@@ -58,9 +58,11 @@
       ui.collect(wrap, stop1)
       ui.collect(wrap, stop2)
 
-      wrap.appendChild(ui.numberInput({
+      const axis = ui.numberInput({
         value: cs, label: labels[idx], step: o.step, precision: o.precision,
-      }))
+      })
+      axis.classList.add('aiditor-ui-vec-axis-field')
+      wrap.appendChild(axis)
     }
     return wrap
   }

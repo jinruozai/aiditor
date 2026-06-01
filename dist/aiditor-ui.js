@@ -2605,9 +2605,11 @@
       ui.collect(wrap, stop1)
       ui.collect(wrap, stop2)
 
-      wrap.appendChild(ui.numberInput({
+      const axis = ui.numberInput({
         value: cs, label: labels[idx], step: o.step, precision: o.precision,
-      }))
+      })
+      axis.classList.add('aiditor-ui-vec-axis-field')
+      wrap.appendChild(axis)
     }
     return wrap
   }
@@ -4098,7 +4100,9 @@
 //
 // opts:
 //   value:    signal<object>                               required
-//   fields:   [{ key, label?, tooltip?, editor }]          required
+//   fields:   [{ key, label?, labelMode?, tooltip?, editor }] required
+//               label:false or labelMode:'hidden' hides the visual row label
+//               labelMode:'sr-only' keeps an accessible label without a column
 //               editor(slotSig, write, ctx) → HTMLElement
 //               tooltip — optional one-liner shown on label hover
 //   onChange?: (nextObj, changedKey, newValue) => void
@@ -4125,9 +4129,12 @@
     const root = ui.h('div', 'aiditor-ui-struct-input')
 
     fields.forEach(function (f) {
+      const labelMode = fieldLabelMode(f)
       const row   = ui.h('div', 'aiditor-ui-struct-input-row')
       row.dataset.efFieldKey = String(f.key)
-      const label = ui.h('div', 'aiditor-ui-struct-input-label', { text: f.label || f.key })
+      row.classList.add('aiditor-ui-struct-input-row-label-' + labelMode)
+      const label = ui.h('div', 'aiditor-ui-struct-input-label', { text: fieldLabel(f) })
+      label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
       // cursor on every label because most labels have no extra info.
@@ -4136,6 +4143,7 @@
         ui.tooltip(label, { text: f.tooltip })
       }
       const cell  = ui.h('div', 'aiditor-ui-struct-input-cell')
+      if (labelMode === 'hidden' && f.tooltip) cell.setAttribute('title', f.tooltip)
 
       const fieldSig = aiditor.derived(function () {
         const cur = value()
@@ -4160,6 +4168,17 @@
     })
 
     return root
+  }
+
+  function fieldLabelMode(f) {
+    if (f.label === false || f.labelMode === 'hidden') return 'hidden'
+    if (f.labelMode === 'sr-only') return 'sr-only'
+    return 'visible'
+  }
+
+  function fieldLabel(f) {
+    if (f.label === false) return String(f.key)
+    return f.label || f.key
   }
 })(window.aiditor = window.aiditor || {})
 
@@ -5105,11 +5124,13 @@
     }
     const fields = Object.keys(def).map(function (fname) {
       const raw     = def[fname]
+      const rawObj  = typeof raw === 'string' ? { type: raw } : raw
       const subFd   = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
       const labeled = (subFd && subFd.name && subFd.name !== subFd.base_type) ? subFd.name : fname
       return {
         key:    fname,
-        label:  labeled,
+        label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
+        labelMode: rawObj && rawObj.labelMode,
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
       }
     })
@@ -5321,9 +5342,11 @@
           const fields = g.keys.map(function (fname) {
             const raw   = schema[fname]
             const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
+            const label = fieldLabel(raw, fname)
             return {
               key:     fname,
-              label:   raw.label || fname,
+              label:   label.value,
+              labelMode: label.mode,
               tooltip: subFd.desc || '',
               editor:  function (slotSig, write, innerCtx) {
                 return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd, fname, defaults,
@@ -5337,6 +5360,7 @@
             onChange: function (_next, key, nv) { fanOut(key, nv) },
             ctx:      ctx,
           })
+          body.classList.add('aiditor-ui-property-form-struct')
           // Named groups wrap in a collapsible section; the unnamed
           // "essentials" bucket renders flat at the top so the most
           // important fields are always visible without a click.
@@ -5399,6 +5423,13 @@
       if (!arr[i] || !Object.prototype.hasOwnProperty.call(arr[i], field)) return false
     }
     return arr.length > 0
+  }
+
+  function fieldLabel(raw, fname) {
+    if (raw && raw.label === false) return { value: fname, mode: 'hidden' }
+    if (raw && raw.labelMode === 'hidden') return { value: raw.label || fname, mode: 'hidden' }
+    if (raw && raw.labelMode === 'sr-only') return { value: raw.label || fname, mode: 'sr-only' }
+    return { value: raw && raw.label || fname, mode: 'visible' }
   }
 
   // Slot wrapper. Optional reset button: present when `defaults[fname]` is defined; faded
@@ -11255,18 +11286,56 @@
     return target && (target.type || target.kind) || ''
   }
 
+  function filterSchema(schema, query) {
+    const q = normalizeQuery(query)
+    if (!q) return schema || {}
+    const out = {}
+    Object.keys(schema || {}).forEach(function (key) {
+      const raw = schema[key]
+      if (fieldMatches(key, raw, q)) out[key] = raw
+    })
+    return out
+  }
+
+  function normalizeQuery(value) {
+    return String(value == null ? '' : value).trim().toLowerCase()
+  }
+
+  function fieldMatches(key, raw, query) {
+    const field = raw && typeof raw === 'object' ? raw : {}
+    const parts = [key]
+    if (field.label && field.label !== false) parts.push(field.label)
+    if (field.group) {
+      parts.push(field.group)
+      if (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[field.group]) parts.push(ui.PROP_GROUP_LABELS[field.group])
+    }
+    if (field.desc) parts.push(field.desc)
+    return parts.join(' ').toLowerCase().indexOf(query) >= 0
+  }
+
   function factory(propsSig, ctx) {
     const root = ui.h('div', 'aiditor-inspector')
     const head = ui.h('div', 'aiditor-inspector-head')
-    const title = ui.h('div', 'aiditor-inspector-title')
-    const subtitle = ui.h('div', 'aiditor-inspector-subtitle')
-    head.appendChild(title)
-    head.appendChild(subtitle)
+    const titleLine = ui.h('div', 'aiditor-inspector-title-line')
+    const title = ui.h('span', 'aiditor-inspector-title')
+    const subtitle = ui.h('span', 'aiditor-inspector-subtitle')
+    titleLine.appendChild(title)
+    titleLine.appendChild(subtitle)
+    const querySig = aiditor.signal('')
+    const search = ui.searchInput({
+      value: querySig,
+      placeholder: 'Search properties...',
+    })
+    search.classList.add('aiditor-inspector-search')
+    search.hidden = true
+    head.appendChild(titleLine)
+    head.appendChild(search)
     const body = ui.h('div', 'aiditor-inspector-body')
     root.appendChild(head)
     root.appendChild(body)
 
     const schemaSig = aiditor.signal({})
+    const filteredSchemaSig = aiditor.derived(function () { return filterSchema(schemaSig(), querySig()) })
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
     let currentInspection = null
@@ -11276,6 +11345,7 @@
     let currentSubscribe = null
     let mode = ''
     let customEl = null
+    ui.collect(root, filteredSchemaSig.dispose)
 
     function clearBody() {
       if (customEl) {
@@ -11284,6 +11354,10 @@
       }
       while (body.firstChild) ui.dispose(body.firstChild)
       mode = ''
+    }
+
+    function setSearchVisible(visible) {
+      search.hidden = !visible
     }
 
     function setSubscription(inspection, targets) {
@@ -11328,6 +11402,7 @@
 
     function mountEmpty(text, hint, bodyText) {
       clearBody()
+      setSearchVisible(false)
       title.textContent = text
       subtitle.textContent = hint || ''
       body.appendChild(ui.h('div', 'aiditor-inspector-empty', { text: bodyText || hint || 'Select something to inspect.' }))
@@ -11336,6 +11411,7 @@
 
     function mountCustom(inspection, targets) {
       clearBody()
+      setSearchVisible(false)
       customEl = aiditor.safeCall({ scope: 'inspector', action: 'render', type: inspection.type }, function () { return inspection.render({
         targets: targets,
         primary: targets[0],
@@ -11357,7 +11433,7 @@
       if (mode !== 'form') {
         clearBody()
         const form = ui.propertyForm({
-          schema: schemaSig,
+          schema: filteredSchemaSig,
           targets: valuesSig,
           disabled: disabledSig,
           defaults: function () { return currentInspection && currentInspection.defaults },
@@ -11376,6 +11452,7 @@
         body.appendChild(form)
         mode = 'form'
       }
+      setSearchVisible(true)
       schemaSig.set(inspection.schema || {})
       valuesSig.set(inspection.values || [])
       disabledSig.set(!!inspection.readonly || !inspection.write)

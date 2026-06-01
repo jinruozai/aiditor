@@ -293,6 +293,24 @@ and usually use `category: 'panel'`.
 
 Domain-specific components live outside `src/ui/`.
 
+## Interaction State Priority
+
+Selectable framework components use one shared visual contract:
+
+1. `disabled`
+2. drag/drop transient state
+3. `selected` / `active`
+4. `hover`
+5. normal
+
+Plain hover is only a neutral preview and should use `--aiditor-hover`. It must
+not use success/green or another semantic state color. Selection and active
+identity use `--aiditor-selected`, `--aiditor-selected-border`, and
+`--aiditor-selected-fg`; `selected:hover` uses `--aiditor-selected-hover` so the
+item remains visibly selected while the pointer is over it. Green/success colors
+are reserved for status, confirmation, running/done indicators, and valid drop
+feedback.
+
 `aiditor.ui.fileBrowser` is the neutral file/list/grid browser primitive for
 workspace-like entries. `aiditor.ui.assetBrowser` remains as a compatibility
 alias for existing asset-oriented hosts. Both names use the same storage-agnostic
@@ -365,8 +383,34 @@ renderer through `type_render: "array_editor"` and renderer args such as
 `elem_type`, `selectionMode`, `indexMode`, `density`, `actions`, and
 `capabilities`.
 
+Composite fields can explicitly hide their row label with `label: false` or
+`labelMode: "hidden"`. This is useful when a named Inspector section contains a
+single struct field and repeating the same label would waste space:
+
+```js
+{
+  transform: {
+    type: 'struct',
+    group: 'transform',
+    label: false,
+    struct_def: { position: 'vec3', rot: 'vec3', scale: 'vec3' },
+  },
+}
+```
+
+The editor then spans the full property row. `labelMode: "sr-only"` keeps the
+label available to assistive technology while removing the visual column.
+
+When `propertyForm` renders grouped fields, its group sections use Inspector
+scoped styling through `.aiditor-ui-property-section`: compact bar headers,
+transparent bodies, and small row insets. Generic `aiditor.ui.section` keeps its
+normal card-like appearance outside property forms.
+
 The dock-level Inspector lives above this helper. It owns ordered selection and
-provider dispatch, then uses `propertyForm` for normal property rows. See
+provider dispatch, shows a compact inline `title` / `subtitle` header, and adds
+a local property search for normal `schema + values + write` inspections. The
+search filters display only by field key, label, `desc`, group id, and group
+label; it does not affect provider state, values, writes, or selection. See
 [inspector.md](./inspector.md).
 
 Use `propertyForm` directly when a component already owns the objects it edits.

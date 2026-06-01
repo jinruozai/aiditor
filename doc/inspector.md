@@ -190,6 +190,21 @@ The panel is generic. It never listens to DOM clicks and never knows about game
 data, animation tracks, scene nodes, assets, or demo projects. Editor surfaces
 select objects explicitly with `aiditor.inspector.select(...)`.
 
+The built-in panel header is intentionally compact: `title` and `subtitle`
+share one ellipsized line, so a provider can show identity like `Meta
+fill_light` without spending two rows. Multi-selection still uses the same
+surface; providers can return a title such as `3 selected`, and the default
+subtitle names the primary target type.
+
+Normal `schema + values + write` inspections include a local property search
+field below the header. The query is panel UI state only: it is not passed to
+providers, does not enter history, and does not change selection. Filtering is
+display-only and matches field key, field label, field `desc`, group id, and
+group label. Empty groups disappear because the filtered schema no longer
+contains rows for them. Clearing the query restores the original schema. Custom
+`render(ctx)` inspections own their entire body UI and are not filtered by this
+property search.
+
 ## Boundaries
 
 - `propertyForm` is a UI form control.

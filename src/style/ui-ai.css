@@ -65,10 +65,13 @@
   background: var(--aiditor-hover);
 }
 
-.aiditor-ai-agent-tree .aiditor-ui-tree-row-active,
-.aiditor-ai-agent-tree .aiditor-ui-tree-row-active:hover {
+.aiditor-ai-agent-tree .aiditor-ui-tree-row-active {
   background: var(--aiditor-selected);
-  color: var(--aiditor-fg-0);
+  color: var(--aiditor-selected-fg);
+}
+.aiditor-ai-agent-tree .aiditor-ui-tree-row-active:hover {
+  background: var(--aiditor-selected-hover);
+  color: var(--aiditor-selected-fg);
 }
 
 .aiditor-ai-agent-tree .aiditor-ui-tree-row-active .aiditor-ui-tree-actions,

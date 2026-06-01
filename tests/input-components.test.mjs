@@ -4,10 +4,12 @@ import vm from 'node:vm'
 
 class ClassList {
   constructor(el) { this.el = el; this.items = new Set() }
-  add(cls) { this.items.add(cls); this.sync() }
-  remove(cls) { this.items.delete(cls); this.sync() }
-  contains(cls) { return this.items.has(cls) }
+  refresh() { this.items = new Set(String(this.el.className || '').split(/\s+/).filter(Boolean)) }
+  add(cls) { this.refresh(); this.items.add(cls); this.sync() }
+  remove(cls) { this.refresh(); this.items.delete(cls); this.sync() }
+  contains(cls) { this.refresh(); return this.items.has(cls) }
   toggle(cls, force) {
+    this.refresh()
     const next = force == null ? !this.items.has(cls) : !!force
     if (next) this.items.add(cls)
     else this.items.delete(cls)
@@ -29,6 +31,7 @@ class FakeEl {
     this.parentNode = null
     this.style = {}
     this.attributes = {}
+    this.dataset = {}
     this.events = {}
     this.classList = new ClassList(this)
     this.className = ''
@@ -70,6 +73,12 @@ class FakeEl {
   removeAttribute(name) {
     delete this.attributes[name]
     if (name === 'class') this.classList.set('')
+  }
+  toggleAttribute(name, force) {
+    const next = force == null ? !this.attributes[name] : !!force
+    if (next) this.setAttribute(name, '')
+    else this.removeAttribute(name)
+    return next
   }
   addEventListener(type, fn) {
     if (!this.events[type]) this.events[type] = []
@@ -206,6 +215,12 @@ for (const file of [
   'src/ui/form/numberInput.js',
   'src/ui/form/tagInput.js',
   'src/ui/form/colorInput.js',
+  'src/ui/form/vectorInput.js',
+  'src/ui/form/typeconfig.js',
+  'src/ui/form/editorFor.js',
+  'src/ui/form/structInput.js',
+  'src/ui/container/section.js',
+  'src/ui/form/propertyForm.js',
   'src/ui/editor/codeInput.js',
   'src/ui/editor/assetPicker.js',
 ]) {
@@ -251,6 +266,74 @@ function key(el, name, extra) {
   ta.selectionEnd = ta.value.length
   key(ta, 'Tab', { shiftKey: true })
   assert.equal(value.peek(), 'a\nb')
+}
+
+{
+  ui.registerRenderer('test_vector_column', function (a) {
+    return ui.vectorInput({ value: a.sig, onChange: a.write, layout: 'column' })
+  }, { replace: true })
+  const targets = aiditor.signal([{
+    name: 'Node',
+    transform: {
+      position: [0, 0, 0],
+      nested: {
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    },
+  }])
+  const form = ui.propertyForm({
+    targets,
+    schema: {
+      name: { type: 'string' },
+      transform: {
+        type: 'struct',
+        label: false,
+        group: 'geometry',
+        struct_def: {
+          position: { type: 'var', type_render: 'test_vector_column' },
+          nested: {
+            type: 'struct',
+            struct_def: {
+              rotation: { type: 'var', type_render: 'test_vector_column' },
+              scale:    { type: 'var', type_render: 'test_vector_column' },
+            },
+          },
+        },
+      },
+    },
+  })
+  const allStructs = form.querySelectorAll('.aiditor-ui-struct-input')
+  const topStructs = form.querySelectorAll('.aiditor-ui-property-form-struct')
+  const topRows = form.querySelectorAll('.aiditor-ui-struct-input-row')
+  const hiddenRows = form.querySelectorAll('.aiditor-ui-struct-input-row-label-hidden')
+  const nestedStructs = allStructs.filter(function (el) {
+    return !el.classList.contains('aiditor-ui-property-form-struct')
+  })
+  assert.equal(topStructs.length, 2)
+  assert.ok(nestedStructs.length >= 2)
+  assert.equal(form.querySelectorAll('.aiditor-ui-property-section').length, 1)
+  assert.equal(topRows[0].classList.contains('aiditor-ui-struct-input-row-label-visible'), true)
+  assert.equal(hiddenRows.length, 1)
+  assert.equal(hiddenRows[0].children[0].classList.contains('aiditor-ui-struct-input-label-hidden'), true)
+  assert.equal(hiddenRows[0].children[1].classList.contains('aiditor-ui-struct-input-cell'), true)
+  assert.ok(form.querySelector('.aiditor-ui-vec-column'))
+  assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
+}
+
+{
+  const value = aiditor.signal({ a: 1, b: 2, c: 3 })
+  const el = ui.structInput({
+    value,
+    fields: [
+      { key: 'a', label: 'A', editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) } },
+      { key: 'b', label: false, editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) } },
+      { key: 'c', labelMode: 'sr-only', label: 'Hidden C', editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) } },
+    ],
+  })
+  assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-visible').length, 1)
+  assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-hidden').length, 1)
+  assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-sr-only').length, 1)
 }
 
 {

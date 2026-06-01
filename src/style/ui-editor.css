@@ -365,7 +365,11 @@
 }
 .aiditor-ui-anchor-cell:hover { background: var(--aiditor-bg-3); }
 .aiditor-ui-anchor-cell.is-active {
-  background: color-mix(in srgb, var(--aiditor-accent) 18%, transparent);
+  background: var(--aiditor-selected);
+  border-color: var(--aiditor-accent);
+}
+.aiditor-ui-anchor-cell.is-active:hover {
+  background: var(--aiditor-selected-hover);
   border-color: var(--aiditor-accent);
 }
 .aiditor-ui-anchor-glyph { width: 100%; height: 100%; display: block; }

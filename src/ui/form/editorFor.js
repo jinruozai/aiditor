@@ -177,11 +177,13 @@
     }
     const fields = Object.keys(def).map(function (fname) {
       const raw     = def[fname]
+      const rawObj  = typeof raw === 'string' ? { type: raw } : raw
       const subFd   = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
       const labeled = (subFd && subFd.name && subFd.name !== subFd.base_type) ? subFd.name : fname
       return {
         key:    fname,
-        label:  labeled,
+        label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
+        labelMode: rawObj && rawObj.labelMode,
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
       }
     })

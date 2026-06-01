@@ -29,18 +29,56 @@
     return target && (target.type || target.kind) || ''
   }
 
+  function filterSchema(schema, query) {
+    const q = normalizeQuery(query)
+    if (!q) return schema || {}
+    const out = {}
+    Object.keys(schema || {}).forEach(function (key) {
+      const raw = schema[key]
+      if (fieldMatches(key, raw, q)) out[key] = raw
+    })
+    return out
+  }
+
+  function normalizeQuery(value) {
+    return String(value == null ? '' : value).trim().toLowerCase()
+  }
+
+  function fieldMatches(key, raw, query) {
+    const field = raw && typeof raw === 'object' ? raw : {}
+    const parts = [key]
+    if (field.label && field.label !== false) parts.push(field.label)
+    if (field.group) {
+      parts.push(field.group)
+      if (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[field.group]) parts.push(ui.PROP_GROUP_LABELS[field.group])
+    }
+    if (field.desc) parts.push(field.desc)
+    return parts.join(' ').toLowerCase().indexOf(query) >= 0
+  }
+
   function factory(propsSig, ctx) {
     const root = ui.h('div', 'aiditor-inspector')
     const head = ui.h('div', 'aiditor-inspector-head')
-    const title = ui.h('div', 'aiditor-inspector-title')
-    const subtitle = ui.h('div', 'aiditor-inspector-subtitle')
-    head.appendChild(title)
-    head.appendChild(subtitle)
+    const titleLine = ui.h('div', 'aiditor-inspector-title-line')
+    const title = ui.h('span', 'aiditor-inspector-title')
+    const subtitle = ui.h('span', 'aiditor-inspector-subtitle')
+    titleLine.appendChild(title)
+    titleLine.appendChild(subtitle)
+    const querySig = aiditor.signal('')
+    const search = ui.searchInput({
+      value: querySig,
+      placeholder: 'Search properties...',
+    })
+    search.classList.add('aiditor-inspector-search')
+    search.hidden = true
+    head.appendChild(titleLine)
+    head.appendChild(search)
     const body = ui.h('div', 'aiditor-inspector-body')
     root.appendChild(head)
     root.appendChild(body)
 
     const schemaSig = aiditor.signal({})
+    const filteredSchemaSig = aiditor.derived(function () { return filterSchema(schemaSig(), querySig()) })
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
     let currentInspection = null
@@ -50,6 +88,7 @@
     let currentSubscribe = null
     let mode = ''
     let customEl = null
+    ui.collect(root, filteredSchemaSig.dispose)
 
     function clearBody() {
       if (customEl) {
@@ -58,6 +97,10 @@
       }
       while (body.firstChild) ui.dispose(body.firstChild)
       mode = ''
+    }
+
+    function setSearchVisible(visible) {
+      search.hidden = !visible
     }
 
     function setSubscription(inspection, targets) {
@@ -102,6 +145,7 @@
 
     function mountEmpty(text, hint, bodyText) {
       clearBody()
+      setSearchVisible(false)
       title.textContent = text
       subtitle.textContent = hint || ''
       body.appendChild(ui.h('div', 'aiditor-inspector-empty', { text: bodyText || hint || 'Select something to inspect.' }))
@@ -110,6 +154,7 @@
 
     function mountCustom(inspection, targets) {
       clearBody()
+      setSearchVisible(false)
       customEl = aiditor.safeCall({ scope: 'inspector', action: 'render', type: inspection.type }, function () { return inspection.render({
         targets: targets,
         primary: targets[0],
@@ -131,7 +176,7 @@
       if (mode !== 'form') {
         clearBody()
         const form = ui.propertyForm({
-          schema: schemaSig,
+          schema: filteredSchemaSig,
           targets: valuesSig,
           disabled: disabledSig,
           defaults: function () { return currentInspection && currentInspection.defaults },
@@ -150,6 +195,7 @@
         body.appendChild(form)
         mode = 'form'
       }
+      setSearchVisible(true)
       schemaSig.set(inspection.schema || {})
       valuesSig.set(inspection.values || [])
       disabledSig.set(!!inspection.readonly || !inspection.write)

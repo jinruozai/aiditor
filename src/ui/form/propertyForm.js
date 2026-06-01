@@ -108,9 +108,11 @@
           const fields = g.keys.map(function (fname) {
             const raw   = schema[fname]
             const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
+            const label = fieldLabel(raw, fname)
             return {
               key:     fname,
-              label:   raw.label || fname,
+              label:   label.value,
+              labelMode: label.mode,
               tooltip: subFd.desc || '',
               editor:  function (slotSig, write, innerCtx) {
                 return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd, fname, defaults,
@@ -124,6 +126,7 @@
             onChange: function (_next, key, nv) { fanOut(key, nv) },
             ctx:      ctx,
           })
+          body.classList.add('aiditor-ui-property-form-struct')
           // Named groups wrap in a collapsible section; the unnamed
           // "essentials" bucket renders flat at the top so the most
           // important fields are always visible without a click.
@@ -186,6 +189,13 @@
       if (!arr[i] || !Object.prototype.hasOwnProperty.call(arr[i], field)) return false
     }
     return arr.length > 0
+  }
+
+  function fieldLabel(raw, fname) {
+    if (raw && raw.label === false) return { value: fname, mode: 'hidden' }
+    if (raw && raw.labelMode === 'hidden') return { value: raw.label || fname, mode: 'hidden' }
+    if (raw && raw.labelMode === 'sr-only') return { value: raw.label || fname, mode: 'sr-only' }
+    return { value: raw && raw.label || fname, mode: 'visible' }
   }
 
   // Slot wrapper. Optional reset button: present when `defaults[fname]` is defined; faded

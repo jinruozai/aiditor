@@ -7,7 +7,9 @@
 //
 // opts:
 //   value:    signal<object>                               required
-//   fields:   [{ key, label?, tooltip?, editor }]          required
+//   fields:   [{ key, label?, labelMode?, tooltip?, editor }] required
+//               label:false or labelMode:'hidden' hides the visual row label
+//               labelMode:'sr-only' keeps an accessible label without a column
 //               editor(slotSig, write, ctx) → HTMLElement
 //               tooltip — optional one-liner shown on label hover
 //   onChange?: (nextObj, changedKey, newValue) => void
@@ -34,9 +36,12 @@
     const root = ui.h('div', 'aiditor-ui-struct-input')
 
     fields.forEach(function (f) {
+      const labelMode = fieldLabelMode(f)
       const row   = ui.h('div', 'aiditor-ui-struct-input-row')
       row.dataset.efFieldKey = String(f.key)
-      const label = ui.h('div', 'aiditor-ui-struct-input-label', { text: f.label || f.key })
+      row.classList.add('aiditor-ui-struct-input-row-label-' + labelMode)
+      const label = ui.h('div', 'aiditor-ui-struct-input-label', { text: fieldLabel(f) })
+      label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
       // cursor on every label because most labels have no extra info.
@@ -45,6 +50,7 @@
         ui.tooltip(label, { text: f.tooltip })
       }
       const cell  = ui.h('div', 'aiditor-ui-struct-input-cell')
+      if (labelMode === 'hidden' && f.tooltip) cell.setAttribute('title', f.tooltip)
 
       const fieldSig = aiditor.derived(function () {
         const cur = value()
@@ -69,5 +75,16 @@
     })
 
     return root
+  }
+
+  function fieldLabelMode(f) {
+    if (f.label === false || f.labelMode === 'hidden') return 'hidden'
+    if (f.labelMode === 'sr-only') return 'sr-only'
+    return 'visible'
+  }
+
+  function fieldLabel(f) {
+    if (f.label === false) return String(f.key)
+    return f.label || f.key
   }
 })(window.aiditor = window.aiditor || {})

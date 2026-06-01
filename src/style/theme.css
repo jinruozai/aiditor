@@ -135,6 +135,9 @@
   --aiditor-hover:       color-mix(in srgb, var(--aiditor-c-11)    6%, transparent);
   --aiditor-active:      color-mix(in srgb, var(--aiditor-c-accent) 18%, transparent);
   --aiditor-selected:    color-mix(in srgb, var(--aiditor-c-accent) 22%, transparent);
+  --aiditor-selected-hover: color-mix(in srgb, var(--aiditor-c-accent) 30%, transparent);
+  --aiditor-selected-border: color-mix(in srgb, var(--aiditor-c-accent) 56%, var(--aiditor-border));
+  --aiditor-selected-fg: var(--aiditor-fg-0);
   --aiditor-focus-ring:  var(--aiditor-c-accent);
   --aiditor-scrim:       color-mix(in srgb, var(--aiditor-surface-canvas) 62%, transparent);
 
@@ -438,6 +441,9 @@
   --aiditor-hover:    color-mix(in srgb, var(--aiditor-text-primary) 5%, transparent);
   --aiditor-active:   color-mix(in srgb, var(--aiditor-brand) 16%, transparent);
   --aiditor-selected: color-mix(in srgb, var(--aiditor-brand) 20%, transparent);
+  --aiditor-selected-hover: color-mix(in srgb, var(--aiditor-brand) 28%, transparent);
+  --aiditor-selected-border: color-mix(in srgb, var(--aiditor-brand) 54%, var(--aiditor-border));
+  --aiditor-selected-fg: var(--aiditor-fg-0);
   --aiditor-scrim:    color-mix(in srgb, var(--aiditor-surface-canvas) 66%, transparent);
 
   --aiditor-toolbar-bg: transparent;
