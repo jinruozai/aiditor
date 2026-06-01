@@ -164,7 +164,7 @@
   let themeModeSig = null
   const THEME_STORAGE_KEY = 'aiditor-theme-overrides-v3'
   const THEME_MODE_KEY = 'aiditor-theme-mode'
-  const THEME_MODES = ['dark', 'dracula', 'harbor', 'abyss', 'hadal', 'linen', 'light']
+  const THEME_MODES = ['dark', 'dracula', 'harbor', 'abyss', 'hadal', 'forest', 'linen', 'light']
 
   function themeMode() {
     return themeModeSig ? themeModeSig.peek() : (localStorage.getItem(THEME_MODE_KEY) || 'dark')

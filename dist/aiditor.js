@@ -18056,10 +18056,11 @@
 
   const THEME_OPTIONS = [
     { value: 'dark', label: 'Dark' },
-    { value: 'dracula', label: 'Dracula' },
+    { value: 'dracula', label: 'Violet' },
     { value: 'harbor', label: 'Harbor' },
-    { value: 'abyss', label: 'Abyss' },
-    { value: 'hadal', label: 'Hadal' },
+    { value: 'abyss', label: 'Sea' },
+    { value: 'hadal', label: 'Abyss' },
+    { value: 'forest', label: 'Forest' },
     { value: 'linen', label: 'Linen' },
     { value: 'light', label: 'Light' },
   ]

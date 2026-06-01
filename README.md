@@ -277,13 +277,14 @@ host app.
 Built-in themes:
 
 ```js
-aiditor.theme.set('dark')
-aiditor.theme.set('dracula')
-aiditor.theme.set('harbor')
-aiditor.theme.set('abyss')
-aiditor.theme.set('hadal')
-aiditor.theme.set('linen')
-aiditor.theme.set('light')
+aiditor.theme.set('dark')     // Dark
+aiditor.theme.set('dracula')  // Violet
+aiditor.theme.set('harbor')   // Harbor
+aiditor.theme.set('abyss')    // Sea
+aiditor.theme.set('hadal')    // Abyss
+aiditor.theme.set('forest')   // Forest
+aiditor.theme.set('linen')    // Linen
+aiditor.theme.set('light')    // Light
 ```
 
 Custom themes should start from semantic authoring tokens such as
