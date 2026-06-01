@@ -164,6 +164,7 @@
   let themeModeSig = null
   const THEME_STORAGE_KEY = 'aiditor-theme-overrides-v3'
   const THEME_MODE_KEY = 'aiditor-theme-mode'
+  const THEME_MODES = ['dark', 'dracula', 'harbor', 'abyss', 'hadal', 'linen', 'light']
 
   function themeMode() {
     return themeModeSig ? themeModeSig.peek() : (localStorage.getItem(THEME_MODE_KEY) || 'dark')
@@ -218,7 +219,7 @@
       summary: 'Current AIditor demo theme mode.',
       meta: {
         value: themeMode(),
-        options: ['dark', 'dracula', 'harbor', 'light'],
+        options: THEME_MODES,
       },
       capabilities: [{ op: 'demo.setThemeMode', risk: 'edit' }],
       tools: ['aiditor.readReference', 'aiditor.applyOperation', 'demo.setThemeMode'],
@@ -232,7 +233,7 @@
       kind: ref.kind,
       title: ref.title,
       value: themeMode(),
-      options: ['dark', 'dracula', 'harbor', 'light'],
+      options: THEME_MODES,
     }
     const spec = themeTokens[meta.token]
     if (!spec) return { uri: ref.uri, kind: ref.kind, title: ref.title, meta: meta }
@@ -282,7 +283,7 @@
 
   function previewSetThemeMode(args) {
     const mode = String(args.mode || '')
-    if (['dark', 'dracula', 'harbor', 'light'].indexOf(mode) < 0) throw new Error('Invalid theme mode: ' + mode)
+    if (THEME_MODES.indexOf(mode) < 0) throw new Error('Invalid theme mode: ' + mode)
     return {
       before: themeMode(),
       after: mode,
@@ -474,7 +475,7 @@
       if (ref.kind === 'demo.themeMode') return {
         type: 'object',
         required: ['mode'],
-        properties: { mode: { type: 'string', enum: ['dark', 'dracula', 'harbor', 'light'] } },
+        properties: { mode: { type: 'string', enum: THEME_MODES } },
       }
       return null
     },
@@ -545,7 +546,7 @@
     schema: {
       type: 'object',
       required: ['mode'],
-      properties: { mode: { type: 'string', enum: ['dark', 'dracula', 'harbor', 'light'] } },
+      properties: { mode: { type: 'string', enum: THEME_MODES } },
     },
     risk: 'edit',
     preview: previewSetThemeMode,
@@ -590,7 +591,7 @@
       type: 'object',
       required: ['mode'],
       properties: {
-        mode: { type: 'string', enum: ['dark', 'dracula', 'harbor', 'light'] },
+        mode: { type: 'string', enum: THEME_MODES },
       },
     },
     preview: previewSetThemeMode,

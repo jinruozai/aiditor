@@ -59,4 +59,33 @@ assert.equal(aiditor.theme.read('--aiditor-brand'), '#569eff')
 const css = aiditor.theme.exportCss(null, ['--aiditor-brand'])
 assert.equal(css, ':root {\n  --aiditor-brand: #569eff;\n}')
 
+const themeCss = readFileSync('src/style/theme.css', 'utf8')
+for (const mode of ['linen', 'abyss', 'hadal']) {
+  assert.match(themeCss, new RegExp('data-aiditor-theme="' + mode + '"'))
+  for (const token of [
+    '--aiditor-surface-canvas',
+    '--aiditor-surface-panel',
+    '--aiditor-surface-field',
+    '--aiditor-text-primary',
+    '--aiditor-stroke-subtle',
+    '--aiditor-brand',
+    '--aiditor-bg-0',
+    '--aiditor-bg-1',
+    '--aiditor-bg-2',
+    '--aiditor-border',
+    '--aiditor-selected-hover',
+    '--aiditor-shadow-raised',
+  ]) {
+    assert.match(themeCss, new RegExp('data-aiditor-theme="' + mode + '"[\\s\\S]*' + token.replace(/-/g, '\\-')))
+  }
+}
+
+const themeSettings = readFileSync('src/style/theme-settings.js', 'utf8')
+assert.match(themeSettings, /value: 'linen', label: 'Linen'/)
+assert.match(themeSettings, /value: 'abyss', label: 'Abyss'/)
+assert.match(themeSettings, /value: 'hadal', label: 'Hadal'/)
+
+const demoTargets = readFileSync('demo/ai-targets.js', 'utf8')
+assert.match(demoTargets, /THEME_MODES = \['dark', 'dracula', 'harbor', 'abyss', 'hadal', 'linen', 'light'\]/)
+
 console.log('theme tests ok')

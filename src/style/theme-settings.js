@@ -4,6 +4,16 @@
 
   if (!aiditor.settings) return
 
+  const THEME_OPTIONS = [
+    { value: 'dark', label: 'Dark' },
+    { value: 'dracula', label: 'Dracula' },
+    { value: 'harbor', label: 'Harbor' },
+    { value: 'abyss', label: 'Abyss' },
+    { value: 'hadal', label: 'Hadal' },
+    { value: 'linen', label: 'Linen' },
+    { value: 'light', label: 'Light' },
+  ]
+
   aiditor.settings.registerSection('theme', {
     title: 'Theme',
     icon: 'palette',
@@ -17,12 +27,7 @@
       label: 'Mode',
       type: 'select',
       default: 'dark',
-      options: [
-        { value: 'dark', label: 'Dark' },
-        { value: 'dracula', label: 'Dracula' },
-        { value: 'harbor', label: 'Harbor' },
-        { value: 'light', label: 'Light' },
-      ],
+      options: THEME_OPTIONS,
       description: 'Active AIditor theme.',
       order: 10,
     },
@@ -147,12 +152,7 @@
     tabs.classList.add(panelMode ? 'aiditor-theme-config-tabs' : 'aiditor-settings-theme-tabs')
     const mode = ui.select({
       value: modeSig,
-      options: [
-        { value: 'dark', label: 'Dark' },
-        { value: 'dracula', label: 'Dracula' },
-        { value: 'harbor', label: 'Harbor' },
-        { value: 'light', label: 'Light' },
-      ],
+      options: THEME_OPTIONS,
       variant: 'minimal',
       autoWidth: true,
     })

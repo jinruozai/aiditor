@@ -280,6 +280,9 @@ Built-in themes:
 aiditor.theme.set('dark')
 aiditor.theme.set('dracula')
 aiditor.theme.set('harbor')
+aiditor.theme.set('abyss')
+aiditor.theme.set('hadal')
+aiditor.theme.set('linen')
 aiditor.theme.set('light')
 ```
 
