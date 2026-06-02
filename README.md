@@ -283,6 +283,7 @@ aiditor.theme.set('harbor')   // Harbor
 aiditor.theme.set('abyss')    // Sea
 aiditor.theme.set('hadal')    // Abyss
 aiditor.theme.set('forest')   // Forest
+aiditor.theme.set('sakura')   // Sakura
 aiditor.theme.set('linen')    // Linen
 aiditor.theme.set('light')    // Light
 ```

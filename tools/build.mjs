@@ -114,6 +114,7 @@ const JS_ORDER = [
   'ui/base/image.js',
   'ui/base/button.js',
   'ui/base/iconButton.js',
+  'ui/base/actionBar.js',
   'ui/base/stateButton.js',
   'ui/base/copyButton.js',
   'ui/base/tooltip.js',

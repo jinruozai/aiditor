@@ -12,6 +12,9 @@
 //   defaults?:object                                  per-key reset-to-default values; when
 //                                                     supplied, each row gets a small reset
 //                                                     iconButton (faded when already at default)
+//   groups?:  object|signal<object>                  optional group label/action metadata
+//   groupActions?:(groupCtx) => UiAction[]            optional per-group actions
+//   groupActionCtx?:(groupCtx) => object              optional per-group action ctx mapper
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -45,6 +48,9 @@
    * @param {Signal<object[]>|object[]} opts.targets - Targets to edit.
    * @param {Signal<object>|object} opts.schema - Field schema passed to editorFor.
    * @param {Function} opts.onChange - Optional persistence hook: (field, newValue, targets, meta) => void.
+   * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels and UiAction arrays.
+   * @param {Function} opts.groupActions - Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions.
+   * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -59,9 +65,12 @@
     const o = opts || {}
     const targets   = ui.isSignal(o.targets) ? o.targets : aiditor.signal(o.targets || [])
     const schemaSig = ui.isSignal(o.schema)  ? o.schema  : aiditor.signal(o.schema  || {})
+    const groupsSig = ui.isSignal(o.groups)  ? o.groups  : aiditor.signal(o.groups  || {})
     const disabled  = ui.asSig(o.disabled != null ? o.disabled : false)
     const defaults  = o.defaults || null
     const onChange  = typeof o.onChange === 'function' ? o.onChange : null
+    const groupActions = typeof o.groupActions === 'function' ? o.groupActions : null
+    const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const ctx       = o.ctx
@@ -87,68 +96,96 @@
       targets.set(arr)
     }
 
-    // Each schema rebuild produces N structInputs (one per group) with a
-    // header between. Sub-instances all share the same composite signal
-    // and route writes through the same fanOut, so per-key reactivity works
-    // without any cross-instance bookkeeping.
+    // Structure is intentionally separated from values. `targets` may update
+    // while a field editor is scrubbing, typing, or holding pointer capture;
+    // equivalent schema/group refreshes must update existing slot signals,
+    // not dispose the editor DOM.
     let mounted = []
-    let mountedSchemaKey = null
+    let mountedStructureKey = null
+    let groupChrome = Object.create(null)
     const stopSchema = aiditor.effect(function () {
       const schema = schemaSig() || {}
-      const schemaKey = JSON.stringify(schema)
-      if (schemaKey === mountedSchemaKey) return
-      mountedSchemaKey = schemaKey
+      const groupConfig = groupsSig() || {}
+      const currentTargets = targets() || []
+      const grouped = groupBySchema(schema)
+      const structureKey = formStructureKey(schema, grouped)
       aiditor.untracked(function () {
-        mounted.forEach(function (n) { ui.dispose(n); if (n.parentNode) n.parentNode.removeChild(n) })
-        mounted = []
-
-        const grouped = groupBySchema(schema)
-        for (let i = 0; i < grouped.length; i++) {
-          const g = grouped[i]
-          const fields = g.keys.map(function (fname) {
-            const raw   = schema[fname]
-            const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
-            const label = fieldLabel(raw, fname)
-            return {
-              key:     fname,
-              label:   label.value,
-              labelMode: label.mode,
-              tooltip: subFd.desc || '',
-              editor:  function (slotSig, write, innerCtx) {
-                return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd, fname, defaults,
-                  fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
-              },
-            }
-          })
-          const body = ui.structInput({
-            value:    composite,
-            fields:   fields,
-            onChange: function (_next, key, nv) { fanOut(key, nv) },
-            ctx:      ctx,
-          })
-          body.classList.add('aiditor-ui-property-form-struct')
-          // Named groups wrap in a collapsible section; the unnamed
-          // "essentials" bucket renders flat at the top so the most
-          // important fields are always visible without a click.
-          let mountedEl
-          if (g.name) {
-            mountedEl = ui.section({
-              title:    ui.PROP_GROUP_LABELS[g.name] || g.name,
-              children: [body],
-            })
-            mountedEl.classList.add('aiditor-ui-property-section')
-          } else {
-            mountedEl = body
-          }
-          root.appendChild(mountedEl)
-          mounted.push(mountedEl)
-        }
+        if (structureKey !== mountedStructureKey) rebuild(schema, groupConfig, grouped, currentTargets, structureKey)
+        else refreshGroupChrome(grouped, groupConfig, currentTargets)
       })
     })
     ui.collect(root, stopSchema)
     ui.collect(root, function () { mounted.forEach(function (n) { ui.dispose(n) }) })
 
     return root
+
+    function rebuild(schema, groupConfig, grouped, currentTargets, structureKey) {
+      mounted.forEach(function (n) { ui.dispose(n); if (n.parentNode) n.parentNode.removeChild(n) })
+      mounted = []
+      groupChrome = Object.create(null)
+      mountedStructureKey = structureKey
+
+      for (let i = 0; i < grouped.length; i++) {
+        const g = grouped[i]
+        const fields = g.keys.map(function (fname) {
+          const raw   = schema[fname]
+          const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
+          const label = fieldLabel(raw, fname)
+          return {
+            key:     fname,
+            label:   label.value,
+            labelMode: label.mode,
+            tooltip: subFd.desc || '',
+            editor:  function (slotSig, write, innerCtx) {
+              return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd, fname, defaults,
+                fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
+            },
+          }
+        })
+        const body = ui.structInput({
+          value:    composite,
+          fields:   fields,
+          onChange: function (_next, key, nv) { fanOut(key, nv) },
+          ctx:      ctx,
+        })
+        body.classList.add('aiditor-ui-property-form-struct')
+        // Named groups wrap in a collapsible section; the unnamed
+        // "essentials" bucket renders flat at the top so the most
+        // important fields are always visible without a click.
+        let mountedEl
+        if (g.name) {
+          const info = groupInfo(g.name, g.keys, groupConfig, currentTargets, ctx, groupActions, groupActionCtx)
+          const chrome = {
+            title: aiditor.signal(info.label),
+            actions: aiditor.signal(info.actions || []),
+            actionCtx: aiditor.signal(info.actionCtx),
+          }
+          groupChrome[g.name] = chrome
+          mountedEl = ui.section({
+            title:    chrome.title,
+            actions:  chrome.actions,
+            actionCtx: chrome.actionCtx,
+            children: [body],
+          })
+          mountedEl.classList.add('aiditor-ui-property-section')
+        } else {
+          mountedEl = body
+        }
+        root.appendChild(mountedEl)
+        mounted.push(mountedEl)
+      }
+    }
+
+    function refreshGroupChrome(grouped, groupConfig, currentTargets) {
+      for (let i = 0; i < grouped.length; i++) {
+        const g = grouped[i]
+        if (!g.name || !groupChrome[g.name]) continue
+        const info = groupInfo(g.name, g.keys, groupConfig, currentTargets, ctx, groupActions, groupActionCtx)
+        groupChrome[g.name].title.set(info.label)
+        groupChrome[g.name].actions.set(info.actions || [])
+        groupChrome[g.name].actionCtx.set(info.actionCtx)
+      }
+    }
   }
 
   // Walk the schema and produce ordered groups. Ungrouped fields go FIRST
@@ -169,6 +206,59 @@
     ;(ui.PROP_GROUPS || []).forEach(function (g) { if (buckets[g]) order.push(g) })
     seen.forEach(function (g) { if (g && order.indexOf(g) < 0) order.push(g) })
     return order.map(function (g) { return { name: g, keys: buckets[g] } })
+  }
+
+  function formStructureKey(schema, grouped) {
+    return stableStringify(grouped.map(function (group) {
+      return {
+        group: group.name,
+        fields: group.keys.map(function (key) {
+          const raw = schema[key]
+          const fd = typeof raw === 'string' ? { type: raw } : (raw || {})
+          return { key: key, field: fd }
+        }),
+      }
+    }))
+  }
+
+  function stableStringify(value) {
+    if (value == null) return String(value)
+    if (typeof value === 'function') return '[function:' + (value.name || '') + ']'
+    if (typeof value !== 'object') return JSON.stringify(value)
+    if (Array.isArray(value)) {
+      return '[' + value.map(stableStringify).join(',') + ']'
+    }
+    const keys = Object.keys(value).sort()
+    let out = '{'
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]
+      if (i) out += ','
+      out += JSON.stringify(key) + ':' + stableStringify(value[key])
+    }
+    return out + '}'
+  }
+
+  function groupInfo(groupId, fields, groupConfig, targets, ctx, groupActions, groupActionCtx) {
+    const raw = groupConfig && groupConfig[groupId] || {}
+    const label = raw.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || groupId
+    const baseCtx = {
+      groupId: groupId,
+      label: label,
+      fields: fields.slice(),
+      targets: targets || [],
+      ctx: ctx,
+    }
+    const actionCtx = groupActionCtx
+      ? aiditor.safeCall({ scope: 'propertyForm', action: 'groupActionCtx', group: groupId }, function () { return groupActionCtx(baseCtx) }) || baseCtx
+      : baseCtx
+    const fromFn = groupActions
+      ? aiditor.safeCall({ scope: 'propertyForm', action: 'groupActions', group: groupId }, function () { return groupActions(actionCtx) })
+      : null
+    return {
+      label: label,
+      actions: fromFn != null ? fromFn : (raw.actions || null),
+      actionCtx: actionCtx,
+    }
   }
 
   function fieldCtx(ctx, field) {

@@ -243,6 +243,24 @@
   color: var(--aiditor-accent-soft);
   background: var(--aiditor-accent-bg-strong);
 }
+
+/* ── action bar (local UiAction surface) ───────── */
+.aiditor-ui-action-bar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aiditor-space-1);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.aiditor-ui-action-bar-empty { display: none; }
+.aiditor-ui-action-bar-compact .aiditor-ui-action-btn.aiditor-ui-icon-btn-sm {
+  width: 22px;
+  height: 22px;
+}
+.aiditor-ui-action-menu-btn {
+  color: var(--aiditor-fg-2);
+}
 .aiditor-ui-copy-btn {
   transition: color var(--aiditor-dur-fast) var(--aiditor-ease),
               background var(--aiditor-dur-fast) var(--aiditor-ease),

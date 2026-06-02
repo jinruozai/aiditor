@@ -11,6 +11,7 @@
     { value: 'abyss', label: 'Sea' },
     { value: 'hadal', label: 'Abyss' },
     { value: 'forest', label: 'Forest' },
+    { value: 'sakura', label: 'Sakura' },
     { value: 'linen', label: 'Linen' },
     { value: 'light', label: 'Light' },
   ]

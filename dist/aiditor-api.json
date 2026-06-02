@@ -387,6 +387,46 @@
       "source": "src/core/runtime.js"
     },
     {
+      "id": "aiditor.ui.actionBar",
+      "group": "ui",
+      "layer": "core-ui",
+      "kind": "js-api",
+      "signature": "aiditor.ui.actionBar(opts)",
+      "summary": "Render a compact local action surface. Actions can run commands, call local UI handlers, or open framework menus.",
+      "params": [
+        {
+          "type": "object",
+          "name": "opts",
+          "description": "Action bar options."
+        },
+        {
+          "type": "Array|Signal<Array>|Function",
+          "name": "opts.actions",
+          "description": "UiAction records, a signal of records, or a function of ctx."
+        },
+        {
+          "type": "object|Signal<object>",
+          "name": "opts.ctx",
+          "description": "Context passed to action predicates, args, menus, and commands."
+        },
+        {
+          "type": "string",
+          "name": "opts.density",
+          "description": "Optional density, \"compact\" by default."
+        }
+      ],
+      "returns": {
+        "type": "HTMLElement",
+        "description": "Action bar root element."
+      },
+      "examples": [],
+      "wrong": [],
+      "related": [
+        "aiditor.commands.run"
+      ],
+      "source": "src/ui/base/actionBar.js"
+    },
+    {
       "id": "aiditor.ui.propertyForm",
       "group": "ui",
       "layer": "core-ui",
@@ -413,6 +453,21 @@
           "type": "Function",
           "name": "opts.onChange",
           "description": "Optional persistence hook: (field, newValue, targets, meta) => void."
+        },
+        {
+          "type": "object|Signal<object>",
+          "name": "opts.groups",
+          "description": "Optional grouped section metadata, including labels and UiAction arrays."
+        },
+        {
+          "type": "Function",
+          "name": "opts.groupActions",
+          "description": "Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions."
+        },
+        {
+          "type": "Function",
+          "name": "opts.groupActionCtx",
+          "description": "Optional mapper for the context passed to group actions."
         },
         {
           "type": "boolean",

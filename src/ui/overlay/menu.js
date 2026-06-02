@@ -62,7 +62,7 @@
       }
       const row = ui.h('button', 'aiditor-ui-menu-item' +
         (it.disabled ? ' aiditor-ui-menu-item-disabled' : '') +
-        (it.danger ? ' aiditor-ui-menu-item-danger' : ''),
+        (it.danger || it.variant === 'danger' ? ' aiditor-ui-menu-item-danger' : ''),
         { type: 'button' })
       // ui.icon resolves `name` against the registered icon set (rendering
       // an SVG); unknown names fall back to text. Passing the consumer's

@@ -221,6 +221,57 @@ preview
 These hints help galleries, generated UI, and property editors. They do not
 change what a component is.
 
+## Action Surfaces
+
+`aiditor.ui.actionBar` renders local `UiAction` records into compact buttons and
+menus:
+
+```js
+aiditor.ui.actionBar({
+  ctx: { source: 'inspector', id: 'light' },
+  actions: [{
+    id: 'add',
+    icon: 'plus',
+    label: 'Add',
+    command: 'case.add',
+    args: function (ctx) { return { id: ctx.id } },
+  }],
+})
+```
+
+`UiAction` shape:
+
+```js
+{
+  id,
+  label,
+  icon,
+  title,
+  variant,   // "default" | "danger"
+  disabled,  // boolean | (ctx) => boolean
+  hidden,    // boolean | (ctx) => boolean
+  command,
+  args,      // object | (ctx) => object
+  onSelect,  // local UI-only behavior
+  menu,      // items | (ctx) => items
+}
+```
+
+The behavior boundary stays `aiditor.commands.run(command, args, actionCtx)`.
+`onSelect` exists for local UI behavior such as opening a popover, copying, or
+focusing; domain data mutations should prefer commands so history, permission,
+and validation stay in the host layer.
+
+`menu` reuses `aiditor.ui.menu`. Menu items accept the same `variant:"danger"`
+shape; actionBar maps it to the existing danger menu styling.
+
+There is no global `aiditor.actions` registry. An action surface is owned by the
+UI component that renders it.
+
+`aiditor.ui.section({ actions })` places an actionBar on the right side of the
+section header. The header is split into a toggle button and a separate action
+rail, so clicking a trailing action does not collapse or expand the section.
+
 ## Toolbar
 
 Toolbar items are ordinary component references stored in toolbar data. Tabs are
@@ -405,6 +456,43 @@ When `propertyForm` renders grouped fields, its group sections use Inspector
 scoped styling through `.aiditor-ui-property-section`: compact bar headers,
 transparent bodies, and small row insets. Generic `aiditor.ui.section` keeps its
 normal card-like appearance outside property forms.
+
+Grouped property sections can receive local actions:
+
+```js
+aiditor.ui.propertyForm({
+  schema,
+  targets,
+  groups: {
+    transform: {
+      label: 'Transform',
+      actions: [{ id: 'more', icon: 'more-vertical', menu: [] }],
+    },
+  },
+  groupActions: function (groupCtx) {
+    return groupCtx.groupId === 'render' ? renderActions : []
+  },
+  groupActionCtx: function (groupCtx) {
+    return Object.assign({}, groupCtx, { source: 'my-panel' })
+  },
+})
+```
+
+`groupCtx` contains `groupId`, `label`, `fields`, `targets`, and the caller's
+form `ctx`. It deliberately does not expose DOM nodes or domain semantics.
+`groupActions` returning `null` / `undefined` falls back to
+`groups[groupId].actions`; returning `[]` explicitly clears that group's
+actions. `groupActionCtx` is only a context mapper for action predicates,
+menus, args, and commands.
+
+`propertyForm` keeps field editor DOM stable across value-only refreshes. It
+builds rows from a structural schema key: field order, field keys, group ids,
+labels, renderer/type configuration, and composite definitions. New `schema` or
+`groups` object identities do not rebuild rows when that structure is
+equivalent. Updating `targets` only updates the existing slot signals, and
+updating group labels/actions only refreshes section header chrome. Real
+structure changes, such as adding/removing a field or changing its renderer,
+still rebuild the affected form structure.
 
 The dock-level Inspector lives above this helper. It owns ordered selection and
 provider dispatch, shows a compact inline `title` / `subtitle` header, and adds

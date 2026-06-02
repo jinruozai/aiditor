@@ -64,6 +64,11 @@
     const subtitle = ui.h('span', 'aiditor-inspector-subtitle')
     titleLine.appendChild(title)
     titleLine.appendChild(subtitle)
+    const actionsSig = aiditor.signal([])
+    const actionCtxSig = aiditor.signal({})
+    const actions = ui.actionBar({ actions: actionsSig, ctx: actionCtxSig, density: 'compact' })
+    actions.classList.add('aiditor-inspector-actions')
+    titleLine.appendChild(actions)
     const querySig = aiditor.signal('')
     const search = ui.searchInput({
       value: querySig,
@@ -79,6 +84,7 @@
 
     const schemaSig = aiditor.signal({})
     const filteredSchemaSig = aiditor.derived(function () { return filterSchema(schemaSig(), querySig()) })
+    const groupsSig = aiditor.signal({})
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
     let currentInspection = null
@@ -101,6 +107,25 @@
 
     function setSearchVisible(visible) {
       search.hidden = !visible
+    }
+
+    function setHeaderActions(inspection, targets) {
+      if (!inspection) {
+        actionsSig.set([])
+        actionCtxSig.set({})
+        return
+      }
+      const actionCtx = {
+        source: 'inspector',
+        inspection: inspection,
+        targets: targets,
+        primary: targets[0],
+        panel: ctx.panel,
+        bus: ctx.bus,
+        refresh: refresh,
+      }
+      actionCtxSig.set(actionCtx)
+      actionsSig.set(inspection.actions || [])
     }
 
     function setSubscription(inspection, targets) {
@@ -180,6 +205,25 @@
           targets: valuesSig,
           disabled: disabledSig,
           defaults: function () { return currentInspection && currentInspection.defaults },
+          groups: groupsSig,
+          groupActions: function (groupCtx) {
+            const fn = currentInspection && currentInspection.groupActions
+            return typeof fn === 'function' ? fn(groupCtx) : null
+          },
+          groupActionCtx: function (groupCtx) {
+            const values = groupCtx.targets || []
+            return Object.assign({}, groupCtx, {
+              source: 'inspector',
+              inspection: currentInspection,
+              targets: currentTargets,
+              primary: currentTargets[0],
+              values: values,
+              primaryValue: values[0],
+              panel: ctx.panel,
+              bus: ctx.bus,
+              refresh: refresh,
+            })
+          },
           requireAllTargets: true,
           canEdit: function (field, values, rawField) {
             return aiditor.inspector.canEditField(currentInspection, field, values, rawField)
@@ -197,6 +241,7 @@
       }
       setSearchVisible(true)
       schemaSig.set(inspection.schema || {})
+      groupsSig.set(inspection.groups || {})
       valuesSig.set(inspection.values || [])
       disabledSig.set(!!inspection.readonly || !inspection.write)
     }
@@ -207,6 +252,7 @@
         currentInspection = null
         currentTargets = []
         setSubscription(null, targets)
+        setHeaderActions(null, targets)
         mountEmpty('Inspector', '', 'Select something to inspect.')
         return
       }
@@ -215,6 +261,7 @@
         currentInspection = null
         currentTargets = targets
         setSubscription(null, targets)
+        setHeaderActions(null, targets)
         mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
         return
       }
@@ -222,6 +269,7 @@
       currentTargets = targets
       title.textContent = titleOf(targets, inspection)
       subtitle.textContent = subtitleOf(targets, inspection)
+      setHeaderActions(inspection, targets)
       setSubscription(inspection, targets)
       if (inspection.render) mountCustom(inspection, targets)
       else mountForm(inspection, targets)

@@ -249,6 +249,24 @@
   color: var(--aiditor-accent-soft);
   background: var(--aiditor-accent-bg-strong);
 }
+
+/* ── action bar (local UiAction surface) ───────── */
+.aiditor-ui-action-bar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aiditor-space-1);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.aiditor-ui-action-bar-empty { display: none; }
+.aiditor-ui-action-bar-compact .aiditor-ui-action-btn.aiditor-ui-icon-btn-sm {
+  width: 22px;
+  height: 22px;
+}
+.aiditor-ui-action-menu-btn {
+  color: var(--aiditor-fg-2);
+}
 .aiditor-ui-copy-btn {
   transition: color var(--aiditor-dur-fast) var(--aiditor-ease),
               background var(--aiditor-dur-fast) var(--aiditor-ease),
@@ -2070,6 +2088,9 @@
 .aiditor-ui-property-section > .aiditor-ui-section-head .aiditor-ui-section-arrow {
   color: var(--aiditor-fg-3);
 }
+.aiditor-ui-property-section > .aiditor-ui-section-head .aiditor-ui-section-actions {
+  min-width: 22px;
+}
 .aiditor-ui-property-section > .aiditor-ui-section-body {
   padding: var(--aiditor-space-1) var(--aiditor-space-1) var(--aiditor-space-2);
   gap: 0;
@@ -2116,7 +2137,7 @@
 }
 .aiditor-inspector-title-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--aiditor-space-1);
   min-width: 0;
 }
@@ -2138,6 +2159,9 @@
   color: var(--aiditor-fg-3);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
 }
+.aiditor-inspector-actions {
+  margin-left: auto;
+}
 .aiditor-inspector-search {
   width: 100%;
 }
@@ -2148,7 +2172,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: var(--aiditor-space-2);
+  padding: 6px var(--aiditor-space-2) var(--aiditor-space-2);
 }
 .aiditor-inspector-empty {
   color: var(--aiditor-fg-3);
@@ -2680,16 +2704,33 @@
   height: var(--aiditor-size-h-md);
   min-height: var(--aiditor-size-h-md);
   padding: 0 var(--aiditor-space-2);
-  background: var(--aiditor-bg-1);
   border: 0;
+  box-sizing: border-box;
+  background: var(--aiditor-bg-1);
+}
+.aiditor-ui-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  gap: var(--aiditor-space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--aiditor-fg-0);
   font: 600 var(--aiditor-fs-sm) var(--aiditor-font-ui);
   letter-spacing: 0;
   cursor: pointer;
   text-align: left;
 }
-.aiditor-ui-section-head:hover {
+.aiditor-ui-section-head:hover,
+.aiditor-ui-section-toggle:hover {
   background: color-mix(in srgb, var(--aiditor-bg-1) 82%, var(--aiditor-hover));
+}
+.aiditor-ui-section-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aiditor-accent) 32%, transparent);
 }
 .aiditor-ui-section-arrow {
   display: inline-flex;
@@ -2702,11 +2743,17 @@
   transition: transform var(--aiditor-dur-1) var(--aiditor-ease-standard);
 }
 .aiditor-ui-section-leading,
-.aiditor-ui-section-trailing {
+.aiditor-ui-section-trailing,
+.aiditor-ui-section-actions {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
   min-width: 0;
+}
+.aiditor-ui-section-actions {
+  gap: var(--aiditor-space-1);
+  max-width: 100%;
+  justify-content: flex-end;
 }
 .aiditor-ui-section-title {
   flex: 1 1 auto;

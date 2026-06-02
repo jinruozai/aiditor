@@ -105,6 +105,7 @@ for (const file of [
   'src/core/log.js',
   'src/core/bus.js',
   'src/core/names.js',
+  'src/core/commands.js',
   'src/core/registry.js',
   'src/ui/_internal/_signal.js',
   'src/ui/_internal/_edit-session.js',
@@ -125,6 +126,8 @@ ui.iconButton = function (opts) {
   if (opts && opts.onClick) el.addEventListener('click', opts.onClick)
   return el
 }
+
+vm.runInThisContext(readFileSync('src/ui/base/actionBar.js', 'utf8'), { filename: 'src/ui/base/actionBar.js' })
 
 for (const file of [
   'src/ui/form/input.js',
@@ -155,6 +158,15 @@ aiditor.inspector.registerProvider('case.light', {
     return {
       title: 'Meta',
       subtitle: 'fill_light',
+      actions: [{ id: 'add', icon: 'plus', label: 'Add' }],
+      groups: {
+        transform: { label: 'Transform', actions: [{ id: 'transform-menu', icon: 'more-vertical', label: 'Transform actions' }] },
+      },
+      groupActions: function (groupCtx) {
+        return groupCtx.groupId === 'render'
+          ? [{ id: 'render-menu', icon: 'more-vertical', label: 'Render actions' }]
+          : null
+      },
       schema: {
         name: { type: 'string', label: 'Name', desc: 'Readable display name' },
         position: { type: 'vector', label: 'Position', group: 'transform', desc: 'World space location' },
@@ -193,10 +205,21 @@ assert.equal(title.parentNode, titleLine)
 assert.equal(subtitle.parentNode, titleLine)
 assert.equal(title.textContent, 'Meta')
 assert.equal(subtitle.textContent, 'fill_light')
+const actions = root.querySelector('.aiditor-inspector-actions')
+assert.equal(actions.parentNode, titleLine)
+assert.equal(actions.querySelectorAll('.aiditor-ui-icon-btn').length, 1)
 
 const search = root.querySelector('.aiditor-inspector-search')
 assert.equal(search.hidden, false)
 assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
+assert.equal(formOptions.groups.peek().transform.label, 'Transform')
+assert.equal(formOptions.groups.peek().transform.actions.length, 1)
+const groupActionCtx = formOptions.groupActionCtx({ groupId: 'render', label: 'Render', fields: ['color'], targets: [selectionValue], ctx: null })
+assert.equal(groupActionCtx.source, 'inspector')
+assert.equal(groupActionCtx.targets[0].id, 'fill_light')
+assert.equal(groupActionCtx.primary.id, 'fill_light')
+assert.equal(groupActionCtx.values[0], selectionValue)
+assert.equal(formOptions.groupActions(groupActionCtx).length, 1)
 
 const input = search.querySelector('input')
 input.value = 'position'
@@ -220,6 +243,8 @@ assert.equal(search.hidden, true)
 
 const formCss = readFileSync('src/style/ui-form.css', 'utf8')
 const containerCss = readFileSync('src/style/ui-container.css', 'utf8')
+assert.match(formCss, /\.aiditor-inspector-head\s*\{[\s\S]*?gap:\s*var\(--aiditor-space-1\);[\s\S]*?padding:\s*var\(--aiditor-space-2\);/)
+assert.match(formCss, /\.aiditor-inspector-body\s*\{[\s\S]*?padding:\s*6px var\(--aiditor-space-2\) var\(--aiditor-space-2\);/)
 assert.match(formCss, /\.aiditor-ui-property-section\s*\{[\s\S]*?border:\s*0;/)
 assert.match(formCss, /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-head\s*\{[\s\S]*?border-radius:/)
 assert.match(formCss, /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-body\s*\{[\s\S]*?background:\s*transparent;/)

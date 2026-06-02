@@ -172,6 +172,12 @@ for (const file of [
 const aiditor = window.aiditor
 const ui = aiditor.ui
 
+aiditor.safeCall = function (_, fn) { return fn() }
+aiditor.reportError = function () {}
+const commandRuns = []
+aiditor.commands = {
+  run(id, input, ctx) { commandRuns.push({ id, input, ctx }) },
+}
 aiditor.shortcuts = {
   markHandled(ev) { ev.__aiditorHandled = true },
 }
@@ -219,6 +225,7 @@ for (const file of [
   'src/ui/form/typeconfig.js',
   'src/ui/form/editorFor.js',
   'src/ui/form/structInput.js',
+  'src/ui/base/actionBar.js',
   'src/ui/container/section.js',
   'src/ui/form/propertyForm.js',
   'src/ui/editor/codeInput.js',
@@ -319,6 +326,69 @@ function key(el, name, extra) {
   assert.equal(hiddenRows[0].children[1].classList.contains('aiditor-ui-struct-input-cell'), true)
   assert.ok(form.querySelector('.aiditor-ui-vec-column'))
   assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
+}
+
+{
+  commandRuns.length = 0
+  const targets = aiditor.signal([{ a: 1, b: 2, c: 3 }])
+  const groups = aiditor.signal({
+    static: {
+      label: 'Static',
+      actions: [{
+        id: 'static',
+        icon: 'more-vertical',
+        label: 'Static action',
+        command: 'case.static',
+        args: function (ctx) { return { owner: ctx.owner, count: ctx.targets.length } },
+      }],
+    },
+    empty: {
+      label: 'Empty',
+      actions: [{ id: 'hidden-by-empty-array', icon: 'more-vertical', label: 'Hidden' }],
+    },
+  })
+  const form = ui.propertyForm({
+    targets,
+    schema: {
+      a: { type: 'string', group: 'static' },
+      b: { type: 'string', group: 'override' },
+      c: { type: 'string', group: 'empty' },
+    },
+    groups,
+    groupActions: function (groupCtx) {
+      if (groupCtx.groupId === 'override') {
+        return [{ id: 'override', icon: 'more-vertical', label: 'Override action' }]
+      }
+      if (groupCtx.groupId === 'empty') return []
+      return null
+    },
+    groupActionCtx: function (groupCtx) {
+      return Object.assign({}, groupCtx, { owner: 'mapped' })
+    },
+  })
+  const sections = form.querySelectorAll('.aiditor-ui-property-section')
+  assert.equal(sections.length, 3)
+  assert.equal(form.querySelectorAll('.aiditor-ui-icon-btn').length, 2)
+  assert.ok(sections[0].querySelector('.aiditor-ui-section-head'))
+  assert.ok(sections[0].querySelector('.aiditor-ui-section-toggle'))
+  assert.ok(sections[0].querySelector('.aiditor-ui-section-actions'))
+  sections[0].querySelector('.aiditor-ui-icon-btn').click()
+  assert.deepEqual(commandRuns[0].input, { owner: 'mapped', count: 1 })
+  assert.equal(commandRuns[0].ctx.groupId, 'static')
+  assert.equal(sections[2].querySelector('.aiditor-ui-icon-btn'), null)
+  const staticBody = sections[0].querySelector('.aiditor-ui-section-body')
+  groups.set({
+    static: {
+      label: 'Static Updated',
+      actions: [{ id: 'static-next', icon: 'more-vertical', label: 'Static next' }],
+    },
+  })
+  assert.equal(sections[0].querySelector('.aiditor-ui-section-body'), staticBody)
+  assert.equal(sections[0].querySelector('.aiditor-ui-section-title').textContent, 'Static Updated')
+  const sectionCss = readFileSync('src/style/ui-container.css', 'utf8')
+  assert.match(sectionCss, /\.aiditor-ui-section-head\s*\{[\s\S]*?width:\s*100%;[\s\S]*?padding:\s*0 var\(--aiditor-space-2\);[\s\S]*?box-sizing:\s*border-box;/)
+  assert.match(sectionCss, /\.aiditor-ui-section-toggle\s*\{[\s\S]*?flex:\s*1 1 0;[\s\S]*?min-width:\s*0;/)
+  assert.match(sectionCss, /\.aiditor-ui-section-actions\s*\{[\s\S]*?flex:\s*0 0 auto;[\s\S]*?min-width:\s*0;/)
 }
 
 {

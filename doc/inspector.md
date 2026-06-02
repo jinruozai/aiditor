@@ -138,6 +138,9 @@ compatibility decision, including mixed-type cases.
 | `title` / `subtitle` | Header text for the panel. |
 | `schema` | `ui.propertyForm` schema. |
 | `values` | One plain value per target, in the same order. The first value is displayed. |
+| `actions` | Optional `UiAction[]` rendered on the Inspector header's right side. |
+| `groups` | Optional property group metadata passed to `ui.propertyForm`. |
+| `groupActions(groupCtx)` | Optional per-group `UiAction[]` factory passed to `ui.propertyForm`. Returning `null` / `undefined` uses `groups[groupId].actions`; returning `[]` explicitly renders no actions. |
 | `read(target)` | Optional alternative to `values`; called for each target. |
 | `hasField(target, field, value, index)` | Optional field existence override. Default is own-property check on value. |
 | `canWrite(target, field, value, index)` | Optional per-target write gate. |
@@ -150,6 +153,78 @@ compatibility decision, including mixed-type cases.
 `render(ctx)` is for cases that are not just fields: table schema editors,
 binding rows, layout pickers, texture lists, or tool buttons. Use it sparingly;
 plain properties should use `schema + values + write`.
+
+## Action Surfaces
+
+Inspector action surfaces are generic UI affordances. They do not define a
+domain action model and they do not mutate data by themselves.
+
+Header actions live in `inspection.actions` and render on the title line's
+right side, above property search:
+
+```js
+{
+  title: 'Object',
+  subtitle: 'selected_item',
+  actions: [{
+    id: 'add',
+    icon: 'plus',
+    label: 'Add',
+    command: 'selection.addItem',
+    args: { id: 'selected_item' },
+  }],
+}
+```
+
+Grouped property actions live in `inspection.groups[groupId].actions` or
+`inspection.groupActions(groupCtx)`. They render in the matching property
+section header. If search filtering removes every field in a group, that group
+and its actions disappear with it.
+
+```js
+{
+  groups: {
+    transform: {
+      label: 'Transform',
+      actions: [{
+        id: 'more',
+        icon: 'more-vertical',
+        label: 'More',
+        menu: [{
+          label: 'Delete',
+          icon: 'trash',
+          variant: 'danger',
+          command: 'selection.deleteGroupItem',
+          args: { id: 'selected_item', group: 'transform' },
+        }],
+      }],
+    },
+  },
+}
+```
+
+`groupCtx` contains only framework-level information:
+
+```js
+{
+  source: 'inspector',
+  groupId,
+  label,
+  fields,
+  inspection,
+  targets,      // inspector selection targets
+  primary,
+  values,       // current propertyForm values
+  primaryValue,
+  panel,
+  bus,
+  refresh,
+}
+```
+
+The framework never interprets group ids as rules, components, materials,
+tracks, or any other domain concept. Data changes should route through
+`aiditor.commands.run`; `onSelect` is available for local UI-only behavior.
 
 ## Change Shape
 
@@ -196,6 +271,10 @@ fill_light` without spending two rows. Multi-selection still uses the same
 surface; providers can return a title such as `3 selected`, and the default
 subtitle names the primary target type.
 
+When a provider returns `actions`, the header shows them on the same line's
+right side. The action surface is local to the Inspector panel and uses the
+shared `UiAction` / `aiditor.ui.actionBar` primitive.
+
 Normal `schema + values + write` inspections include a local property search
 field below the header. The query is panel UI state only: it is not passed to
 providers, does not enter history, and does not change selection. Filtering is
@@ -205,10 +284,20 @@ contains rows for them. Clearing the query restores the original schema. Custom
 `render(ctx)` inspections own their entire body UI and are not filtered by this
 property search.
 
+Inspector refreshes may return fresh `schema`, `groups`, and `values` objects.
+The built-in panel keeps value updates separate from form structure updates:
+equivalent schema/group structure reuses the existing `propertyForm` field DOM,
+so dragging a number field, editing text, or holding focus is not interrupted by
+a provider refresh. Only real field structure changes, or search filtering that
+changes the visible field set, rebuild the form rows. Group labels and actions
+update section header chrome without recreating the group body.
+
 ## Boundaries
 
 - `propertyForm` is a UI form control.
 - `inspector` is a dock panel.
 - `inspector provider` adapts a domain object type to schema/read/write.
+- `UiAction` is a local UI description routed through commands or local UI
+  callbacks, not a domain action registry.
 - Domain editors own selection rules, object IDs, validation, undo history, and
   persistence.
