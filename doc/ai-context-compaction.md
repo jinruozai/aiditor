@@ -49,8 +49,8 @@ This keeps the system debuggable:
   summary.
 - Persistence truncation remains a storage safety limit, not semantic memory.
 
-If a future storage adapter archives raw messages, it must preserve enough ids,
-hashes, and timestamps to make compaction records traceable.
+If a storage adapter archives raw messages, it must preserve enough ids, hashes,
+and timestamps to make compaction records traceable.
 
 ## When To Compact
 
@@ -297,8 +297,10 @@ Current code already has useful pieces:
 - `src/ai/request.js` truncates large strings, tool args, and context payloads.
 - `src/ai/request.js` groups assistant tool-call messages with their matching
   tool results so provider history is not split by budgeting.
-- `src/ai/store.js` persists agent memory, compaction records, and truncates
-  oversized snapshots.
+- `src/ai/store.js` persists recoverable AI runtime state. Its local storage
+  compaction is a quota safety layer defined in
+  [ai-persistence.md](./ai-persistence.md), not model-facing semantic
+  compaction.
 - `src/ai/store.js` keeps messages, queue, inbox, quests, and runtime status in
   the agent record.
 - `src/ai/compaction.js` provides deterministic semantic compaction records,

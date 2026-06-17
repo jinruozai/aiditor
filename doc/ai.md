@@ -230,3 +230,13 @@ waiting for user approval
 done
 failed
 ```
+
+## Persistence
+
+AI runtime persistence belongs to the optional AI Host. It stores bounded
+recoverable agent state so a reload can restore agents, recent messages, active
+agent selection, queues, quests, attachments, and compact tool-call history.
+
+It does not store project truth, workspace files, editor history, or full
+transcript archives in `localStorage`. The bounded local persistence contract is
+defined in [ai-persistence.md](./ai-persistence.md).

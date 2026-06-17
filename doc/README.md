@@ -137,6 +137,7 @@ extension runtime, AI panels, or AI-specific styles.
 - [inspector.md](./inspector.md): ordered selection, provider protocol, multi-target property editing, and the built-in Inspector panel.
 - [ai.md](./ai.md): optional AI Host and the public AI concept model.
 - [ai-runtime.md](./ai-runtime.md): agents, skills, messages, queues, live run state, compaction, and persistence.
+- [ai-persistence.md](./ai-persistence.md): bounded AI runtime recovery snapshots, localStorage quota policy, and persistence compaction.
 - [ai-permission-policy.md](./ai-permission-policy.md): unified permission resolver, audit, and always-allow policy.
 - [ai-context-assembly.md](./ai-context-assembly.md): budgeted request context layers and model-facing context order.
 - [ai-context-compaction.md](./ai-context-compaction.md): context budgeting, semantic compaction, memory, and long-session request assembly.

@@ -38,6 +38,8 @@
 
 :root,
 .aiditor-root[data-aiditor-theme="dark"] {
+  color-scheme: dark;
+
   /* ── Layer 1 — Primitives (Dark theme — Godot-minimal default) ───
    *
    * Palette inspired by passivestar/godot-minimal-theme.tres: a neutral
@@ -295,6 +297,8 @@
 
 :root[data-aiditor-theme="dracula"],
 .aiditor-root[data-aiditor-theme="dracula"] {
+  color-scheme: dark;
+
   --aiditor-surface-canvas: #0c0c0e;
   --aiditor-surface-lower:  #111113;
   --aiditor-surface-frame:  #16161a;
@@ -371,6 +375,8 @@
 /* Harbor theme - layered charcoal editor palette with quiet translucent tabs. */
 :root[data-aiditor-theme="harbor"],
 .aiditor-root[data-aiditor-theme="harbor"] {
+  color-scheme: dark;
+
   --aiditor-surface-canvas: #18181a;
   --aiditor-surface-lower:  #272729;
   --aiditor-surface-frame:  #313035;
@@ -482,6 +488,8 @@
 /* Linen theme - warm paper surfaces with graphite text and a restrained teal accent. */
 :root[data-aiditor-theme="linen"],
 .aiditor-root[data-aiditor-theme="linen"] {
+  color-scheme: light;
+
   --aiditor-surface-canvas: #ece4d8;
   --aiditor-surface-lower:  #f9f4ec;
   --aiditor-surface-frame:  #e2d8c9;
@@ -605,6 +613,8 @@
 /* Sakura theme - soft cherry-blossom surfaces with plum text and rose accent. */
 :root[data-aiditor-theme="sakura"],
 .aiditor-root[data-aiditor-theme="sakura"] {
+  color-scheme: light;
+
   --aiditor-surface-canvas: #f5e9ec;
   --aiditor-surface-lower:  #fff9f7;
   --aiditor-surface-frame:  #ead7dc;
@@ -728,6 +738,8 @@
 /* Abyss theme id, shown as Sea - brighter ocean blue with sea-glass accent. */
 :root[data-aiditor-theme="abyss"],
 .aiditor-root[data-aiditor-theme="abyss"] {
+  color-scheme: dark;
+
   --aiditor-surface-canvas: #102830;
   --aiditor-surface-lower:  #15313a;
   --aiditor-surface-frame:  #1a3c46;
@@ -851,6 +863,8 @@
 /* Hadal theme id, shown as Abyss - blue-gray black with cold ocean highlights. */
 :root[data-aiditor-theme="hadal"],
 .aiditor-root[data-aiditor-theme="hadal"] {
+  color-scheme: dark;
+
   --aiditor-surface-canvas: #02050a;
   --aiditor-surface-lower:  #040812;
   --aiditor-surface-frame:  #070d18;
@@ -974,6 +988,8 @@
 /* Forest theme - clean pine surfaces with moss accent and warm bark states. */
 :root[data-aiditor-theme="forest"],
 .aiditor-root[data-aiditor-theme="forest"] {
+  color-scheme: dark;
+
   --aiditor-surface-canvas: #0c130f;
   --aiditor-surface-lower:  #101a14;
   --aiditor-surface-frame:  #16231a;
@@ -1096,6 +1112,8 @@
 
 :root[data-aiditor-theme="light"],
 .aiditor-root[data-aiditor-theme="light"] {
+  color-scheme: light;
+
   --aiditor-surface-canvas: #f4f4f7;
   --aiditor-surface-lower:  #ffffff;
   --aiditor-surface-frame:  #f8f8fa;

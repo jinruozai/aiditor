@@ -546,7 +546,12 @@ async function assertGdePatchPreviewRendering() {
     button: function (opts) { return this.h('button', 'aiditor-ui-btn', { text: opts.text || '' }) },
     stateButton: function () { return this.h('button', 'aiditor-ui-state-btn') },
     'switch': function (opts) { return this.h('label', 'aiditor-ui-switch', { text: opts.label || '' }) },
-    copyButton: function () { return this.h('button', 'aiditor-ui-copy-btn', { text: 'Copy' }) },
+    copyButton: function (opts) {
+      const el = this.h('button', 'aiditor-ui-copy-btn', { text: 'Copy' })
+      const text = opts && opts.text
+      el.__copyText = typeof text === 'function' ? text() : text
+      return el
+    },
     scrollArea: function () { return this.h('div', 'aiditor-ui-scrollarea') },
     view: function (opts) {
       const el = this.h('div', 'aiditor-ui-view')
@@ -610,6 +615,13 @@ async function assertGdePatchPreviewRendering() {
   assert.match(text, /Before\s+20/)
   assert.match(text, /After\s+25/)
   assert.doesNotMatch(text, /"value": 1/)
+  const footerCopy = root.querySelector('.aiditor-ai-message-footer').querySelector('.aiditor-ui-copy-btn')
+  assert.match(footerCopy.__copyText, /preview/)
+  assert.match(footerCopy.__copyText, /\[Tool\] gde\.patch/)
+  assert.match(footerCopy.__copyText, /Preview:/)
+  assert.match(footerCopy.__copyText, /Tune swords/)
+  assert.match(footerCopy.__copyText, /Result:/)
+  assert.match(footerCopy.__copyText, /"value": 1/)
 
   const streamAgent = ai.createAgent({
     name: 'Stable Transcript',

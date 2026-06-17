@@ -13302,6 +13302,41 @@
     return displayText(msg.content != null ? msg.content : msg.text)
   }
 
+  function copyBlock(title, value) {
+    if (value == null) return ''
+    const text = displayText(value).trim()
+    return text ? title + ':\n' + text : ''
+  }
+
+  function toolCallCopyText(call) {
+    const lines = []
+    const status = toolStatus(call)
+    lines.push('[Tool] ' + toolName(call) + (status ? ' (' + status + ')' : ''))
+    if (call.description || call.title) lines.push('Description: ' + (call.description || call.title))
+    const args = copyBlock('Args', call.args)
+    if (args) lines.push(args)
+    const preview = copyBlock('Preview', call.preview)
+    if (preview) lines.push(preview)
+    const result = copyBlock('Result', call.result)
+    if (result) lines.push(result)
+    const applied = copyBlock('Applied', call.applyResult)
+    if (applied) lines.push(applied)
+    const error = copyBlock('Error', call.error)
+    if (error) lines.push(error)
+    return lines.join('\n')
+  }
+
+  function messageCopyText(msg) {
+    const parts = []
+    const text = messageText(msg).trim()
+    if (text) parts.push(text)
+    const calls = toolCallsOf(msg)
+    for (let i = 0; i < calls.length; i++) parts.push(toolCallCopyText(calls[i]))
+    const error = statusOf(msg) === 'error' && msg.meta && msg.meta.error ? copyBlock('Error', msg.meta.error) : ''
+    if (error) parts.push(error)
+    return parts.join('\n\n')
+  }
+
   function usageOf(msg) {
     return msg.usage || (msg.stats && msg.stats.usage) || (msg.meta && msg.meta.usage) || null
   }
@@ -13376,7 +13411,7 @@
       }
       const group = groups[runId]
       group.lastId = msg.id
-      const text = messageText(msg).trim()
+      const text = messageCopyText(msg).trim()
       if (text) group.content.push(text)
       group.toolCalls += toolCallsOf(msg).length
       group.duration += durationMs(msg)
@@ -13885,7 +13920,7 @@
     if (runId && isAssistantMessage(msg) && !runFooter) return null
     if (runFooter && !runFooter.complete) return null
 
-    const copyText = runFooter && runFooter.content.length ? runFooter.content.join('\n\n') : messageText(msg)
+    const copyText = runFooter && runFooter.content.length ? runFooter.content.join('\n\n') : messageCopyText(msg)
     const footer = ui.h('div', 'aiditor-ai-message-footer')
     footer.appendChild(ui.copyButton({ text: copyText, title: runFooter ? 'Copy run' : 'Copy message', size: 'sm' }))
     const calls = toolCallsOf(msg)

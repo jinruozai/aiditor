@@ -52,7 +52,7 @@ preserved or deliberately replaced.
 | --- | --- | --- |
 | `src/ai/name-generator.js` | [ai-runtime.md](./ai-runtime.md) | Agent name generation. |
 | `src/ai/permission.js` | [ai-permission-policy.md](./ai-permission-policy.md), [ai-runtime.md](./ai-runtime.md) | Permission resolver, default hierarchy policy, path rules, and audit log. |
-| `src/ai/store.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Agents, messages, quests, persistence, memory, attachments, and permission-scoped read facades. |
+| `src/ai/store.js` | [ai-runtime.md](./ai-runtime.md), [ai-persistence.md](./ai-persistence.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Agents, messages, quests, bounded local persistence, memory, attachments, and permission-scoped read facades. |
 | `src/ai/compaction.js` | [ai-context-compaction.md](./ai-context-compaction.md), [ai-runtime.md](./ai-runtime.md) | Semantic compaction records, safe range planning, request filtering, and compaction context messages. |
 | `src/ai/runtime.js` | [ai-runtime.md](./ai-runtime.md) | Scheduler, runs, resume, tool approval flow. |
 | `src/ai/orchestration.js` | [ai-runtime.md](./ai-runtime.md) | Agent, quest, message tools. |

@@ -457,3 +457,8 @@ aiditor.ai.clearStoredState()
 
 Persistence belongs to the AI runtime. Domain persistence remains outside
 AIditor Core.
+
+Local browser persistence is a compact recovery snapshot, not a full transcript
+archive. The runtime must write bounded, deterministic snapshots, compact before
+writing when the payload exceeds the configured budget, and avoid repeated quota
+error loops. See [ai-persistence.md](./ai-persistence.md).
