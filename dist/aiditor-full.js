@@ -33530,13 +33530,6 @@
     factory: renderThemeSettings,
   })
 
-  aiditor.effect(function () {
-    const mode = aiditor.settings.get('theme.mode')
-    if (aiditor.theme && aiditor.theme.set) aiditor.theme.set(mode || 'dark')
-    const density = aiditor.settings.get('theme.density')
-    if (aiditor.theme && aiditor.theme.setDensity) aiditor.theme.setDensity(density || 'default')
-  })
-
   const THEME_STORAGE_KEY = 'aiditor-theme-overrides-v3'
   const THEME_MODE_KEY = 'aiditor-theme-mode'
   const THEME_DENSITY_KEY = 'aiditor-theme-density'
@@ -33609,6 +33602,16 @@
     ['--aiditor-dur-slow', 'Slow', 0, 1000],
   ]
 
+  migrateStoredThemePreferences()
+  applyStoredThemeOverrides()
+
+  aiditor.effect(function () {
+    const mode = aiditor.settings.get('theme.mode')
+    if (aiditor.theme && aiditor.theme.set) aiditor.theme.set(mode || 'dark')
+    const density = aiditor.settings.get('theme.density')
+    if (aiditor.theme && aiditor.theme.setDensity) aiditor.theme.setDensity(density || 'default')
+  })
+
   function renderThemeSettings(opts) {
     opts = opts || {}
     const panelMode = opts.panel === true
@@ -33621,8 +33624,8 @@
 
     const bar = ui.h('div', panelMode ? 'aiditor-theme-config-head' : 'aiditor-settings-theme-bar')
     const tabSig = aiditor.signal('palette')
-    const modeSig = aiditor.signal(aiditor.settings.get('theme.mode') || localStorage.getItem(THEME_MODE_KEY) || 'dark')
-    const densitySig = aiditor.signal(aiditor.settings.get('theme.density') || localStorage.getItem(THEME_DENSITY_KEY) || 'default')
+    const modeSig = aiditor.signal(aiditor.settings.get('theme.mode') || 'dark')
+    const densitySig = aiditor.signal(aiditor.settings.get('theme.density') || 'default')
     const tabs = ui.segmented({ value: tabSig, options: THEME_TABS })
     tabs.classList.add(panelMode ? 'aiditor-theme-config-tabs' : 'aiditor-settings-theme-tabs')
     const mode = ui.select({
@@ -33754,6 +33757,27 @@
 
   function readThemeOverrides() {
     try { return JSON.parse(localStorage.getItem(THEME_STORAGE_KEY) || '{}') } catch (_) { return {} }
+  }
+
+  function migrateStoredThemePreferences() {
+    const values = aiditor.settings.exportValues ? aiditor.settings.exportValues() : {}
+    if (!Object.prototype.hasOwnProperty.call(values, 'theme.mode')) {
+      const mode = readStorageText(THEME_MODE_KEY)
+      if (mode) aiditor.settings.set('theme.mode', mode)
+    }
+    if (!Object.prototype.hasOwnProperty.call(values, 'theme.density')) {
+      const density = readStorageText(THEME_DENSITY_KEY)
+      if (density) aiditor.settings.set('theme.density', density)
+    }
+  }
+
+  function readStorageText(key) {
+    try { return localStorage.getItem(key) || '' } catch (_) { return '' }
+  }
+
+  function applyStoredThemeOverrides() {
+    const overrides = readThemeOverrides()
+    for (const key in overrides) document.documentElement.style.setProperty(key, overrides[key])
   }
 
   function writeThemeToken(name, value) {

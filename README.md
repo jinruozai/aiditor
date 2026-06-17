@@ -15,9 +15,10 @@
 
 AIditor gives host applications the shared foundation most serious editor UIs
 need: a Blender-style dock layout, panel/component runtime, themeable UI
-controls, workspace contracts, optional AI agents, and optional extension
-loading. It is plain browser JavaScript: no framework, no bundler, no module
-system, and no runtime dependencies.
+controls, command/menu/shortcut infrastructure, history and settings services,
+workspace contracts, optional AI agents, and optional extension loading. It is
+plain browser JavaScript: no framework, no bundler, no module system, and no
+runtime dependencies.
 
 ![AIditor editor workspace](./screenshots/screenshot_01.jpg)
 
@@ -83,6 +84,8 @@ specific editor product.
   interactions, tabbed panels, and pop-out windows.
 - **Detached inactive panels**: inactive panel DOM is removed from layout and
   paint while JS/DOM state is preserved for fast tab switching.
+- **Editor primitives**: commands, menus, shortcuts, settings, history,
+  inspector, logs, workspace IO, and reusable UI controls.
 - **Optional AI Host**: agents, providers, tools, context references,
   operations, permissions, ChangeSet review, and compaction.
 - **Optional Extension Runtime**: package, review, install, disable, and
@@ -132,7 +135,7 @@ Or load directly in the browser:
 <script src="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-full.js"></script>
 ```
 
-Published files are intentionally small and runtime-only:
+Published files are intentionally runtime-only:
 
 | Bundle | Includes | Use When |
 | --- | --- | --- |
@@ -229,6 +232,33 @@ aiditor.splitDock(tree, dockId, direction, side, ratio, opts)
 aiditor.mergeDocks(tree, winnerDockId, loserDockId)
 ```
 
+### Core Services
+
+AIditor keeps common editor infrastructure in Core without adding application
+semantics:
+
+```text
+aiditor.log
+aiditor.bus
+aiditor.settings
+aiditor.commands
+aiditor.shortcuts
+aiditor.history
+aiditor.workspace
+aiditor.runtime
+aiditor.theme
+aiditor.i18n
+```
+
+Commands and menus are data-driven contribution surfaces. Shortcuts normalize
+keys, resolve generic UI targets, and route to `aiditor.commands.run`; the
+framework does not define app-level shortcut policy. History supports
+sync/async `jump`, `undo`, and `redo`, and the built-in `history` panel binds to
+named history instances without owning project saved state. Workspace is a
+bounded file primitive layer: text/blob IO, stat/version checks, preview/apply,
+snapshots, object URL leases, permission recovery, and optional desktop
+`revealInSystem`.
+
 ### UI Library
 
 `aiditor.ui.*` provides signal-first controls and editor-focused widgets:
@@ -244,18 +274,34 @@ var button = aiditor.ui.button({
 
 The UI layer includes base controls, form inputs, editor inputs, containers,
 virtualized data views, overlays, property forms, settings UI, tab/history/log
-panels, and the generic Inspector panel.
+panels, and the generic Inspector panel. It also includes reusable editor
+primitives such as `actionBar`, `section` header actions, `arrayEditor`,
+`propertyForm`, `structInput`, and `vectorInput`.
+
+`arrayEditor` owns generic list interactions such as selection, active row,
+add/delete/duplicate, and reorder feedback while callers keep item structure,
+validation, history, and persistence. `arrayInput` remains the simple
+compatibility facade used by schema forms.
 
 ### Inspector
 
 Inspector is provider-based. Editor surfaces select typed targets; domain code
-describes how those targets become editable fields.
+describes how those targets become editable fields and local actions.
 
 ```js
 aiditor.inspector.registerProvider('app.node', {
   inspect: function (targets) {
     return {
+      title: 'Node',
+      subtitle: targets[0].id,
+      actions: [{ id: 'add', icon: 'plus', command: 'app.node.addChild' }],
       schema: { name: { type: 'string' }, visible: { type: 'bool' } },
+      groups: {
+        main: {
+          label: 'Main',
+          actions: [{ id: 'more', icon: 'more-vertical', menu: [] }],
+        },
+      },
       values: targets.map(function (target) { return nodeStore.get(target.id) }),
       write: function (field, change, ctx) {
         ctx.targets.forEach(function (target, index) {
@@ -269,8 +315,11 @@ aiditor.inspector.registerProvider('app.node', {
 })
 ```
 
-Domain validation, undo history, persistence, and object semantics stay in the
-host app.
+The built-in Inspector panel provides a compact header, local search over schema
+fields and groups, and action slots in the header and property group sections.
+`label:false` or `labelMode:"hidden"` lets composite fields span the full row
+when a section title already names the value. Domain validation, undo history,
+persistence, and object semantics stay in the host app.
 
 ### Themes
 
@@ -323,6 +372,22 @@ Context references expose bounded readable state. Operations expose previewable
 and applyable mutations. ChangeSets group reviewed changes. Permission checks,
 workspace writes, operation apply, extension install, and host-adapter calls all
 go through one resolver.
+
+AI runtime state can be persisted with bounded localStorage snapshots:
+
+```js
+aiditor.ai.configurePersistence({
+  namespace: 'my-editor',
+  maxBytes: 2 * 1024 * 1024,
+  maxMessagesPerAgent: 80,
+  toolResultPolicy: 'compact',
+})
+```
+
+Persistence keeps recoverable compact state, not a full transcript archive.
+Separate apps should use separate namespaces; when omitted, AIditor derives one
+from the current location. New agents inherit the last selected connection/model
+when available, then fall back to the active/default connection.
 
 `aiditor-ai` and `aiditor-full` also include built-in authoring skills:
 
@@ -397,7 +462,11 @@ in `src/`.
 - [Architecture](./doc/architecture.md)
 - [Core](./doc/core.md)
 - [UI and dock runtime](./doc/ui.md)
+- [Workspace](./doc/workspace.md)
+- [Shortcuts](./doc/shortcuts.md)
+- [Inspector](./doc/inspector.md)
 - [AI Host](./doc/ai.md)
+- [AI persistence](./doc/ai-persistence.md)
 - [Extension Runtime](./doc/extensions.md)
 - [Generated API docs](./doc/api/index.md)
 - [Runtime authoring skill](./doc/skill/aiditor-runtime-authoring/SKILL.md)

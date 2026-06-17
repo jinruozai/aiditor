@@ -528,3 +528,22 @@ This prevents tooltips, popovers, and menus from leaking across tabs or panels.
 Themes are token-driven and applied through `aiditor.theme`.
 
 UI components should consume semantic role tokens, not domain-specific colors.
+
+`aiditor.theme.set(mode[, root])` and `aiditor.theme.setDensity(density[, root])`
+are low-level runtime APIs. They update the target root immediately and do not
+persist by themselves, because scoped roots should not overwrite global user
+preferences.
+
+The built-in theme preference is owned by `aiditor.settings`:
+
+```text
+theme.mode
+theme.density
+```
+
+`src/style/theme-settings.js` registers those settings, applies them on startup,
+and the `theme-config` panel writes through the same settings surface. Legacy
+standalone keys such as `aiditor-theme-mode` and `aiditor-theme-density` are
+migrated into settings when no explicit setting exists. Custom authoring-token
+overrides are restored from the theme override store before the settings effect
+applies the active mode.
