@@ -457,6 +457,7 @@
         disabled: controlDisabled,
         onChange: function (v) {
           const parsed = parseModelValue(v)
+          if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel(parsed)
           aiditor.batch(function () {
             connection.set(parsed.connection)
             model.set(parsed.model)
@@ -519,6 +520,7 @@
         attachmentRefs: refs,
         renderedText: content.renderedText,
       }
+      if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel({ connection: meta.connection, model: meta.model })
       aiditor.ai.message.send(agent.id, { content: content, contextRefs: refs, meta: meta, from: 'user' })
       draft.set(aiditor.ai.richPrompt.empty())
     }

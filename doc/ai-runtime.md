@@ -42,6 +42,21 @@ contextRefs
 
 Parent/child is an agent relationship, not a new runtime layer.
 
+New agents inherit the user's latest selected connection/model when no explicit
+model is provided. This is AI runtime user preference, not project data. The
+fallback order is:
+
+```text
+explicit spec.connection / spec.model
+latest selected connection + model
+active/default connection defaultModel
+empty model, so UI asks the user to choose
+```
+
+Model hints are display suggestions only. The runtime must not silently choose a
+hint as the agent model because hints may not be available for the user's
+current account or provider configuration.
+
 ## Skills
 
 A skill is an agent behavior profile. It can provide prompt guidance and rules

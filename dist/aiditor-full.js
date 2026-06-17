@@ -5164,6 +5164,7 @@
   const messageListVersionSigs = {}
   const messageVersionSigs = {}
   const activeRunStateSigs = {}
+  let lastModelSelection = { connection: null, model: null }
   const PERSISTENCE_BASE_KEY = 'aiditor.ai'
   let persistenceNamespace = defaultPersistenceNamespace()
   let persistenceKey = persistenceKeyFor(persistenceNamespace)
@@ -5204,16 +5205,33 @@
     return { paths: [] }
   }
 
+  function connectionConfigDefaultModel(connection) {
+    const config = ai.getConnectionConfig ? ai.getConnectionConfig(connection) : null
+    return config && config.defaultModel || ''
+  }
+
+  function defaultAgentConnection(spec) {
+    if (Object.prototype.hasOwnProperty.call(spec, 'connection')) return spec.connection || ai.defaultConnection || 'mock'
+    return lastModelSelection.connection || ai.defaultConnection || 'mock'
+  }
+
+  function defaultAgentModel(spec, connection) {
+    if (Object.prototype.hasOwnProperty.call(spec, 'model')) return spec.model || ''
+    if (lastModelSelection.model && (!lastModelSelection.connection || lastModelSelection.connection === connection)) return lastModelSelection.model
+    return connectionConfigDefaultModel(connection)
+  }
+
   function makeAgent(spec) {
     spec = spec || {}
     const id = spec.id || makeId('a', nextAgentId++)
+    const connection = defaultAgentConnection(spec)
     return {
       id: id,
       name: spec.name || defaultAgentName(),
       parentAgentId: spec.parentAgentId || null,
       order: cleanOrder(spec.order, agentsSig.peek().length),
-      connection: spec.connection || ai.defaultConnection || 'mock',
-      model: spec.model || '',
+      connection: connection,
+      model: defaultAgentModel(spec, connection),
       contextBudgetTokens: spec.contextBudgetTokens || null,
       permissionMode: spec.permissionMode || 'full',
       status: spec.status || 'idle',
@@ -5750,6 +5768,7 @@
     agentsSig.set([])
     attachmentsSig.set([])
     activeAgentIdSig.set(null)
+    lastModelSelection = { connection: null, model: null }
   }
 
   function snapshot() {
@@ -5757,6 +5776,10 @@
       version: 2,
       agents: agentsSig.peek().map(snapshotAgent),
       attachments: attachmentsSig.peek(),
+      preferences: {
+        lastConnection: lastModelSelection.connection,
+        lastModel: lastModelSelection.model,
+      },
       activeAgentId: activeAgentIdSig.peek(),
     }
   }
@@ -5884,6 +5907,10 @@
   function restore(data) {
     const next = data || readStored()
     if (!next || next.version !== 2) return null
+    lastModelSelection = {
+      connection: next.preferences && next.preferences.lastConnection || null,
+      model: next.preferences && next.preferences.lastModel || null,
+    }
     agentsSig.set((next.agents || []).map(function (agent) { return normalizeRestoredRuntime(makeAgent(agent)) }))
     attachmentsSig.set((next.attachments || []).map(makeAttachment))
     activeAgentIdSig.set(next.activeAgentId || (agentsSig.peek()[0] && agentsSig.peek()[0].id) || null)
@@ -5925,6 +5952,20 @@
   function clearStoredState() {
     const s = storage()
     if (s) s.removeItem(persistenceKey)
+  }
+
+  function setLastSelectedModel(selection) {
+    const s = selection || {}
+    lastModelSelection = {
+      connection: s.connection || null,
+      model: s.model || '',
+    }
+    scheduleSave()
+    return Object.assign({}, lastModelSelection)
+  }
+
+  function getLastSelectedModel() {
+    return Object.assign({}, lastModelSelection)
   }
 
   function permissionAllowed(actor, targetAgentId, scope, details) {
@@ -6119,6 +6160,8 @@
   ai.restore = restore
   ai.configurePersistence = configurePersistence
   ai.clearStoredState = clearStoredState
+  ai.setLastSelectedModel = setLastSelectedModel
+  ai.getLastSelectedModel = getLastSelectedModel
   ai.message = ai.message || {}
   ai.quest = ai.quest || {}
   ai.agent = ai.agent || {}
@@ -31049,6 +31092,7 @@
         disabled: controlDisabled,
         onChange: function (v) {
           const parsed = parseModelValue(v)
+          if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel(parsed)
           aiditor.batch(function () {
             connection.set(parsed.connection)
             model.set(parsed.model)
@@ -31111,6 +31155,7 @@
         attachmentRefs: refs,
         renderedText: content.renderedText,
       }
+      if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel({ connection: meta.connection, model: meta.model })
       aiditor.ai.message.send(agent.id, { content: content, contextRefs: refs, meta: meta, from: 'user' })
       draft.set(aiditor.ai.richPrompt.empty())
     }

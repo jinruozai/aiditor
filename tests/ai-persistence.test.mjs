@@ -24,6 +24,7 @@ function loadRuntime(store, location) {
 const memory = storage()
 let ai = loadRuntime(memory)
 ai.configurePersistence({ key: 'test.ai', load: false })
+ai.setLastSelectedModel({ connection: 'persisted-connection', model: 'persisted-model' })
 const parent = ai.createAgent({ name: 'Saved Parent' })
 const agent = ai.createAgent({
   name: 'Saved Agent',
@@ -49,6 +50,7 @@ ai.save()
 
 const stored = JSON.parse(window.localStorage.getItem('test.ai'))
 assert.equal(stored.version, 2)
+assert.deepEqual(stored.preferences, { lastConnection: 'persisted-connection', lastModel: 'persisted-model' })
 assert.equal(stored.agents.length, 2)
 assert.equal(stored.attachments.length, 1)
 assert.equal('groups' in stored, false)
@@ -59,6 +61,12 @@ assert.equal(stored.agents[1].messages[1].toolCalls[0].args.text.length < 13000,
 
 ai = loadRuntime(memory)
 ai.configurePersistence({ key: 'test.ai' })
+
+assert.deepEqual(ai.getLastSelectedModel(), { connection: 'persisted-connection', model: 'persisted-model' })
+const inherited = ai.createAgent({ name: 'Inherited Model', select: false })
+assert.equal(inherited.connection, 'persisted-connection')
+assert.equal(inherited.model, 'persisted-model')
+ai.deleteAgent(inherited.id)
 
 const restored = ai.agents().find(function (item) { return item.id === agent.id })
 assert.equal(restored.name, 'Saved Agent')

@@ -67,6 +67,29 @@ function assertAgentNameGenerator() {
   ai.deleteAgent(generated.id)
 }
 
+function assertAgentModelDefaults() {
+  ai.setLastSelectedModel({ connection: null, model: '' })
+  ai.setActiveConnection('openai-codex')
+  const defaulted = ai.createAgent({ name: 'Default Model Agent', select: false })
+  assert.equal(defaulted.connection, 'openai-codex')
+  assert.equal(defaulted.model, 'gpt-5.5')
+
+  ai.setLastSelectedModel({ connection: 'openai-codex', model: 'gpt-5.5-pro' })
+  const recent = ai.createAgent({ name: 'Recent Model Agent', select: false })
+  assert.equal(recent.connection, 'openai-codex')
+  assert.equal(recent.model, 'gpt-5.5-pro')
+
+  const explicit = ai.createAgent({ name: 'Explicit Model Agent', connection: 'mock', model: 'manual-model', select: false })
+  assert.equal(explicit.connection, 'mock')
+  assert.equal(explicit.model, 'manual-model')
+
+  ai.deleteAgent(defaulted.id)
+  ai.deleteAgent(recent.id)
+  ai.deleteAgent(explicit.id)
+  ai.setLastSelectedModel({ connection: null, model: '' })
+  ai.setActiveConnection('mock')
+}
+
 function assertAgentsAreIdBasedTree() {
   const agent = ai.createAgent({
     name: 'Planner',
@@ -385,6 +408,7 @@ async function assertStopAgent(agentId) {
 
 assertNoSessionSurface()
 assertAgentNameGenerator()
+assertAgentModelDefaults()
 const seed = assertAgentsAreIdBasedTree()
 assertAgentRuntimeState(seed.agent)
 const resourceCheck = assertReferenceProviderContract(seed.agent.id)
