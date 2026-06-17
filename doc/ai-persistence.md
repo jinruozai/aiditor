@@ -37,7 +37,8 @@ settings:
 ```js
 aiditor.ai.configurePersistence({
   enabled: true,
-  key: 'aiditor.ai.v2',
+  namespace: 'my-editor',
+  key: null,
   load: true,
   maxBytes: 2 * 1024 * 1024,
   maxMessagesPerAgent: 80,
@@ -50,11 +51,34 @@ Options:
 | Option | Meaning |
 | --- | --- |
 | `enabled` | Enables or disables AI runtime persistence. Disabling does not clear existing storage. |
-| `key` | Storage key. Default is `aiditor.ai.v2`. |
+| `namespace` | App or workspace identity used to derive the storage key. |
+| `key` | Advanced exact storage-key override. When omitted, the key is derived from `namespace`. |
 | `load` | When not `false`, reads stored state immediately after configuration. |
 | `maxBytes` | Conservative serialized storage budget for the localStorage payload. |
 | `maxMessagesPerAgent` | Maximum latest messages retained per agent in compact persistent state. |
 | `toolResultPolicy` | `compact`, `metadata-only`, or `none`. Controls persisted tool result detail. |
+
+The base key is always:
+
+```text
+aiditor.ai
+```
+
+With a namespace, the effective key is:
+
+```text
+aiditor.ai.<namespace>
+```
+
+If the host does not provide a namespace, the framework derives one from the
+current app location. This makes separate AIditor apps on the same origin use
+separate AI runtime state by default. If no location is available, the base key
+`aiditor.ai` is used.
+
+The storage key is identity, not schema. Do not put the snapshot format version
+into the key. Format versioning belongs inside the stored snapshot's `version`
+field so the runtime can parse or migrate stored data without changing app
+identity.
 
 The default `maxBytes` should be well below common per-origin storage limits.
 The budget is for the single AI state key, not the whole origin. Other AIditor
@@ -63,6 +87,10 @@ systems, host code, and browser data may share the same quota.
 `aiditor.ai.clearStoredState()` removes only the configured AI persistence key.
 It must not clear project data, workspace snapshots, settings, or extension
 state.
+
+Changing `namespace` or `key` changes the AI runtime identity. The store clears
+the current in-memory AI runtime and then restores from the new key. This avoids
+leaking agents or transcript rows from one app/workspace identity into another.
 
 ## Snapshot Shape
 
@@ -217,7 +245,7 @@ The persistence layer reports structured storage warnings through
 ```js
 {
   scope: 'ai.persistence',
-  key: 'aiditor.ai.v2',
+  key: 'aiditor.ai.my-editor',
   reason: 'quota_exceeded',
   maxBytes: 2097152,
   attemptedBytes: 0,

@@ -16,7 +16,9 @@
   const messageListVersionSigs = {}
   const messageVersionSigs = {}
   const activeRunStateSigs = {}
-  let persistenceKey = 'aiditor.ai.v2'
+  const PERSISTENCE_BASE_KEY = 'aiditor.ai'
+  let persistenceNamespace = defaultPersistenceNamespace()
+  let persistenceKey = persistenceKeyFor(persistenceNamespace)
   let persistenceEnabled = true
   let saveTimer = null
   const MAX_SNAPSHOT_CONTENT_CHARS = 1000000
@@ -568,6 +570,40 @@
     try { return window.localStorage || null } catch (_) { return null }
   }
 
+  function normalizeNamespace(value) {
+    return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '')
+  }
+
+  function defaultPersistenceNamespace() {
+    if (!window.location) return ''
+    return normalizeNamespace(String(window.location.origin || '') + String(window.location.pathname || ''))
+  }
+
+  function persistenceKeyFor(namespace) {
+    const ns = normalizeNamespace(namespace)
+    return ns ? PERSISTENCE_BASE_KEY + '.' + ns : PERSISTENCE_BASE_KEY
+  }
+
+  function clearMap(map) {
+    Object.keys(map).forEach(function (key) { delete map[key] })
+  }
+
+  function resetRuntimeState() {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = null
+    nextAgentId = 1
+    nextMessageId = 1
+    nextAttachmentId = 1
+    nextEventId = 1
+    clearMap(agentVersionSigs)
+    clearMap(messageListVersionSigs)
+    clearMap(messageVersionSigs)
+    clearMap(activeRunStateSigs)
+    agentsSig.set([])
+    attachmentsSig.set([])
+    activeAgentIdSig.set(null)
+  }
+
   function snapshot() {
     return {
       version: 2,
@@ -725,8 +761,15 @@
 
   function configurePersistence(opts) {
     opts = opts || {}
-    if (opts.key) persistenceKey = opts.key
+    const previousKey = persistenceKey
+    if (Object.prototype.hasOwnProperty.call(opts, 'key') && opts.key) {
+      persistenceKey = String(opts.key)
+    } else if (Object.prototype.hasOwnProperty.call(opts, 'namespace')) {
+      persistenceNamespace = normalizeNamespace(opts.namespace)
+      persistenceKey = persistenceKeyFor(persistenceNamespace)
+    }
     if (opts.enabled != null) persistenceEnabled = opts.enabled !== false
+    if (persistenceKey !== previousKey) resetRuntimeState()
     if (opts.load !== false) restore()
     return snapshot()
   }
