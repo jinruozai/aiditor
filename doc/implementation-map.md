@@ -40,8 +40,10 @@ preserved or deliberately replaced.
 | `src/ui/panel/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Built-in generic Inspector dock panel backed by `aiditor.inspector` and `aiditor.ui.propertyForm`. |
 | `src/ui/panel/history.js` | [core.md](./core.md), [ui.md](./ui.md) | Built-in generic History dock panel backed by an `aiditor.history` instance or named binding. |
 | `src/ui/panel/panel-list.js` | [ui.md](./ui.md) | Built-in searchable panel palette for registered generic panel components. |
+| `src/ui/form/editorFor.js` | [ui.md](./ui.md), [schema-value-encoding.md](./schema-value-encoding.md), [dict-input.md](./dict-input.md) | Schema renderer dispatcher and canonical value encoding boundary; built-in `struct` projects tuple values to record UI, and built-in `dict` delegates dynamic key/value editing to `dictInput`. |
 | `src/ui/form/propertyForm.js` | [ui.md](./ui.md), [inspector.md](./inspector.md) | Schema-driven single/multi-target property form helper with group and field row actions. |
 | `src/ui/form/propertyList.js` | [property-list.md](./property-list.md), [ui.md](./ui.md) | Keyed expandable object property-list primitive built from section/actionBar/propertyForm. |
+| `src/ui/form/dictInput.js` | [dict-input.md](./dict-input.md), [schema-value-encoding.md](./schema-value-encoding.md), [ui.md](./ui.md) | Dynamic key-value dictionary editor primitive used by the built-in `dict` schema renderer. |
 | `src/ui/form/arrayEditor.js` | [ui.md](./ui.md) | Generic array-row interaction primitive: key-based selection, active item, add/delete/duplicate, reorder feedback, and controlled mutation callbacks. |
 | `src/ui/form/arrayInput.js` | [ui.md](./ui.md) | Compatibility facade over `arrayEditor` for simple property array editing. |
 | `src/ui/**` | [ui.md](./ui.md) | Generic UI component library and built-in generic panel components. |

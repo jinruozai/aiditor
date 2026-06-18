@@ -94,8 +94,8 @@ Minimal object inspector:
 
 ```js
 const cube = {
-  position: { x: 0, y: 0, z: 0 },
-  size: { x: 1, y: 1, z: 1 },
+  position: [0, 0, 0],
+  size: [1, 1, 1],
   color: '#ff6a00',
 }
 
@@ -126,6 +126,11 @@ aiditor.inspector.registerProvider('three.cube', {
 
 aiditor.inspector.select({ type: 'three.cube', id: 'cube', title: 'Cube' })
 ```
+
+`position` and `size` are `struct` fields, so their canonical values are tuple
+arrays. `struct_def` provides the field names and order used by the UI; it does
+not turn the value into a dictionary object. See
+[schema-value-encoding.md](./schema-value-encoding.md).
 
 `inspect(targets, ctx)` returns an Inspection object:
 

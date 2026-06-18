@@ -155,6 +155,109 @@ class FakeDirHandle {
   }
 }
 
+function installFakeIndexedDB() {
+  const data = {}
+  global.indexedDB = {
+    open: function () {
+      const req = {}
+      setTimeout(function () {
+        const db = {
+          createObjectStore: function () {},
+          transaction: function () {
+            const tx = {
+              objectStore: function () {
+                return {
+                  put: function (value, key) {
+                    const out = {}
+                    setTimeout(function () {
+                      data[String(key)] = value
+                      if (out.onsuccess) out.onsuccess()
+                      if (tx.oncomplete) tx.oncomplete()
+                    }, 0)
+                    return out
+                  },
+                  get: function (key) {
+                    const out = {}
+                    setTimeout(function () {
+                      out.result = data[String(key)] || null
+                      if (out.onsuccess) out.onsuccess()
+                      if (tx.oncomplete) tx.oncomplete()
+                    }, 0)
+                    return out
+                  },
+                }
+              },
+            }
+            return tx
+          },
+          close: function () {},
+        }
+        req.result = db
+        if (req.onupgradeneeded) req.onupgradeneeded()
+        if (req.onsuccess) req.onsuccess()
+      }, 0)
+      return req
+    },
+  }
+}
+
+class PermissionDirHandle extends FakeDirHandle {
+  constructor(name, permission, requestResult) {
+    super(name)
+    this.permission = permission
+    this.requestResult = requestResult
+    this.queryCalls = []
+    this.requestCalls = []
+  }
+  async queryPermission(opts) {
+    this.queryCalls.push(opts)
+    return this.permission
+  }
+  async requestPermission(opts) {
+    this.requestCalls.push(opts)
+    this.permission = this.requestResult
+    return this.requestResult
+  }
+}
+
+installFakeIndexedDB()
+let pickerCalls = 0
+window.showDirectoryPicker = async function () {
+  pickerCalls++
+  throw new Error('restoreDirectory must not call showDirectoryPicker')
+}
+
+const rememberedGranted = new PermissionDirHandle('remembered-granted', 'granted')
+await aiditor.workspace.saveDirectoryHandle('remembered-granted', rememberedGranted)
+const restoredGranted = await aiditor.workspace.restoreDirectory('remembered-granted', { mode: 'read' })
+assert.equal(restoredGranted.rootId(), 'remembered-granted')
+assert.deepEqual(rememberedGranted.queryCalls, [{ mode: 'read' }])
+assert.equal(rememberedGranted.requestCalls.length, 0)
+
+const rememberedPromptNoRequest = new PermissionDirHandle('remembered-prompt-no-request', 'prompt', 'granted')
+await aiditor.workspace.saveDirectoryHandle('remembered-prompt-no-request', rememberedPromptNoRequest)
+assert.equal(await aiditor.workspace.restoreDirectory('remembered-prompt-no-request', { requestPermission: false }), null)
+assert.equal(rememberedPromptNoRequest.requestCalls.length, 0)
+
+const rememberedPromptGranted = new PermissionDirHandle('remembered-prompt-granted', 'prompt', 'granted')
+await aiditor.workspace.saveDirectoryHandle('remembered-prompt-granted', rememberedPromptGranted)
+const restoredPromptGranted = await aiditor.workspace.restoreDirectory('remembered-prompt-granted', { mode: 'readwrite', requestPermission: true })
+assert.equal(restoredPromptGranted.rootId(), 'remembered-prompt-granted')
+assert.deepEqual(rememberedPromptGranted.queryCalls, [{ mode: 'readwrite' }])
+assert.deepEqual(rememberedPromptGranted.requestCalls, [{ mode: 'readwrite' }])
+
+const rememberedPromptDenied = new PermissionDirHandle('remembered-prompt-denied', 'prompt', 'denied')
+await aiditor.workspace.saveDirectoryHandle('remembered-prompt-denied', rememberedPromptDenied)
+assert.equal(await aiditor.workspace.restoreDirectory('remembered-prompt-denied', { requestPermission: true }), null)
+assert.deepEqual(rememberedPromptDenied.requestCalls, [{ mode: 'readwrite' }])
+
+const rememberedDenied = new PermissionDirHandle('remembered-denied', 'denied', 'granted')
+await aiditor.workspace.saveDirectoryHandle('remembered-denied', rememberedDenied)
+assert.equal(await aiditor.workspace.restoreDirectory('remembered-denied', { requestPermission: true }), null)
+assert.equal(rememberedDenied.requestCalls.length, 0)
+assert.equal(await aiditor.workspace.restoreDirectory('missing-remembered-directory', { requestPermission: true }), null)
+assert.equal(pickerCalls, 0)
+
 const root = new FakeDirHandle('root')
 const src = await root.getDirectoryHandle('src', { create: true })
 const nested = await root.getDirectoryHandle('nested', { create: true })

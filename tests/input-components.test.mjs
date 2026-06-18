@@ -189,6 +189,14 @@ ui.icon = function (opts) {
 ui.iconButton = function (opts) {
   const el = ui.h('button', 'aiditor-ui-icon-btn', { type: 'button' })
   if (opts && opts.title) el.setAttribute('title', opts.title)
+  if (opts && opts.disabled) el.disabled = true
+  if (opts && opts.onClick) el.addEventListener('click', opts.onClick)
+  return el
+}
+ui.button = function (opts) {
+  const el = ui.h('button', 'aiditor-ui-btn', { type: 'button' })
+  if (opts && opts.text) el.textContent = opts.text
+  if (opts && opts.disabled) el.disabled = true
   if (opts && opts.onClick) el.addEventListener('click', opts.onClick)
   return el
 }
@@ -223,9 +231,10 @@ for (const file of [
   'src/ui/form/colorInput.js',
   'src/ui/form/vectorInput.js',
   'src/ui/form/typeconfig.js',
-  'src/ui/form/editorFor.js',
   'src/ui/form/structInput.js',
   'src/ui/base/actionBar.js',
+  'src/ui/form/dictInput.js',
+  'src/ui/form/editorFor.js',
   'src/ui/container/section.js',
   'src/ui/form/propertyForm.js',
   'src/ui/form/propertyList.js',
@@ -282,13 +291,13 @@ function key(el, name, extra) {
   }, { replace: true })
   const targets = aiditor.signal([{
     name: 'Node',
-    transform: {
-      position: [0, 0, 0],
-      nested: {
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
-      },
-    },
+    transform: [
+      [0, 0, 0],
+      [
+        [0, 0, 0],
+        [1, 1, 1],
+      ],
+    ],
   }])
   const form = ui.propertyForm({
     targets,
@@ -498,6 +507,189 @@ function key(el, name, extra) {
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-visible').length, 1)
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-hidden').length, 1)
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-sr-only').length, 1)
+}
+
+{
+  assert.deepEqual(ui.resolveType('struct').default, [])
+}
+
+{
+  assert.deepEqual(ui.resolveType('dict').default, {})
+}
+
+{
+  const value = aiditor.signal(['old-id', 'old-num'])
+  const writes = []
+  const el = ui.editorFor({
+    type: 'struct',
+    struct_def: {
+      id: 'string',
+      num: 'string',
+    },
+  }, value, function (next) { writes.push(next); value.set(next) })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, 'old-id')
+  assert.equal(inputs[1].value, 'old-num')
+  inputs[0].value = 'new-id'
+  inputs[0].dispatch('input', { target: inputs[0] })
+  assert.deepEqual(writes.at(-1), ['new-id', 'old-num'])
+  assert.deepEqual(value.peek(), ['new-id', 'old-num'])
+}
+
+{
+  const value = aiditor.signal(['x'])
+  const el = ui.editorFor({
+    type: 'struct',
+    struct_def: {
+      x: { type: 'string', default: 'dx' },
+      y: { type: 'string', default: 'dy' },
+      z: { type: 'string', default: 'dz' },
+    },
+  }, value, function (next) { value.set(next) })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, 'x')
+  assert.equal(inputs[1].value, 'dy')
+  assert.equal(inputs[2].value, 'dz')
+  inputs[2].value = 'zz'
+  inputs[2].dispatch('input', { target: inputs[2] })
+  assert.deepEqual(value.peek(), ['x', 'dy', 'zz'])
+}
+
+{
+  const value = aiditor.signal([['a', 'b'], 'enabled'])
+  const el = ui.editorFor({
+    type: 'struct',
+    struct_def: {
+      inner: {
+        type: 'struct',
+        struct_def: {
+          left: 'string',
+          right: 'string',
+        },
+      },
+      state: 'string',
+    },
+  }, value, function (next) { value.set(next) })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, 'a')
+  assert.equal(inputs[1].value, 'b')
+  assert.equal(inputs[2].value, 'enabled')
+  inputs[1].value = 'bb'
+  inputs[1].dispatch('input', { target: inputs[1] })
+  assert.deepEqual(value.peek(), [['a', 'bb'], 'enabled'])
+}
+
+{
+  const value = aiditor.signal({ id: 'object-id', num: 'object-num' })
+  const el = ui.editorFor({
+    type: 'struct',
+    struct_def: {
+      id: 'string',
+      num: 'string',
+    },
+  }, value, function (next) { value.set(next) })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, '')
+  assert.equal(inputs[1].value, '')
+  inputs[1].value = 'tuple-num'
+  inputs[1].dispatch('input', { target: inputs[1] })
+  assert.deepEqual(value.peek(), ['', 'tuple-num'])
+}
+
+{
+  const value = aiditor.signal({ health: '100', speed: '4' })
+  const el = ui.dictInput({
+    value,
+    valueType: 'string',
+  })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, 'health')
+  assert.equal(inputs[1].value, '100')
+  assert.equal(inputs[2].value, 'speed')
+  assert.equal(inputs[3].value, '4')
+  inputs[1].value = '120'
+  inputs[1].dispatch('input', { target: inputs[1] })
+  assert.deepEqual(value.peek(), { health: '120', speed: '4' })
+}
+
+{
+  const value = aiditor.derived(function () { return { health: '100' } })
+  const changes = []
+  const el = ui.dictInput({
+    value,
+    valueType: 'string',
+    onValueChange: function (key, next) { changes.push({ key: key, next: next }) },
+  })
+  const input = el.querySelectorAll('input')[1]
+  input.value = '130'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(changes, [{ key: 'health', next: '130' }])
+}
+
+{
+  const value = aiditor.signal({ health: '100' })
+  const el = ui.dictInput({
+    value,
+    renderValue: function (sig, write) { return ui.input({ value: sig, onChange: write }) },
+    createKey: function () { return 'speed' },
+    createValue: function () { return '4' },
+  })
+  el.querySelector('.aiditor-ui-dict-input-add').click()
+  assert.deepEqual(value.peek(), { health: '100', speed: '4' })
+  const speedRow = el.querySelectorAll('.aiditor-ui-dict-input-row')[1]
+  const inputs = el.querySelectorAll('input')
+  inputs[2].value = 'hp'
+  inputs[2].blur()
+  assert.deepEqual(value.peek(), { health: '100', hp: '4' })
+  assert.equal(el.querySelectorAll('.aiditor-ui-dict-input-row')[1], speedRow)
+  el.querySelectorAll('.aiditor-ui-action-btn')[0].click()
+  assert.deepEqual(value.peek(), { hp: '4' })
+}
+
+{
+  const value = aiditor.signal({ health: '100', speed: '4' })
+  const el = ui.dictInput({
+    value,
+    renderValue: function (sig, write) { return ui.input({ value: sig, onChange: write }) },
+  })
+  const row = el.querySelector('.aiditor-ui-dict-input-row')
+  const keyInput = el.querySelector('input')
+  keyInput.value = 'speed'
+  keyInput.blur()
+  assert.deepEqual(value.peek(), { health: '100', speed: '4' })
+  assert.equal(row.classList.contains('has-error'), true)
+}
+
+{
+  const value = aiditor.signal({
+    apple: ['101', '0.8'],
+    pear: ['102', '0.6'],
+  })
+  const el = ui.editorFor({
+    type: 'dict',
+    type_agv: {
+      value_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          weight: 'string',
+        },
+      },
+    },
+  }, value, function (next) { value.set(next) })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, 'apple')
+  assert.equal(inputs[1].value, '101')
+  assert.equal(inputs[2].value, '0.8')
+  assert.equal(inputs[3].value, 'pear')
+  assert.equal(inputs[4].value, '102')
+  assert.equal(inputs[5].value, '0.6')
+  inputs[5].value = '0.7'
+  inputs[5].dispatch('input', { target: inputs[5] })
+  assert.deepEqual(value.peek(), {
+    apple: ['101', '0.8'],
+    pear: ['102', '0.7'],
+  })
 }
 
 {

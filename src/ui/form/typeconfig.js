@@ -21,7 +21,7 @@
 // Data shapes:
 //   TypeDef = {
 //     name:        string,        // human-readable
-//     base_type:   'int'|'float'|'string'|'struct'|'array'|'var',
+//     base_type:   'int'|'float'|'string'|'struct'|'array'|'dict'|'var',
 //     type_render: string,        // kind key -> a registered renderer
 //     default:     any,
 //     mem?:        string,        // tooltip / description
@@ -46,9 +46,10 @@
     'int':          { name: 'Integer', base_type: 'int',    type_render: 'input_int',    default: 0,    mem: 'Standard integer', type_agv: { radix: 'dec' }, support_render: ['input_int','enum','range','toggle','color','id','ref_id'] },
     'float':        { name: 'Float',   base_type: 'float',  type_render: 'input_float',  default: 0.0,  mem: 'Standard floating-point number', type_agv: { decimal_places: 2, percent: false }, support_render: ['input_float','range'] },
     'string':       { name: 'String',  base_type: 'string', type_render: 'input_string', default: '',   mem: 'Standard text', support_render: ['input_string','textarea','enum','img','snd','date'] },
-    'struct':       { name: 'Struct',  base_type: 'struct', type_render: 'struct',       default: {},   mem: 'Composite record', support_render: ['struct'] },
+    'struct':       { name: 'Struct',  base_type: 'struct', type_render: 'struct',       default: [],   mem: 'Composite tuple', support_render: ['struct'] },
     'array':        { name: 'Array',   base_type: 'array',  type_render: 'array',        default: [],   mem: 'Ordered list', support_render: ['array','array_editor'] },
-    'var':          { name: 'Any',     base_type: 'var',    type_render: 'input_string', default: null, mem: 'Auto-typed variable', support_render: ['input_string','textarea','input_int','input_float','range','enum','toggle','color','date','img','snd','id','ref_id','struct','array','array_editor'] },
+    'dict':         { name: 'Dictionary', base_type: 'dict', type_render: 'dict',         default: {},   mem: 'Dynamic key-value dictionary', type_agv: { value_type: 'string' }, support_render: ['dict'] },
+    'var':          { name: 'Any',     base_type: 'var',    type_render: 'input_string', default: null, mem: 'Auto-typed variable', support_render: ['input_string','textarea','input_int','input_float','range','enum','toggle','color','date','img','snd','id','ref_id','struct','array','array_editor','dict'] },
 
     'enum_int':     { name: 'Enum (int)',    base_type: 'int',    type_render: 'enum',    default: 0,  mem: 'Integer enumeration',  type_agv: { options: { '0': 'Option 1', '1': 'Option 2' } } },
     'enum_string':  { name: 'Enum (string)', base_type: 'string', type_render: 'enum',    default: '', mem: 'String enumeration',   type_agv: { options: {} } },

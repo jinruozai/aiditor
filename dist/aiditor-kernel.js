@@ -3550,6 +3550,13 @@
     return handle.queryPermission({ mode: mode || 'readwrite' })
   }
 
+  async function restorePermission(handle, mode, requestPermission) {
+    const permission = await permissionState(handle, mode)
+    if (permission === 'granted') return true
+    if (permission !== 'prompt' || !requestPermission || !handle.requestPermission) return false
+    return await handle.requestPermission({ mode: mode || 'readwrite' }) === 'granted'
+  }
+
   async function openDirectory(opts) {
     if (!window.showDirectoryPicker) throw new Error('aiditor.workspace.openDirectory: File System Access API is not available')
     opts = opts || {}
@@ -3566,8 +3573,8 @@
     const handle = await loadDirectoryHandle(key)
     if (!handle) return null
     const mode = opts.mode || 'readwrite'
-    const permission = await permissionState(handle, mode)
-    if (permission !== 'granted') return null
+    const granted = await restorePermission(handle, mode, opts.requestPermission === true)
+    if (!granted) return null
     return fromHandle(handle)
   }
 

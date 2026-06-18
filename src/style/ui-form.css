@@ -1401,6 +1401,7 @@
    wraps a top-level structInput) overrides those base styles below to get
    the wider "inspector" layout. */
 .aiditor-ui-struct-input,
+.aiditor-ui-dict-input,
 .aiditor-ui-array-input,
 .aiditor-ui-array-editor {
   border: 1px solid var(--aiditor-border);
@@ -1409,6 +1410,7 @@
   background: color-mix(in srgb, var(--aiditor-bg-1) 84%, var(--aiditor-bg-2));
 }
 .aiditor-ui-struct-input-row,
+.aiditor-ui-dict-input-row,
 .aiditor-ui-array-input-row {
   display: grid;
   gap: var(--aiditor-space-1);
@@ -1416,11 +1418,13 @@
   padding: 2px 0;
 }
 .aiditor-ui-struct-input-row { grid-template-columns: 56px minmax(0, 1fr); }
+.aiditor-ui-dict-input-row { grid-template-columns: 56px minmax(0, 1fr) auto; }
 .aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
   grid-template-columns: 56px minmax(0, 1fr) auto;
 }
 .aiditor-ui-array-input-row  { grid-template-columns: auto minmax(0, 1fr) auto; }
 .aiditor-ui-struct-input-label,
+.aiditor-ui-dict-input-key,
 .aiditor-ui-array-input-index {
   font: var(--aiditor-fs-sm) var(--aiditor-font-mono);
   color: var(--aiditor-fg-3);
@@ -1429,8 +1433,10 @@
   white-space: nowrap;
 }
 .aiditor-ui-struct-input-cell,
+.aiditor-ui-dict-input-cell,
 .aiditor-ui-array-input-cell { min-width: 0; }
-.aiditor-ui-struct-input-actions {
+.aiditor-ui-struct-input-actions,
+.aiditor-ui-dict-input-actions {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -1440,7 +1446,67 @@
   display: none;
 }
 .aiditor-ui-struct-input-cell > *,
+.aiditor-ui-dict-input-cell > *,
 .aiditor-ui-array-input-cell > * { width: 100%; max-width: 100%; box-sizing: border-box; }
+.aiditor-ui-dict-input-row-actions-empty > .aiditor-ui-dict-input-actions { display: none; }
+.aiditor-ui-dict-input-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.aiditor-ui-dict-input-key {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.aiditor-ui-dict-input-key-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--aiditor-size-h-md);
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--aiditor-r-1);
+  outline: 0;
+  color: var(--aiditor-fg-2);
+  font: inherit;
+  padding: 0 var(--aiditor-space-1);
+}
+.aiditor-ui-dict-input-key-input:not(:read-only):hover {
+  border-color: var(--aiditor-border-hover);
+  background: var(--aiditor-bg-2);
+}
+.aiditor-ui-dict-input-key-input:not(:read-only):focus {
+  border-color: var(--aiditor-accent);
+  background: var(--aiditor-bg-2);
+  color: var(--aiditor-fg-0);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aiditor-accent) 20%, transparent);
+}
+.aiditor-ui-dict-input-error {
+  display: none;
+  margin-top: 1px;
+  color: var(--aiditor-danger);
+  font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
+  white-space: normal;
+}
+.aiditor-ui-dict-input-row.has-error .aiditor-ui-dict-input-error { display: block; }
+.aiditor-ui-dict-input-row.has-error .aiditor-ui-dict-input-key-input {
+  border-color: var(--aiditor-danger);
+  color: var(--aiditor-danger);
+}
+.aiditor-ui-dict-input-empty {
+  padding: var(--aiditor-space-2);
+  color: var(--aiditor-fg-3);
+  font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
+  text-align: center;
+}
+.aiditor-ui-dict-input-add {
+  align-self: stretch;
+  width: 100%;
+  margin-top: var(--aiditor-space-1);
+  background: var(--aiditor-bg-2);
+  border-color: var(--aiditor-border-input);
+}
 .aiditor-ui-struct-input-row-label-hidden,
 .aiditor-ui-struct-input-row-label-sr-only {
   grid-template-columns: minmax(0, 1fr);

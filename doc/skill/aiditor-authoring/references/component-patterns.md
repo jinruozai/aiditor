@@ -110,6 +110,12 @@ target type, call `aiditor.inspector.select(targets)` from selection surfaces,
 and mount the built-in `inspector` component.
 
 ```js
+const cubeState = {
+  position: [0, 0, 0],
+  size: [1, 1, 1],
+  color: '#ff6a00',
+}
+
 aiditor.inspector.registerProvider('three.cube', {
   inspect: function (targets, ctx) {
     return {
@@ -131,6 +137,9 @@ aiditor.inspector.registerProvider('three.cube', {
 
 aiditor.inspector.select({ type: 'three.cube', id: 'cube', title: 'Cube' })
 ```
+
+`struct` values are tuple arrays ordered by `struct_def`; do not author them as
+dictionary objects.
 
 Inspector multi-selection is ordered. The first target is primary and supplies
 displayed values. A field is editable only when every selected target has that

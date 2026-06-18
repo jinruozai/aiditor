@@ -37,6 +37,31 @@ aiditor.workspace.fromBridge(root)
 aiditor.workspace.memory(files)
 ```
 
+`restoreDirectory(key, options)` restores a remembered File System Access
+directory handle. It never calls `showDirectoryPicker` and never exposes the raw
+`FileSystemDirectoryHandle`.
+
+```js
+const ws = await aiditor.workspace.restoreDirectory('recent-project', {
+  mode: 'readwrite',
+  requestPermission: true,
+})
+```
+
+Restore behavior:
+
+- missing remembered handle returns `null`;
+- `queryPermission({ mode }) === "granted"` returns a workspace adapter;
+- `queryPermission({ mode }) === "prompt"` returns `null` by default;
+- `prompt` plus `requestPermission:true` calls
+  `handle.requestPermission({ mode })` and returns an adapter only when the
+  browser grants access;
+- `denied` returns `null`.
+
+`requestPermission` defaults to `false` so existing callers can probe recent
+entries without opening a browser permission prompt. Hosts should pass
+`requestPermission:true` only from an explicit user action such as Open Recent.
+
 Utility helpers in the workspace module may normalize relative paths, hash text
 or bytes, derive parent paths, and build safe previews. Those helpers support
 file tools and adapters; they do not create a project concept.

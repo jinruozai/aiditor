@@ -443,11 +443,26 @@ aiditor.ui.propertyList(options)
 can extend it, but property editing should remain a UI helper, not a separate
 data model.
 
+Schema kinds have canonical value shapes. `array` is an ordered JavaScript
+array. `struct` is a fixed JavaScript array tuple whose positions are defined by
+`Object.keys(normalizedStructDef)`. `dict` is a dynamic key-value dictionary
+whose keys are data. The built-in `struct` renderer may project tuple values
+into a keyed UI record while editing, but writes must return tuple values.
+Dictionary editing belongs to the `dict` renderer and `dictInput`. See
+[schema-value-encoding.md](./schema-value-encoding.md) and
+[dict-input.md](./dict-input.md).
+
 Array fields keep the classic `array` renderer by default. Hosts that need row
 selection, active item, duplicate, or reorder can opt into the `array_editor`
 renderer through `type_render: "array_editor"` and renderer args such as
 `elem_type`, `selectionMode`, `indexMode`, `density`, `actions`, and
 `capabilities`.
+
+Dictionary fields use `type: "dict"` and `type_agv.value_type`. They render as
+dynamic key/value rows: the key cell follows `structInput`'s compact row visual
+rhythm, while the value cell is produced by `editorFor(value_type)`. `dictInput`
+owns add/delete/rename key interactions and stable rows for unchanged keys; it
+does not reuse `structInput`'s fixed-field data model.
 
 Composite fields can explicitly hide their row label with `label: false` or
 `labelMode: "hidden"`. This is useful when a named Inspector section contains a

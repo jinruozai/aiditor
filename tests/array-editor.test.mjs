@@ -28,6 +28,7 @@ class FakeEl {
     this.children = []
     this.parentNode = null
     this.attributes = {}
+    this.dataset = {}
     this.events = {}
     this.classList = new ClassList(this)
     this._className = ''
@@ -188,6 +189,7 @@ for (const file of [
   'src/ui/form/arrayInput.js',
   'src/ui/form/typeconfig.js',
   'src/ui/form/editorFor.js',
+  'src/ui/form/structInput.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -418,6 +420,36 @@ function pointer(el, type, extra) {
   const ev = key(el, 'ArrowDown', { altKey: true })
   assert.equal(ev.defaultPrevented, false)
   assert.deepEqual(value.peek(), ['a', 'b'])
+}
+
+{
+  const value = aiditor.signal([
+    ['a', '1'],
+    ['b', '2'],
+  ])
+  const el = ui.editorFor({
+    type: 'array',
+    type_agv: {
+      elem_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          num: 'string',
+        },
+      },
+    },
+  }, value, function (next) { value.set(next) })
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs[0].value, 'a')
+  assert.equal(inputs[1].value, '1')
+  assert.equal(inputs[2].value, 'b')
+  assert.equal(inputs[3].value, '2')
+  inputs[3].value = '3'
+  inputs[3].dispatch('input', { target: inputs[3] })
+  assert.deepEqual(value.peek(), [
+    ['a', '1'],
+    ['b', '3'],
+  ])
 }
 
 console.log('array-editor tests passed')

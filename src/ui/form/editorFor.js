@@ -182,19 +182,32 @@
       const labeled = (subFd && subFd.name && subFd.name !== subFd.base_type) ? subFd.name : fname
       return {
         key:    fname,
+        fieldDef: subFd,
         label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
         labelMode: rawObj && rawObj.labelMode,
         actions: rawObj && rawObj.actions,
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
       }
     })
-    return ui.structInput({ value: a.sig, fields: fields, onChange: a.write, ctx: a.ctx })
+    const projection = aiditor.derived(function () {
+      return tupleToRecord(a.sig(), fields)
+    })
+    const el = ui.structInput({
+      value: projection,
+      fields: fields,
+      onChange: function (_nextRecord, key, nv) {
+        const next = writeTupleMember(asPlain(a.sig), fields, key, nv)
+        if (next) a.write(next)
+      },
+      ctx: a.ctx,
+    })
+    ui.collect(el, projection.dispose)
+    return el
   })
 
   ui.registerRenderer('array', function (a) {
     const agv      = a.fieldDef.type_agv || {}
-    const elemType = agv.elem_type || parseArrayElemType(a.fieldDef.type) || 'string'
-    const elemFd   = ui.resolveFieldDef({ type: elemType })
+    const elemFd   = resolveArrayElemFieldDef(a.fieldDef, agv)
     return ui.arrayInput({
       value:        a.sig,
       editor:       function (sig, write, ctx) { return editorFor(elemFd, sig, write, ctx) },
@@ -210,8 +223,7 @@
 
   ui.registerRenderer('array_editor', function (a) {
     const agv      = a.fieldDef.type_agv || {}
-    const elemType = agv.elem_type || parseArrayElemType(a.fieldDef.type) || 'string'
-    const elemFd   = ui.resolveFieldDef({ type: elemType })
+    const elemFd   = resolveArrayElemFieldDef(a.fieldDef, agv)
     const hasKey   = typeof agv.getKey === 'function'
     return ui.arrayEditor({
       items:         a.sig,
@@ -228,6 +240,20 @@
         return editorFor(elemFd, rowCtx.value, rowCtx.writeItem, a.ctx)
       },
       emptyText: agv.emptyText || 'No items',
+    })
+  })
+
+  ui.registerRenderer('dict', function (a) {
+    const agv = a.fieldDef.type_agv || {}
+    const valueFd = resolveValueFieldDef(agv.value_type || 'string')
+    return ui.dictInput({
+      value: a.sig,
+      onChange: a.write,
+      valueType: valueFd,
+      defaultValue: cloneDefault(valueFd),
+      createValue: function () { return cloneDefault(valueFd) },
+      renderValue: function (sig, write, ctx) { return editorFor(valueFd, sig, write, ctx) },
+      ctx: a.ctx,
     })
   })
 
@@ -254,6 +280,15 @@
     return m ? m[1] : null
   }
 
+  function resolveArrayElemFieldDef(fieldDef, agv) {
+    const elem = agv.elem_type || parseArrayElemType(fieldDef.type) || 'string'
+    return resolveValueFieldDef(elem)
+  }
+
+  function resolveValueFieldDef(valueType) {
+    return ui.resolveFieldDef(typeof valueType === 'string' ? { type: valueType } : valueType)
+  }
+
   function cloneDefault(fieldDef) {
     return fieldDef && fieldDef.default !== undefined
       ? cloneItem(fieldDef.default)
@@ -263,6 +298,40 @@
   function cloneItem(item) {
     if (item == null || typeof item !== 'object') return item
     return JSON.parse(JSON.stringify(item))
+  }
+
+  function tupleToRecord(value, fields) {
+    const tuple = Array.isArray(value) ? value : []
+    const out = {}
+    for (let i = 0; i < fields.length; i++) {
+      const f = fields[i]
+      out[f.key] = i < tuple.length ? tuple[i] : cloneFieldDefault(f.fieldDef)
+    }
+    return out
+  }
+
+  function writeTupleMember(value, fields, key, nv) {
+    const tuple = Array.isArray(value) ? value : []
+    let target = -1
+    for (let i = 0; i < fields.length; i++) {
+      if (fields[i].key === key) { target = i; break }
+    }
+    if (target < 0) return null
+    const current = target < tuple.length ? tuple[target] : cloneFieldDefault(fields[target].fieldDef)
+    if (Object.is(current, nv)) return null
+    const nextLen = Math.max(tuple.length, target + 1)
+    const next = new Array(nextLen)
+    for (let i = 0; i < nextLen; i++) {
+      next[i] = i < tuple.length ? tuple[i] : cloneFieldDefault(fields[i] && fields[i].fieldDef)
+    }
+    next[target] = nv
+    return next
+  }
+
+  function cloneFieldDefault(fieldDef) {
+    return fieldDef && fieldDef.default !== undefined
+      ? cloneItem(fieldDef.default)
+      : undefined
   }
 
   // Accept two struct_def shapes for convenience:

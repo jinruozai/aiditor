@@ -1,12 +1,12 @@
-// aiditor.ui.structInput — generic fixed-shape object editor.
+// aiditor.ui.structInput — generic fixed-shape record editor.
 //
 // Renders one row per field; each row = [label · editor · actions]. The editor for each
 // slot is produced by a caller-provided factory — this component does not
-// know about type_config or FieldDef. Use it anywhere you need a schema-less
-// "edit a record" UI.
+// know about type_config, FieldDef, or canonical value encoding. Use it
+// anywhere you need a schema-less keyed editing projection.
 //
 // opts:
-//   value:    signal<object>                               required
+//   value:    signal<object>                               required; keyed UI projection
 //   fields:   [{ key, label?, labelMode?, tooltip?, editor, actions?, actionCtx? }] required
 //               label:false or labelMode:'hidden' hides the visual row label
 //               labelMode:'sr-only' keeps an accessible label without a column
