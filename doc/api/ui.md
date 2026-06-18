@@ -40,6 +40,7 @@ aiditor.ui.propertyForm(opts)
 | `opts.groups` | `object\|Signal<object>` | Optional grouped section metadata, including labels and UiAction arrays. |
 | `opts.groupActions` | `Function` | Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions. |
 | `opts.groupActionCtx` | `Function` | Optional mapper for the context passed to group actions. |
+| `opts.fieldActions` | `Function` | Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions. |
 | `opts.requireAllTargets` | `boolean` | When true, disable fields missing from any target. |
 | `opts.canEdit` | `Function` | Optional field gate: (field, targets, rawField) => boolean. |
 
@@ -55,3 +56,25 @@ var form = aiditor.ui.propertyForm({
 Related: `aiditor.inspector.registerProvider`
 
 Source: `src/ui/form/propertyForm.js`
+
+## `aiditor.ui.propertyList`
+
+Render a stable keyed list of expandable schema-driven property blocks.
+
+```js
+aiditor.ui.propertyList(opts)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `opts` | `object` | Property list options. |
+| `opts.items` | `Array\|Signal<Array>` | Item array or signal. Refreshes reconcile by stable key. |
+| `opts.getKey` | `Function` | Stable item id resolver: (item, index) => id. |
+| `opts.schema` | `Function` | Schema resolver, object, or signal for each item body. |
+| `opts.onFieldChange` | `Function` | Optional field persistence hook: (itemId, field, value, meta) => void. |
+
+Returns: `HTMLElement` Property list root element.
+
+Related: `aiditor.ui.propertyForm`, `aiditor.ui.section`, `aiditor.ui.actionBar`
+
+Source: `src/ui/form/propertyList.js`

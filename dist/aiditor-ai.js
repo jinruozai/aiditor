@@ -363,11 +363,17 @@
   let persistenceNamespace = defaultPersistenceNamespace()
   let persistenceKey = persistenceKeyFor(persistenceNamespace)
   let persistenceEnabled = true
+  let persistenceDisabledForSession = false
+  let persistenceWarningReported = false
+  let persistenceMaxBytes = 2 * 1024 * 1024
+  let persistenceMaxMessagesPerAgent = 80
+  let persistenceToolResultPolicy = 'compact'
   let saveTimer = null
   const MAX_SNAPSHOT_CONTENT_CHARS = 1000000
   const MAX_SNAPSHOT_REASONING_CHARS = 65536
   const MAX_STORED_STATE_CHARS = 5000000
   const MAX_SNAPSHOT_TOOL_STRING_CHARS = 12000
+  const PERSISTENCE_TOOL_POLICIES = { compact: true, 'metadata-only': true, none: true }
 
   function now() { return Date.now() }
 
@@ -965,6 +971,11 @@
     lastModelSelection = { connection: null, model: null }
   }
 
+  function resetPersistenceFailureState() {
+    persistenceDisabledForSession = false
+    persistenceWarningReported = false
+  }
+
   function snapshot() {
     return {
       version: 2,
@@ -1056,6 +1067,220 @@
     }
   }
 
+  function storageBytes(text) {
+    return String(text || '').length * 2
+  }
+
+  function serializeSnapshot(data) {
+    return JSON.stringify(data)
+  }
+
+  function boundedNumber(value, fallback, min) {
+    const n = Math.floor(Number(value))
+    return isFinite(n) && n >= min ? n : fallback
+  }
+
+  function compactString(value, max) {
+    if (typeof value !== 'string' || value.length <= max) return value
+    return value.slice(0, max) + '\n\n[truncated for persistence]'
+  }
+
+  function compactPersistenceValue(value, depth, stringMax, arrayMax, objectMax, seen) {
+    if (value == null) return value
+    if (typeof value === 'string') return compactString(value, stringMax)
+    if (typeof value === 'number' || typeof value === 'boolean') return value
+    if (typeof value === 'bigint') return String(value)
+    if (typeof value === 'function') return '[Function]'
+    if (typeof value !== 'object') return String(value)
+    seen = seen || []
+    for (let i = 0; i < seen.length; i++) if (seen[i] === value) return '[Circular]'
+    if (depth <= 0) return compactString(stringifySnapshotValue(value), stringMax)
+    seen.push(value)
+    if (Array.isArray(value)) {
+      const out = []
+      const n = Math.min(value.length, arrayMax)
+      for (let j = 0; j < n; j++) out.push(compactPersistenceValue(value[j], depth - 1, stringMax, arrayMax, objectMax, seen))
+      if (value.length > n) out.push('[+' + (value.length - n) + ' items truncated]')
+      seen.pop()
+      return out
+    }
+    const out = {}
+    const keys = Object.keys(value).sort()
+    const n = Math.min(keys.length, objectMax)
+    for (let k = 0; k < n; k++) out[keys[k]] = compactPersistenceValue(value[keys[k]], depth - 1, stringMax, arrayMax, objectMax, seen)
+    if (keys.length > n) out.__truncatedKeys = keys.length - n
+    seen.pop()
+    return out
+  }
+
+  function compactRefs(list, emergency) {
+    const out = []
+    const input = Array.isArray(list) ? list : []
+    const max = emergency ? 16 : 64
+    for (let i = 0; i < input.length && i < max; i++) {
+      const item = input[i]
+      if (typeof item === 'string') out.push(item)
+      else if (item && typeof item === 'object') {
+        out.push({
+          id: item.id || item.refId || null,
+          refId: item.refId || item.id || null,
+          kind: item.kind || item.type || null,
+          uri: compactString(item.uri || item.url || '', emergency ? 160 : 512),
+          title: compactString(item.title || item.label || '', emergency ? 80 : 240),
+        })
+      }
+    }
+    if (input.length > max) out.push({ omitted: input.length - max })
+    return out
+  }
+
+  function compactAttachment(item, emergency) {
+    return {
+      id: item.id,
+      kind: item.kind,
+      uri: compactString(item.uri, emergency ? 240 : 1024),
+      title: compactString(item.title, emergency ? 120 : 512),
+      summary: compactString(item.summary, emergency ? 240 : 1024),
+      resolver: item.resolver,
+      meta: compactPersistenceValue(item.meta || {}, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 24, emergency ? 12 : 32),
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }
+  }
+
+  function compactMessage(message, emergency) {
+    const out = Object.assign({}, message)
+    out.content = compactString(out.content, emergency ? 1200 : 12000)
+    out.reasoning_content = compactString(out.reasoning_content, emergency ? 400 : 2000)
+    out.contextRefs = compactRefs(out.contextRefs, emergency)
+    out.attachments = compactRefs(out.attachments, emergency)
+    out.meta = compactPersistenceValue(out.meta, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32)
+    out.usage = compactPersistenceValue(out.usage, 1, 200, 8, 16)
+    out.stats = compactPersistenceValue(out.stats, 1, 200, 8, 16)
+    if (out.toolCalls && out.toolCalls.length) out.toolCalls = out.toolCalls.map(function (call) { return compactPersistenceToolCall(call, emergency) })
+    return out
+  }
+
+  function compactPersistenceToolCall(call, emergency) {
+    const out = {
+      id: call.id,
+      providerCallId: call.providerCallId,
+      toolId: call.toolId,
+      name: call.name,
+      status: call.status,
+      actor: call.actor,
+      createdAt: call.createdAt,
+      updatedAt: call.updatedAt,
+      error: compactString(call.error, emergency ? 500 : 2000),
+    }
+    if (persistenceToolResultPolicy !== 'none') {
+      out.args = compactPersistenceValue(call.args || {}, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
+    }
+    if (persistenceToolResultPolicy === 'compact') {
+      out.preview = compactPersistenceValue(call.preview, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
+      out.result = compactPersistenceValue(call.result, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
+      out.applyResult = compactPersistenceValue(call.applyResult, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
+    }
+    return out
+  }
+
+  function compactAgent(agent, emergency) {
+    const messages = agent.messages || []
+    const maxMessages = Math.max(1, emergency ? Math.min(persistenceMaxMessagesPerAgent, 12) : persistenceMaxMessagesPerAgent)
+    const omittedMessages = Math.max(0, messages.length - maxMessages)
+    const meta = compactPersistenceValue(agent.meta || {}, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32) || {}
+    if (omittedMessages) {
+      meta.persistence = Object.assign({}, meta.persistence || {}, {
+        compacted: true,
+        omittedMessages: omittedMessages,
+      })
+    }
+    return Object.assign({}, agent, {
+      systemPrompt: compactString(agent.systemPrompt, emergency ? 2000 : 16000),
+      statusText: compactString(agent.statusText, emergency ? 200 : 800),
+      messages: messages.slice(Math.max(0, messages.length - maxMessages)).map(function (message) { return compactMessage(message, emergency) }),
+      compactions: (agent.compactions || []).slice(emergency ? -4 : -16).map(function (item) {
+        return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32)
+      }),
+      inbox: (agent.inbox || []).slice(emergency ? -8 : -32).map(function (item) {
+        return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24)
+      }),
+      quests: (agent.quests || []).slice(emergency ? -8 : -32).map(function (item) {
+        return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24)
+      }),
+      queue: (agent.queue || []).slice(emergency ? -4 : -16).map(function (item) {
+        return compactPersistenceValue(item, 1, 160, 8, 16)
+      }),
+      contextRefs: compactRefs(agent.contextRefs, emergency),
+      memory: compactPersistenceValue(agent.memory || {}, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32),
+      state: compactPersistenceValue(agent.state || {}, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32),
+      meta: meta,
+    })
+  }
+
+  function compactPersistenceSnapshot(data, emergency) {
+    return {
+      version: 2,
+      agents: (data.agents || []).map(function (agent) { return compactAgent(agent, emergency) }),
+      attachments: (data.attachments || []).map(function (item) { return compactAttachment(item, emergency) }),
+      preferences: data.preferences || {},
+      activeAgentId: data.activeAgentId || null,
+      persistence: { compacted: true, emergency: !!emergency },
+    }
+  }
+
+  function preparePersistenceSnapshot(data, emergency) {
+    let out = emergency ? compactPersistenceSnapshot(data, true) : data
+    let usedEmergency = !!emergency
+    let text = null
+    try {
+      text = serializeSnapshot(out)
+    } catch (err) {
+      if (emergency) throw err
+      out = compactPersistenceSnapshot(data, true)
+      usedEmergency = true
+      text = serializeSnapshot(out)
+    }
+    if (!usedEmergency && storageBytes(text) > persistenceMaxBytes) {
+      out = compactPersistenceSnapshot(data, false)
+      text = serializeSnapshot(out)
+    }
+    if (!usedEmergency && storageBytes(text) > persistenceMaxBytes) {
+      out = compactPersistenceSnapshot(data, true)
+      usedEmergency = true
+      text = serializeSnapshot(out)
+    }
+    return { data: out, text: text, bytes: storageBytes(text), fits: storageBytes(text) <= persistenceMaxBytes }
+  }
+
+  function isQuotaError(err) {
+    const name = err && err.name || ''
+    const message = String(err && err.message || '')
+    return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      err && (err.code === 22 || err.code === 1014) || /quota/i.test(message)
+  }
+
+  function reportPersistenceFailure(reason, err, info) {
+    if (persistenceWarningReported) return
+    persistenceWarningReported = true
+    if (!aiditor.reportError) return
+    const e = new Error('AI persistence disabled for this session: ' + reason)
+    e.reason = reason
+    e.code = 'ai_persistence_' + reason
+    e.storageKey = persistenceKey
+    e.maxBytes = persistenceMaxBytes
+    e.bytes = info && info.bytes || null
+    e.cause = err || null
+    aiditor.reportError({ scope: 'ai', storage: persistenceKey, op: 'save', reason: reason }, e)
+  }
+
+  function disablePersistenceForSession(reason, err, info) {
+    persistenceDisabledForSession = true
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = null
+    reportPersistenceFailure(reason, err, info)
+  }
+
   function normalizeRestoredRuntime(agent) {
     const transient = { running: true, queued: true, waiting_approval: true, stopped: true, failed: true }
     const messages = (agent.messages || []).map(function (message) {
@@ -1082,18 +1307,46 @@
   function save() {
     saveTimer = null
     const s = storage()
-    if (!s || !persistenceEnabled) return snapshot()
     const data = snapshot()
+    if (!s || !persistenceEnabled || persistenceDisabledForSession) return data
+    let prepared = null
     try {
-      s.setItem(persistenceKey, JSON.stringify(data))
+      prepared = preparePersistenceSnapshot(data, false)
     } catch (err) {
-      if (aiditor.reportError) aiditor.reportError({ scope: 'ai', storage: persistenceKey }, err)
+      disablePersistenceForSession('serialization_failed', err, null)
+      return data
+    }
+    if (!prepared.fits) {
+      disablePersistenceForSession('size_exceeded', null, prepared)
+      return prepared.data
+    }
+    try {
+      s.setItem(persistenceKey, prepared.text)
+      return prepared.data
+    } catch (err) {
+      let emergency = null
+      try {
+        emergency = preparePersistenceSnapshot(data, true)
+      } catch (serializeErr) {
+        disablePersistenceForSession('serialization_failed', serializeErr, prepared)
+        return prepared.data
+      }
+      if (isQuotaError(err) && emergency.fits) {
+        try {
+          s.setItem(persistenceKey, emergency.text)
+          return emergency.data
+        } catch (secondErr) {
+          disablePersistenceForSession(isQuotaError(secondErr) ? 'quota_exceeded' : 'storage_error', secondErr, emergency)
+          return emergency.data
+        }
+      }
+      disablePersistenceForSession(isQuotaError(err) ? 'quota_exceeded' : 'storage_error', err, prepared)
     }
     return data
   }
 
   function scheduleSave() {
-    if (!persistenceEnabled) return
+    if (!persistenceEnabled || persistenceDisabledForSession) return
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(save, 800)
   }
@@ -1118,7 +1371,7 @@
     if (!s) return null
     try {
       const text = s.getItem(persistenceKey)
-      if (text && text.length > MAX_STORED_STATE_CHARS) {
+      if (text && (text.length > MAX_STORED_STATE_CHARS || storageBytes(text) > persistenceMaxBytes)) {
         s.removeItem(persistenceKey)
         return null
       }
@@ -1131,6 +1384,10 @@
   function configurePersistence(opts) {
     opts = opts || {}
     const previousKey = persistenceKey
+    const previousEnabled = persistenceEnabled
+    const previousMaxBytes = persistenceMaxBytes
+    const previousMaxMessages = persistenceMaxMessagesPerAgent
+    const previousPolicy = persistenceToolResultPolicy
     if (Object.prototype.hasOwnProperty.call(opts, 'key') && opts.key) {
       persistenceKey = String(opts.key)
     } else if (Object.prototype.hasOwnProperty.call(opts, 'namespace')) {
@@ -1138,6 +1395,16 @@
       persistenceKey = persistenceKeyFor(persistenceNamespace)
     }
     if (opts.enabled != null) persistenceEnabled = opts.enabled !== false
+    if (opts.maxBytes != null) persistenceMaxBytes = boundedNumber(opts.maxBytes, persistenceMaxBytes, 4096)
+    if (opts.maxMessagesPerAgent != null) persistenceMaxMessagesPerAgent = boundedNumber(opts.maxMessagesPerAgent, persistenceMaxMessagesPerAgent, 1)
+    if (opts.toolResultPolicy != null && PERSISTENCE_TOOL_POLICIES[opts.toolResultPolicy]) persistenceToolResultPolicy = opts.toolResultPolicy
+    if (persistenceKey !== previousKey ||
+        persistenceEnabled !== previousEnabled ||
+        persistenceMaxBytes !== previousMaxBytes ||
+        persistenceMaxMessagesPerAgent !== previousMaxMessages ||
+        persistenceToolResultPolicy !== previousPolicy) {
+      resetPersistenceFailureState()
+    }
     if (persistenceKey !== previousKey) resetRuntimeState()
     if (opts.load !== false) restore()
     return snapshot()
@@ -5737,6 +6004,11 @@
             "description": "Optional mapper for the context passed to group actions."
           },
           {
+            "type": "Function",
+            "name": "opts.fieldActions",
+            "description": "Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions."
+          },
+          {
             "type": "boolean",
             "name": "opts.requireAllTargets",
             "description": "When true, disable fields missing from any target."
@@ -5759,6 +6031,53 @@
           "aiditor.inspector.registerProvider"
         ],
         "source": "src/ui/form/propertyForm.js"
+      },
+      {
+        "id": "aiditor.ui.propertyList",
+        "group": "ui",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.ui.propertyList(opts)",
+        "summary": "Render a stable keyed list of expandable schema-driven property blocks.",
+        "params": [
+          {
+            "type": "object",
+            "name": "opts",
+            "description": "Property list options."
+          },
+          {
+            "type": "Array|Signal<Array>",
+            "name": "opts.items",
+            "description": "Item array or signal. Refreshes reconcile by stable key."
+          },
+          {
+            "type": "Function",
+            "name": "opts.getKey",
+            "description": "Stable item id resolver: (item, index) => id."
+          },
+          {
+            "type": "Function",
+            "name": "opts.schema",
+            "description": "Schema resolver, object, or signal for each item body."
+          },
+          {
+            "type": "Function",
+            "name": "opts.onFieldChange",
+            "description": "Optional field persistence hook: (itemId, field, value, meta) => void."
+          }
+        ],
+        "returns": {
+          "type": "HTMLElement",
+          "description": "Property list root element."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.ui.propertyForm",
+          "aiditor.ui.section",
+          "aiditor.ui.actionBar"
+        ],
+        "source": "src/ui/form/propertyList.js"
       }
     ]
   }

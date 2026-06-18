@@ -470,6 +470,11 @@
           "description": "Optional mapper for the context passed to group actions."
         },
         {
+          "type": "Function",
+          "name": "opts.fieldActions",
+          "description": "Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions."
+        },
+        {
           "type": "boolean",
           "name": "opts.requireAllTargets",
           "description": "When true, disable fields missing from any target."
@@ -492,6 +497,53 @@
         "aiditor.inspector.registerProvider"
       ],
       "source": "src/ui/form/propertyForm.js"
+    },
+    {
+      "id": "aiditor.ui.propertyList",
+      "group": "ui",
+      "layer": "core-ui",
+      "kind": "js-api",
+      "signature": "aiditor.ui.propertyList(opts)",
+      "summary": "Render a stable keyed list of expandable schema-driven property blocks.",
+      "params": [
+        {
+          "type": "object",
+          "name": "opts",
+          "description": "Property list options."
+        },
+        {
+          "type": "Array|Signal<Array>",
+          "name": "opts.items",
+          "description": "Item array or signal. Refreshes reconcile by stable key."
+        },
+        {
+          "type": "Function",
+          "name": "opts.getKey",
+          "description": "Stable item id resolver: (item, index) => id."
+        },
+        {
+          "type": "Function",
+          "name": "opts.schema",
+          "description": "Schema resolver, object, or signal for each item body."
+        },
+        {
+          "type": "Function",
+          "name": "opts.onFieldChange",
+          "description": "Optional field persistence hook: (itemId, field, value, meta) => void."
+        }
+      ],
+      "returns": {
+        "type": "HTMLElement",
+        "description": "Property list root element."
+      },
+      "examples": [],
+      "wrong": [],
+      "related": [
+        "aiditor.ui.propertyForm",
+        "aiditor.ui.section",
+        "aiditor.ui.actionBar"
+      ],
+      "source": "src/ui/form/propertyList.js"
     }
   ]
 }

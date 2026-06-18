@@ -276,12 +276,16 @@ The UI layer includes base controls, form inputs, editor inputs, containers,
 virtualized data views, overlays, property forms, settings UI, tab/history/log
 panels, and the generic Inspector panel. It also includes reusable editor
 primitives such as `actionBar`, `section` header actions, `arrayEditor`,
-`propertyForm`, `structInput`, and `vectorInput`.
+`propertyList`, `propertyForm`, `structInput`, and `vectorInput`.
 
 `arrayEditor` owns generic list interactions such as selection, active row,
 add/delete/duplicate, and reorder feedback while callers keep item structure,
 validation, history, and persistence. `arrayInput` remains the simple
 compatibility facade used by schema forms.
+
+`propertyList` owns keyed expandable object chrome around `propertyForm`: title,
+summary, item actions, field row actions, collapsed state, and stable refresh
+without rebuilding unchanged item DOM.
 
 ### Inspector
 

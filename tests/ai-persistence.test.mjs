@@ -11,6 +11,27 @@ function storage() {
   }
 }
 
+function quotaStorage() {
+  let attempts = 0
+  return {
+    getItem: function () { return null },
+    setItem: function () {
+      attempts++
+      const err = new Error('Quota exceeded')
+      err.name = 'QuotaExceededError'
+      err.code = 22
+      throw err
+    },
+    removeItem: function () {},
+    attempts: function () { return attempts },
+  }
+}
+
+function storedBytes(store, key) {
+  const text = store.getItem(key) || ''
+  return text.length * 2
+}
+
 function loadRuntime(store, location) {
   global.window = { aiditor: {}, localStorage: store }
   if (location) global.window.location = location
@@ -139,5 +160,89 @@ assert.equal(ai.agents().length, 1)
 assert.equal(ai.agents()[0].name, 'Agent Two')
 ai.clearStoredState()
 assert.equal(window.localStorage.getItem('aiditor.ai.two'), null)
+
+{
+  const compactMemory = storage()
+  ai = loadRuntime(compactMemory)
+  ai.configurePersistence({ key: 'compact.ai', maxBytes: 18000, maxMessagesPerAgent: 2, load: false })
+  const compactAgent = ai.createAgent({ name: 'Compact Agent' })
+  for (let i = 0; i < 6; i++) {
+    ai.appendMessage(compactAgent.id, { role: i % 2 ? 'assistant' : 'user', content: 'message-' + i + ':' + 'x'.repeat(20000) })
+  }
+  const saved = ai.save()
+  const storedCompact = JSON.parse(window.localStorage.getItem('compact.ai'))
+  assert.equal(storedCompact.persistence.compacted, true)
+  assert.equal(saved.persistence.compacted, true)
+  assert.equal(storedCompact.agents[0].messages.length, 2)
+  assert.equal(storedCompact.agents[0].messages[0].content.length < 1600, true)
+  assert.equal(storedCompact.agents[0].meta.persistence.omittedMessages, 4)
+  assert.equal(storedBytes(window.localStorage, 'compact.ai') <= 18000, true)
+
+  ai = loadRuntime(compactMemory)
+  ai.configurePersistence({ key: 'compact.ai', maxBytes: 18000, maxMessagesPerAgent: 2 })
+  assert.equal(ai.agents()[0].messages.length, 2)
+  assert.equal(ai.agents()[0].messages[0].content.indexOf('[truncated for persistence]') > 0, true)
+}
+
+{
+  const toolMemory = storage()
+  ai = loadRuntime(toolMemory)
+  ai.configurePersistence({ key: 'tool.ai', maxBytes: 50000, maxMessagesPerAgent: 5, toolResultPolicy: 'metadata-only', load: false })
+  const toolAgent = ai.createAgent({ name: 'Tool Agent' })
+  const calls = []
+  for (let i = 0; i < 24; i++) {
+    calls.push({
+      id: 'tool-' + i,
+      toolId: 'demo.tool',
+      name: 'demo.tool',
+      args: { text: 'a'.repeat(4000), index: i },
+      result: { text: 'r'.repeat(12000), rows: Array(50).fill({ value: 'row' }) },
+      preview: { text: 'p'.repeat(12000) },
+      applyResult: { text: 'w'.repeat(12000) },
+      status: 'completed',
+    })
+  }
+  ai.appendMessage(toolAgent.id, { role: 'assistant', content: 'tools', toolCalls: calls })
+  ai.save()
+  const storedTools = JSON.parse(window.localStorage.getItem('tool.ai'))
+  const savedCall = storedTools.agents[0].messages[0].toolCalls[0]
+  assert.equal(storedBytes(window.localStorage, 'tool.ai') <= 50000, true)
+  assert.equal(savedCall.id, 'tool-0')
+  assert.equal(savedCall.toolId, 'demo.tool')
+  assert.equal(savedCall.status, 'completed')
+  assert.equal('args' in savedCall, true)
+  assert.equal('result' in savedCall, false)
+  assert.equal('preview' in savedCall, false)
+  assert.equal('applyResult' in savedCall, false)
+}
+
+{
+  const circularMemory = storage()
+  ai = loadRuntime(circularMemory)
+  ai.configurePersistence({ key: 'circular.ai', maxBytes: 50000, load: false })
+  const circularAgent = ai.createAgent({ name: 'Circular Agent' })
+  const state = { label: 'root' }
+  state.self = state
+  ai.updateAgent(circularAgent.id, { state: state })
+  ai.save()
+  const storedCircular = JSON.parse(window.localStorage.getItem('circular.ai'))
+  assert.equal(storedCircular.persistence.compacted, true)
+  assert.equal(storedCircular.agents[0].state.self, '[Circular]')
+}
+
+{
+  const failing = quotaStorage()
+  ai = loadRuntime(failing)
+  let reports = 0
+  window.aiditor.reportError = function () { reports++ }
+  ai.configurePersistence({ key: 'quota.ai', maxBytes: 50000, load: false })
+  const quotaAgent = ai.createAgent({ name: 'Quota Agent' })
+  ai.appendMessage(quotaAgent.id, { role: 'assistant', content: 'x'.repeat(2000) })
+  ai.save()
+  ai.appendMessage(quotaAgent.id, { role: 'assistant', content: 'again' })
+  ai.save()
+  assert.equal(reports, 1)
+  assert.equal(failing.attempts(), 2)
+}
 
 console.log('ai persistence tests ok')

@@ -151,8 +151,11 @@ compatibility decision, including mixed-type cases.
 | `render(ctx)` | Optional custom renderer for complex inspections. |
 
 `render(ctx)` is for cases that are not just fields: table schema editors,
-binding rows, layout pickers, texture lists, or tool buttons. Use it sparingly;
-plain properties should use `schema + values + write`.
+binding rows, layout pickers, texture lists, or tool buttons. When the complex
+case is a keyed list of expandable property-backed objects, custom renderers
+should prefer `aiditor.ui.propertyList` instead of rebuilding their own
+accordion/property chrome. Use custom renderers sparingly; plain properties
+should use `schema + values + write`.
 
 ## Action Surfaces
 

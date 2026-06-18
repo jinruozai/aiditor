@@ -48,6 +48,7 @@
     const body = ui.h('div', 'aiditor-ui-section-body')
     if (o.bodyClassName) body.classList.add.apply(body.classList, String(o.bodyClassName).split(/\s+/).filter(Boolean))
     el.appendChild(head); el.appendChild(body)
+    ui.collect(el, function () { ui.disposeChildren(body) })
     toggle.addEventListener('click', function () { doWrite(!sig.peek()) })
     ui.bind(el, sig, function (v) {
       el.classList.toggle('aiditor-ui-section-collapsed', !!v)

@@ -3401,6 +3401,9 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   padding: 2px 0;
 }
 .aiditor-ui-struct-input-row { grid-template-columns: 56px minmax(0, 1fr); }
+.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+}
 .aiditor-ui-array-input-row  { grid-template-columns: auto minmax(0, 1fr) auto; }
 .aiditor-ui-struct-input-label,
 .aiditor-ui-array-input-index {
@@ -3412,15 +3415,32 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
 }
 .aiditor-ui-struct-input-cell,
 .aiditor-ui-array-input-cell { min-width: 0; }
+.aiditor-ui-struct-input-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.aiditor-ui-struct-input-row-actions-empty > .aiditor-ui-struct-input-actions {
+  display: none;
+}
 .aiditor-ui-struct-input-cell > *,
 .aiditor-ui-array-input-cell > * { width: 100%; max-width: 100%; box-sizing: border-box; }
 .aiditor-ui-struct-input-row-label-hidden,
 .aiditor-ui-struct-input-row-label-sr-only {
   grid-template-columns: minmax(0, 1fr);
 }
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
+.aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
 .aiditor-ui-struct-input-row-label-hidden > .aiditor-ui-struct-input-cell,
 .aiditor-ui-struct-input-row-label-sr-only > .aiditor-ui-struct-input-cell {
   grid-column: 1 / -1;
+}
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell,
+.aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
+  grid-column: 1;
 }
 .aiditor-ui-struct-input-label-hidden { display: none; }
 .aiditor-ui-struct-input-label-sr-only {
@@ -3581,6 +3601,9 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   gap: var(--aiditor-space-2);
   padding: var(--aiditor-space-1) 0;
 }
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(64px, 76px) minmax(0, 1fr) auto;
+}
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row > .aiditor-ui-struct-input-label {
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
   color: var(--aiditor-fg-2);
@@ -3589,9 +3612,17 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only {
   grid-template-columns: minmax(0, 1fr);
 }
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden > .aiditor-ui-struct-input-cell,
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only > .aiditor-ui-struct-input-cell {
   grid-column: 1 / -1;
+}
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell,
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
+  grid-column: 1;
 }
 /* Help cursor only when the label actually carries a tooltip — otherwise the
  * cursor lies. Marker is set by ui.structInput when a tooltip is wired. */
@@ -3628,6 +3659,41 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   padding: var(--aiditor-space-1) var(--aiditor-space-1) var(--aiditor-space-2);
   gap: 0;
   background: transparent;
+}
+
+.aiditor-ui-property-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aiditor-space-1);
+  min-width: 0;
+}
+.aiditor-ui-property-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aiditor-space-1);
+  min-width: 0;
+}
+.aiditor-ui-property-list-item {
+  background: transparent;
+}
+.aiditor-ui-property-list-item > .aiditor-ui-section-head {
+  min-height: 26px;
+  height: 26px;
+}
+.aiditor-ui-property-list-comfortable .aiditor-ui-property-list-item > .aiditor-ui-section-head {
+  min-height: 30px;
+  height: 30px;
+}
+.aiditor-ui-property-list-item > .aiditor-ui-section-body {
+  padding: var(--aiditor-space-1) 0 var(--aiditor-space-2);
+}
+.aiditor-ui-property-list-form {
+  min-width: 0;
+}
+.aiditor-ui-property-list-empty {
+  padding: var(--aiditor-space-2);
+  color: var(--aiditor-fg-3);
+  font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
 }
 
 /* ── slot wrapper for propertyForm editing ──────────────────────────

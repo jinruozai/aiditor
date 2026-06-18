@@ -184,6 +184,7 @@
         key:    fname,
         label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
         labelMode: rawObj && rawObj.labelMode,
+        actions: rawObj && rawObj.actions,
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
       }
     })

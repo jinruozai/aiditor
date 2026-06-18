@@ -153,6 +153,7 @@ const JS_ORDER = [
   'ui/form/arrayInput.js',
   'ui/form/editorFor.js',
   'ui/form/propertyForm.js',
+  'ui/form/propertyList.js',
   'ui/inspector.js',
 
   // Layer 8 - UI library: editor specials

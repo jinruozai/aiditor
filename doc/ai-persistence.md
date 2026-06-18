@@ -240,17 +240,28 @@ through registered context/reference providers when needed.
 ## Error Reporting
 
 The persistence layer reports structured storage warnings through
-`aiditor.reportError` or the log system with enough context for UI display:
+`aiditor.reportError` or the log system with enough context for UI display. The
+report source is:
 
 ```js
 {
-  scope: 'ai.persistence',
-  key: 'aiditor.ai.my-editor',
+  scope: 'ai',
+  storage: 'aiditor.ai.my-editor',
+  op: 'save',
   reason: 'quota_exceeded',
+}
+```
+
+The reported `Error` carries stable diagnostic fields:
+
+```js
+{
+  reason: 'quota_exceeded',
+  code: 'ai_persistence_quota_exceeded',
+  storageKey: 'aiditor.ai.my-editor',
   maxBytes: 2097152,
-  attemptedBytes: 0,
-  compacted: true,
-  disabledForSession: true,
+  bytes: 180012,
+  cause: originalStorageError
 }
 ```
 
@@ -258,10 +269,9 @@ Stable reasons:
 
 ```text
 quota_exceeded
+size_exceeded
+storage_error
 serialization_failed
-storage_unavailable
-parse_failed
-oversized_stored_state
 ```
 
 Repeated quota errors for the same key and runtime session are coalesced. The

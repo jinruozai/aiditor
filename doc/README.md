@@ -134,6 +134,7 @@ extension runtime, AI panels, or AI-specific styles.
 - [architecture.md](./architecture.md): full layer model and naming rules.
 - [core.md](./core.md): core infrastructure that already exists.
 - [ui.md](./ui.md): component registry, dock layout/runtime, toolbar records, and UI library.
+- [property-list.md](./property-list.md): keyed object property list design, field row actions, and reconcile stability contract.
 - [inspector.md](./inspector.md): ordered selection, provider protocol, multi-target property editing, and the built-in Inspector panel.
 - [ai.md](./ai.md): optional AI Host and the public AI concept model.
 - [ai-runtime.md](./ai-runtime.md): agents, skills, messages, queues, live run state, compaction, and persistence.

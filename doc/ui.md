@@ -400,6 +400,20 @@ existing property forms. It delegates to `arrayEditor` with selection disabled
 and reorder/duplicate off, preserving the old add/delete/edit behavior while
 keeping rich list interaction in one implementation.
 
+`aiditor.ui.propertyList` is the companion primitive for keyed object property
+blocks. Use it when each item has a stable id, title, summary, header actions,
+collapsed state, and an expanded schema-driven property body. It composes
+`ui.section`, `ui.actionBar`, and `ui.propertyForm`; it is not a second schema
+editor and it does not own add/delete/history/domain semantics.
+
+`propertyList` accepts `items` as either an array or a signal. Refreshing the
+items source must reconcile by stable `getKey(item, index)`: existing ids keep
+their section DOM, title/meta/actions/value signals update in place, new ids are
+created, removed ids are disposed, and reordered ids move without rebuild. This
+is required so expanded state, focus, numberInput pointer capture, open row UI,
+and editor-local DOM state survive ordinary host refreshes. See
+[property-list.md](./property-list.md).
+
 The settings panel under `src/ui/panel/` is only the generic settings shell.
 Concrete settings are registered by the owning module, for example theme
 settings from `src/style/theme-settings.js` and AI settings from
@@ -422,6 +436,7 @@ aiditor.ui.getRenderer(kind)
 aiditor.ui.listRenderKinds()
 aiditor.ui.editorFor(fieldDef, value, onChange, ctx)
 aiditor.ui.propertyForm(options)
+aiditor.ui.propertyList(options)
 ```
 
 `typeconfig` provides built-in field aliases and render hints. Domain schemas
@@ -484,6 +499,18 @@ form `ctx`. It deliberately does not expose DOM nodes or domain semantics.
 `groups[groupId].actions`; returning `[]` explicitly clears that group's
 actions. `groupActionCtx` is only a context mapper for action predicates,
 menus, args, and commands.
+
+Individual property rows can also expose actions. `propertyForm` accepts
+`fieldActions(fieldCtx)` and schema fields may carry `actions: UiAction[]`.
+Those actions render through `ui.actionBar` on the row's right edge and support
+the same `icon`, `title`, `menu`, `variant:"danger"`, `command`, and `args`
+shape as header/group actions. Row actions are UI chrome only; mutations still
+route through host commands or the form's normal `onChange` path.
+
+Field row actions must not change the stability contract. Adding or updating
+actions should refresh row chrome in place, not recreate the editor. With no
+actions, rows keep the existing label/editor layout. With actions, rows become
+`label | editor | actions`; hidden-label rows become `editor | actions`.
 
 `propertyForm` keeps field editor DOM stable across value-only refreshes. It
 builds rows from a structural schema key: field order, field keys, group ids,

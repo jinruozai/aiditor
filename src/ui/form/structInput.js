@@ -1,13 +1,13 @@
 // aiditor.ui.structInput — generic fixed-shape object editor.
 //
-// Renders one row per field; each row = [label · editor]. The editor for each
+// Renders one row per field; each row = [label · editor · actions]. The editor for each
 // slot is produced by a caller-provided factory — this component does not
 // know about type_config or FieldDef. Use it anywhere you need a schema-less
 // "edit a record" UI.
 //
 // opts:
 //   value:    signal<object>                               required
-//   fields:   [{ key, label?, labelMode?, tooltip?, editor }] required
+//   fields:   [{ key, label?, labelMode?, tooltip?, editor, actions?, actionCtx? }] required
 //               label:false or labelMode:'hidden' hides the visual row label
 //               labelMode:'sr-only' keeps an accessible label without a column
 //               editor(slotSig, write, ctx) → HTMLElement
@@ -71,6 +71,19 @@
       ui.collect(root, function () { ui.dispose(editor) })
 
       row.appendChild(label); row.appendChild(cell)
+      if (f.actions) {
+        const actions = ui.h('div', 'aiditor-ui-struct-input-actions')
+        actions.appendChild(ui.actionBar({ actions: f.actions, ctx: f.actionCtx || ctx || {}, density: 'compact' }))
+        row.appendChild(actions)
+        row.classList.add('aiditor-ui-struct-input-row-has-actions')
+        if (f.actions.dispose) ui.collect(root, f.actions.dispose)
+        if (f.actionCtx && f.actionCtx.dispose) ui.collect(root, f.actionCtx.dispose)
+        if (ui.isSignal(f.actions)) {
+          ui.bind(row, f.actions, function (list) {
+            row.classList.toggle('aiditor-ui-struct-input-row-actions-empty', !(Array.isArray(list) && list.length))
+          })
+        }
+      }
       root.appendChild(row)
     })
 

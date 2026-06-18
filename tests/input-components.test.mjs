@@ -228,6 +228,7 @@ for (const file of [
   'src/ui/base/actionBar.js',
   'src/ui/container/section.js',
   'src/ui/form/propertyForm.js',
+  'src/ui/form/propertyList.js',
   'src/ui/editor/codeInput.js',
   'src/ui/editor/assetPicker.js',
 ]) {
@@ -389,6 +390,99 @@ function key(el, name, extra) {
   assert.match(sectionCss, /\.aiditor-ui-section-head\s*\{[\s\S]*?width:\s*100%;[\s\S]*?padding:\s*0 var\(--aiditor-space-2\);[\s\S]*?box-sizing:\s*border-box;/)
   assert.match(sectionCss, /\.aiditor-ui-section-toggle\s*\{[\s\S]*?flex:\s*1 1 0;[\s\S]*?min-width:\s*0;/)
   assert.match(sectionCss, /\.aiditor-ui-section-actions\s*\{[\s\S]*?flex:\s*0 0 auto;[\s\S]*?min-width:\s*0;/)
+}
+
+{
+  commandRuns.length = 0
+  const targets = aiditor.signal([{ a: 'one', b: 'two', c: 'three' }])
+  const form = ui.propertyForm({
+    targets,
+    schema: {
+      a: {
+        type: 'string',
+        actions: [{
+          id: 'schema-action',
+          icon: 'edit',
+          title: 'Schema action',
+          command: 'case.schemaAction',
+          args: function (ctx) { return { field: ctx.field, value: ctx.value } },
+        }],
+      },
+      b: { type: 'string' },
+      c: { type: 'string', label: false },
+    },
+    fieldActions: function (fieldCtx) {
+      if (fieldCtx.field === 'b') {
+        return [{ id: 'field-action', icon: 'edit', title: 'Field action', command: 'case.fieldAction' }]
+      }
+      return null
+    },
+  })
+  const rows = form.querySelectorAll('.aiditor-ui-struct-input-row')
+  assert.equal(rows.length, 3)
+  assert.equal(rows[0].classList.contains('aiditor-ui-struct-input-row-has-actions'), true)
+  assert.equal(rows[0].classList.contains('aiditor-ui-struct-input-row-actions-empty'), false)
+  assert.equal(rows[1].classList.contains('aiditor-ui-struct-input-row-has-actions'), true)
+  assert.equal(rows[1].classList.contains('aiditor-ui-struct-input-row-actions-empty'), false)
+  assert.equal(rows[2].classList.contains('aiditor-ui-struct-input-row-label-hidden'), true)
+  assert.equal(rows[2].classList.contains('aiditor-ui-struct-input-row-has-actions'), true)
+  assert.equal(rows[2].classList.contains('aiditor-ui-struct-input-row-actions-empty'), true)
+  assert.equal(form.querySelectorAll('.aiditor-ui-struct-input-actions').length, 3)
+  assert.equal(form.querySelectorAll('.aiditor-ui-icon-btn').length, 2)
+  form.querySelectorAll('.aiditor-ui-icon-btn')[0].click()
+  assert.deepEqual(commandRuns[0].input, { field: 'a', value: 'one' })
+  assert.equal(commandRuns[0].ctx.field, 'a')
+}
+
+{
+  commandRuns.length = 0
+  const items = aiditor.signal([
+    { id: 'first', title: 'First', meta: 'string', value: { key: 'first', type: 'string' } },
+    { id: 'second', title: 'Second', meta: 'int', value: { key: 'second', type: 'int' } },
+  ])
+  const changes = []
+  const list = ui.propertyList({
+    items,
+    getKey: function (item) { return item.id },
+    title: function (itemCtx) { return itemCtx.value.key },
+    meta: function (itemCtx) { return itemCtx.value.type },
+    schema: {
+      key: { type: 'string' },
+      type: { type: 'string', actions: [{ id: 'edit-type', icon: 'edit', command: 'case.editType' }] },
+    },
+    actions: function (itemCtx) {
+      return [{ id: 'delete', icon: 'trash', variant: 'danger', command: 'case.delete', args: { id: itemCtx.id } }]
+    },
+    fieldActions: function (fieldCtx) {
+      if (fieldCtx.field === 'key') return [{ id: 'edit-key', icon: 'edit', command: 'case.editKey' }]
+      return null
+    },
+    onFieldChange: function (itemId, field, value) {
+      changes.push({ itemId: itemId, field: field, value: value })
+    },
+  })
+  const sections = list.querySelectorAll('.aiditor-ui-property-list-item')
+  assert.equal(sections.length, 2)
+  const firstSection = sections[0]
+  const firstInput = firstSection.querySelector('input')
+  firstInput.focus()
+  items.set([
+    { id: 'second', title: 'Second+', meta: 'int+', value: { key: 'second', type: 'int+' } },
+    { id: 'first', title: 'First+', meta: 'string+', value: { key: 'first+', type: 'string+' } },
+  ])
+  const reordered = list.querySelectorAll('.aiditor-ui-property-list-item')
+  assert.equal(reordered[1], firstSection)
+  assert.equal(reordered[1].querySelector('input'), firstInput)
+  assert.equal(document.activeElement, firstInput)
+  assert.equal(reordered[1].querySelector('.aiditor-ui-section-title').textContent, 'first+')
+  assert.equal(reordered[1].querySelector('.aiditor-ui-section-meta').textContent, 'string+')
+  firstInput.value = 'first-edited'
+  firstInput.dispatch('input', { target: firstInput })
+  assert.deepEqual(changes[0], { itemId: 'first', field: 'key', value: 'first-edited' })
+  reordered[1].querySelectorAll('.aiditor-ui-icon-btn')[0].click()
+  assert.equal(commandRuns.at(-1).id, 'case.delete')
+  assert.deepEqual(commandRuns.at(-1).input, { id: 'first' })
+  assert.equal(reordered[1].querySelectorAll('.aiditor-ui-icon-btn').length, 3)
 }
 
 {

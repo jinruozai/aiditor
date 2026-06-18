@@ -15,6 +15,7 @@
 //   groups?:  object|signal<object>                  optional group label/action metadata
 //   groupActions?:(groupCtx) => UiAction[]            optional per-group actions
 //   groupActionCtx?:(groupCtx) => object              optional per-group action ctx mapper
+//   fieldActions?:(fieldCtx) => UiAction[]            optional per-field row actions
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -51,6 +52,7 @@
    * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels and UiAction arrays.
    * @param {Function} opts.groupActions - Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions.
    * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
+   * @param {Function} opts.fieldActions - Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -71,6 +73,7 @@
     const onChange  = typeof o.onChange === 'function' ? o.onChange : null
     const groupActions = typeof o.groupActions === 'function' ? o.groupActions : null
     const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
+    const fieldActions = typeof o.fieldActions === 'function' ? o.fieldActions : null
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const ctx       = o.ctx
@@ -131,11 +134,14 @@
           const raw   = schema[fname]
           const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
           const label = fieldLabel(raw, fname)
+          const action = fieldActionSignals(fname, label, raw, subFd)
           return {
             key:     fname,
             label:   label.value,
             labelMode: label.mode,
             tooltip: subFd.desc || '',
+            actions: action.actions,
+            actionCtx: action.ctx,
             editor:  function (slotSig, write, innerCtx) {
               return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd, fname, defaults,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
@@ -186,6 +192,31 @@
         groupChrome[g.name].actionCtx.set(info.actionCtx)
       }
     }
+
+    function fieldActionSignals(field, label, raw, resolved) {
+      const rawObj = typeof raw === 'string' ? null : (raw || null)
+      const actionCtx = aiditor.derived(function () {
+        const arr = targets() || []
+        const values = composite()
+        return {
+          field: field,
+          label: label.value,
+          rawField: raw,
+          resolvedField: resolved,
+          value: values == null ? undefined : values[field],
+          targets: arr,
+          ctx: ctx,
+        }
+      })
+      const actions = aiditor.derived(function () {
+        const currentCtx = actionCtx()
+        const fromFn = fieldActions
+          ? aiditor.safeCall({ scope: 'propertyForm', action: 'fieldActions', field: field }, function () { return fieldActions(currentCtx) })
+          : null
+        return fromFn != null ? fromFn : (rawObj && rawObj.actions || [])
+      })
+      return { actions: actions, ctx: actionCtx }
+    }
   }
 
   // Walk the schema and produce ordered groups. Ungrouped fields go FIRST
@@ -215,10 +246,23 @@
         fields: group.keys.map(function (key) {
           const raw = schema[key]
           const fd = typeof raw === 'string' ? { type: raw } : (raw || {})
-          return { key: key, field: fd }
+          return { key: key, field: structuralFieldDef(fd) }
         }),
       }
     }))
+  }
+
+  function structuralFieldDef(fd) {
+    if (!fd || typeof fd !== 'object') return fd
+    if (Array.isArray(fd)) return fd.map(structuralFieldDef)
+    const out = {}
+    const keys = Object.keys(fd)
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]
+      if (key === 'actions') continue
+      out[key] = structuralFieldDef(fd[key])
+    }
+    return out
   }
 
   function stableStringify(value) {
