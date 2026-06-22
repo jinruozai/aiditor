@@ -43,28 +43,28 @@
   // Fields not overridden by user's setTypeConfig() fall back to these.
   // These are the types every editor is expected to support out of the box.
   const DEFAULT_BUILTIN = {
-    'int':          { name: 'Integer', base_type: 'int',    type_render: 'input_int',    default: 0,    mem: 'Standard integer', type_agv: { radix: 'dec' }, support_render: ['input_int','enum','range','toggle','color','id','ref_id'] },
-    'float':        { name: 'Float',   base_type: 'float',  type_render: 'input_float',  default: 0.0,  mem: 'Standard floating-point number', type_agv: { decimal_places: 2, percent: false }, support_render: ['input_float','range'] },
-    'string':       { name: 'String',  base_type: 'string', type_render: 'input_string', default: '',   mem: 'Standard text', support_render: ['input_string','textarea','enum','img','snd','date'] },
-    'struct':       { name: 'Struct',  base_type: 'struct', type_render: 'struct',       default: [],   mem: 'Composite tuple', support_render: ['struct'] },
-    'array':        { name: 'Array',   base_type: 'array',  type_render: 'array',        default: [],   mem: 'Ordered list', support_render: ['array','array_editor'] },
-    'dict':         { name: 'Dictionary', base_type: 'dict', type_render: 'dict',         default: {},   mem: 'Dynamic key-value dictionary', type_agv: { value_type: 'string' }, support_render: ['dict'] },
-    'var':          { name: 'Any',     base_type: 'var',    type_render: 'input_string', default: null, mem: 'Auto-typed variable', support_render: ['input_string','textarea','input_int','input_float','range','enum','toggle','color','date','img','snd','id','ref_id','struct','array','array_editor','dict'] },
+    'int':          { name: 'int',     base_type: 'int',    type_render: 'input_int',    default: 0,    mem: 'Standard integer', type_agv: { radix: 'dec' }, support_render: ['input_int','enum','range','toggle','color','id','ref_id'] },
+    'float':        { name: 'float',   base_type: 'float',  type_render: 'input_float',  default: 0.0,  mem: 'Standard floating-point number', type_agv: { decimal_places: 2, percent: false }, support_render: ['input_float','range'] },
+    'string':       { name: 'string',  base_type: 'string', type_render: 'input_string', default: '',   mem: 'Standard text', support_render: ['input_string','textarea','enum','img','snd','date'] },
+    'struct':       { name: 'struct',  base_type: 'struct', type_render: 'struct',       default: [],   mem: 'Composite tuple', support_render: ['struct'] },
+    'array':        { name: 'array',   base_type: 'array',  type_render: 'array',        default: [],   mem: 'Ordered list', support_render: ['array','array_editor'] },
+    'dict':         { name: 'dict',    base_type: 'dict',   type_render: 'dict',         default: {},   mem: 'Dynamic key-value dictionary', type_agv: { value_type: 'string' }, support_render: ['dict'] },
+    'var':          { name: 'var',     base_type: 'var',    type_render: 'input_string', default: null, mem: 'Auto-typed variable', support_render: ['input_string','textarea','input_int','input_float','range','enum','toggle','color','date','img','snd','id','ref_id','struct','array','array_editor','dict'] },
 
-    'enum_int':     { name: 'Enum (int)',    base_type: 'int',    type_render: 'enum',    default: 0,  mem: 'Integer enumeration',  type_agv: { options: { '0': 'Option 1', '1': 'Option 2' } } },
-    'enum_string':  { name: 'Enum (string)', base_type: 'string', type_render: 'enum',    default: '', mem: 'String enumeration',   type_agv: { options: {} } },
-    'range_int':    { name: 'Range (int)',   base_type: 'int',    type_render: 'range',   default: 0,  mem: 'Integer within a range',  type_agv: { min: 0, max: 100, step: 1 } },
-    'range_float':  { name: 'Range (float)', base_type: 'float',  type_render: 'range',   default: 0,  mem: 'Float within a range',    type_agv: { min: 0, max: 1, step: 0.01 } },
+    'enum_int':     { name: 'int',           base_type: 'int',    type_render: 'enum',    default: 0,  mem: 'Integer enumeration',  type_agv: { options: { '0': 'Option 1', '1': 'Option 2' } } },
+    'enum_string':  { name: 'string',        base_type: 'string', type_render: 'enum',    default: '', mem: 'String enumeration',   type_agv: { options: {} } },
+    'range_int':    { name: 'int',           base_type: 'int',    type_render: 'range',   default: 0,  mem: 'Integer within a range',  type_agv: { min: 0, max: 100, step: 1 } },
+    'range_float':  { name: 'float',         base_type: 'float',  type_render: 'range',   default: 0,  mem: 'Float within a range',    type_agv: { min: 0, max: 1, step: 0.01 } },
 
-    'bool':         { name: 'Bool',          base_type: 'int',    type_render: 'toggle',  default: 0,  mem: 'Boolean toggle' },
-    'percent':      { name: 'Percent',       base_type: 'float',  type_render: 'input_float', default: 0, mem: 'Fractional value displayed / parsed as %', type_agv: { decimal_places: 0, percent: true, step: 0.01 } },
-    'color':        { name: 'Color',         base_type: 'int',    type_render: 'color',   default: 0,  mem: 'Color picker',     type_agv: { valueKind: 'int' } },
-    'date':         { name: 'Date',          base_type: 'string', type_render: 'date',    default: '', mem: 'ISO date string' },
-    'img':          { name: 'Image',         base_type: 'string', type_render: 'img',     default: '', mem: 'Image asset',      type_agv: { accept: '.png,.jpg,.jpeg,.gif,.webp' } },
-    'snd':          { name: 'Audio',         base_type: 'string', type_render: 'snd',     default: '', mem: 'Audio asset',      type_agv: { accept: '.mp3,.wav,.ogg' } },
+    'bool':         { name: 'bool',          base_type: 'int',    type_render: 'toggle',  default: 0,  mem: 'Boolean toggle' },
+    'percent':      { name: 'percent',       base_type: 'float',  type_render: 'input_float', default: 0, mem: 'Fractional value displayed / parsed as %', type_agv: { decimal_places: 0, percent: true, step: 0.01 } },
+    'color':        { name: 'color',         base_type: 'int',    type_render: 'color',   default: 0,  mem: 'Color picker',     type_agv: { valueKind: 'int' } },
+    'date':         { name: 'date',          base_type: 'string', type_render: 'date',    default: '', mem: 'ISO date string' },
+    'img':          { name: 'img',           base_type: 'string', type_render: 'img',     default: '', mem: 'Image asset',      type_agv: { accept: '.png,.jpg,.jpeg,.gif,.webp' } },
+    'snd':          { name: 'snd',           base_type: 'string', type_render: 'snd',     default: '', mem: 'Audio asset',      type_agv: { accept: '.mp3,.wav,.ogg' } },
 
-    'id':           { name: 'ID',            base_type: 'int',    type_render: 'id',      default: 0,  mem: 'Unique identifier' },
-    'ref_id':       { name: 'Reference ID',  base_type: 'int',    type_render: 'ref_id',  default: 0,  mem: 'Reference to another entity id' },
+    'id':           { name: 'id',            base_type: 'int',    type_render: 'id',      default: 0,  mem: 'Unique identifier' },
+    'ref_id':       { name: 'refid',         base_type: 'int',    type_render: 'ref_id',  default: 0,  mem: 'Reference to another entity id' },
   }
 
   // Mutable state.

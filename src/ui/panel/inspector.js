@@ -224,6 +224,22 @@
               refresh: refresh,
             })
           },
+          fieldContextActions: function (fieldCtx) {
+            const fn = currentInspection && currentInspection.fieldContextActions
+            if (typeof fn !== 'function') return null
+            const values = fieldCtx.targets || []
+            return fn(Object.assign({}, fieldCtx, {
+              source: 'inspector',
+              inspection: currentInspection,
+              targets: currentTargets,
+              primary: currentTargets[0],
+              values: values,
+              primaryValue: values[0],
+              panel: ctx.panel,
+              bus: ctx.bus,
+              refresh: refresh,
+            }))
+          },
           requireAllTargets: true,
           canEdit: function (field, values, rawField) {
             return aiditor.inspector.canEditField(currentInspection, field, values, rawField)

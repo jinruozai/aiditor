@@ -265,6 +265,20 @@ and validation stay in the host layer.
 `menu` reuses `aiditor.ui.menu`. Menu items accept the same `variant:"danger"`
 shape; actionBar maps it to the existing danger menu styling.
 
+`aiditor.ui.actionMenu` is the shared adapter for local action menu surfaces.
+It takes `UiAction[]`, the caller's `ctx`, and either an anchor or a mouse
+point, resolves `disabled` / `hidden` / `args` / `menu`, then opens `ui.menu`.
+It is not a registry and it is not a second command system; it only keeps
+button menus and right-click menus on the same UiAction execution path. Use
+`behavior:"dropdown"` for button-anchored menus, where clicking the anchor can
+remain part of the dropdown interaction. Use `behavior:"context"` for
+right-click menus, where clicking outside the menu, including the original row
+or label, dismisses it.
+`actionMenu` may accept an async action source. While a `Promise<UiAction[]>`
+is pending it may show a small loading menu at the requested point; if the
+resolved list is empty or all actions are hidden, it closes without running
+anything.
+
 There is no global `aiditor.actions` registry. An action surface is owned by the
 UI component that renders it.
 
@@ -333,7 +347,7 @@ src/ui/form/        input controls and schema-driven property editors
 src/ui/editor/      editor-specific inputs such as code, curve, path, file
 src/ui/container/   layout and containers such as vbox, hbox, absolute, view, scrollArea
 src/ui/data/        list, tree, table, file/asset browser, change review
-src/ui/overlay/     menu, modal, drawer, toast, dialogs
+src/ui/overlay/     menu, quickPick, modal, drawer, toast, dialogs
 src/ui/panel/       generic dock panel components such as panel-list/log/settings/tabs
 src/ui/_internal/   implementation helpers used by the UI library
 ```
@@ -376,6 +390,14 @@ pointer reorder with insertion feedback, keyboard row actions, and controlled
 `onChange`/writable signal. It does not own history, transactions, validation,
 asset semantics, tracks, vertices, or any project workflow.
 
+Array rows keep their chrome compact: the index/handle column sizes to its
+content instead of reserving an inspector-style label column. This keeps
+`arrayEditor` usable inside `propertyForm`, including arrays whose item editor
+is a nested `structInput`, while preserving the same delete/action rail and
+reorder handle semantics. When a `structInput` or `dictInput` is rendered as an
+array row item, its label/key column also switches to a compact width so the
+field name and editor stay visually connected.
+
 Selection and active state use item keys. Callers that need selection, active
 row behavior, keyboard row actions, or stable reorder should provide `getKey`.
 When `getKey` is omitted, `arrayEditor` uses index keys for simple lists,
@@ -399,6 +421,22 @@ the generic selected/active maintenance it can safely infer.
 existing property forms. It delegates to `arrayEditor` with selection disabled
 and reorder/duplicate off, preserving the old add/delete/edit behavior while
 keeping rich list interaction in one implementation.
+
+`aiditor.ui.quickPick` is the generic quick filter picker primitive. Use it when
+the user needs to search a bounded in-memory collection and choose one item.
+Items are opaque objects; callers provide `getKey`, `getLabel`,
+`getSearchText`, optional metadata/group/disabled accessors, optional
+`renderItem`, and `onSelect`.
+Quick Pick owns the popover, search input, active row, keyboard navigation,
+hover state, disabled row behavior, grouping display, keyed row reconcile, and
+selection callback. It does not own data mutation, commands, history,
+validation, or domain semantics.
+
+Quick Pick is the only public "search and pick from a list" primitive. It
+replaces the older searchable-menu shape instead of living next to it as another
+similar concept. `ui.menu` remains for actions, `ui.select` remains for short
+form value selection, and `ui.combobox` remains for editable text with
+suggestions. See [quick-pick.md](./quick-pick.md).
 
 `aiditor.ui.propertyList` is the companion primitive for keyed object property
 blocks. Use it when each item has a stable id, title, summary, header actions,
@@ -515,12 +553,76 @@ form `ctx`. It deliberately does not expose DOM nodes or domain semantics.
 actions. `groupActionCtx` is only a context mapper for action predicates,
 menus, args, and commands.
 
-Individual property rows can also expose actions. `propertyForm` accepts
+Individual property rows can also expose visible actions. `propertyForm` accepts
 `fieldActions(fieldCtx)` and schema fields may carry `actions: UiAction[]`.
 Those actions render through `ui.actionBar` on the row's right edge and support
 the same `icon`, `title`, `menu`, `variant:"danger"`, `command`, and `args`
 shape as header/group actions. Row actions are UI chrome only; mutations still
 route through host commands or the form's normal `onChange` path.
+
+Property rows can also expose context-menu actions with one form-level strategy
+function:
+
+```js
+aiditor.ui.propertyForm({
+  schema: schema,
+  targets: targets,
+  ctx: editorCtx,
+  fieldContextActions: function (fieldCtx) {
+    if (fieldCtx.resolvedField.type === 'number') {
+      return [
+        { label: 'Reset', icon: 'refresh', command: 'field.reset' },
+        { label: 'Copy Value', icon: 'copy', command: 'field.copyValue' },
+      ]
+    }
+    return [{ label: 'Copy Value', icon: 'copy', command: 'field.copyValue' }]
+  },
+})
+```
+
+This is intentionally a single strategy function, not per-field event wiring.
+The framework creates `fieldCtx` for the row that was right-clicked and calls
+the same callback for every field. Callers branch by field key, resolved type,
+group, target metadata inside `ctx`, or any other host-owned data.
+
+`fieldContextActions(fieldCtx)` may return `UiAction[]` or
+`Promise<UiAction[]>`. Async actions are for host-owned checks such as
+permissions, reference lookups, or AI availability. The framework only owns the
+loading/menu lifecycle; it does not interpret the result.
+
+`fieldCtx` contains:
+
+```js
+{
+  field,          // schema key
+  label,          // displayed row label
+  value,          // current displayed value
+  targets,        // current propertyForm targets
+  rawField,       // original schema field
+  resolvedField,  // resolveFieldDef(rawField)
+  ctx,            // caller-provided context
+}
+```
+
+Right-click triggering is deliberately narrow:
+
+- field label opens the field context menu;
+- row chrome / non-editor empty space opens the field context menu;
+- editor controls keep their own right-click behavior.
+
+Events that originate inside `input`, `textarea`, `select`, `button`,
+`[contenteditable]`, textbox/searchbox/spinbutton widgets, numberInput, sliders,
+comboboxes, action bars, popovers, or other interactive editor content must not
+open the field row menu. If no `fieldContextActions` is supplied, or if the
+resolved action list is empty, the framework does not call `preventDefault` and
+the browser/context owner keeps its normal menu.
+
+Each `structInput` / `propertyForm` instance owns at most one open field
+context menu. Opening a new field context menu closes the previous one in the
+same form, and menu dismiss removes the tracked handle. Field context menus use
+`actionMenu({ behavior:"context" })`, so a click on the original field row is
+an outside click. Button dropdowns rendered by `actionBar` keep their dropdown
+behavior.
 
 Field row actions must not change the stability contract. Adding or updating
 actions should refresh row chrome in place, not recreate the editor. With no

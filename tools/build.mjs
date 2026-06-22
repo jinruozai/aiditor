@@ -114,6 +114,7 @@ const JS_ORDER = [
   'ui/base/image.js',
   'ui/base/button.js',
   'ui/base/iconButton.js',
+  'ui/base/actionMenu.js',
   'ui/base/actionBar.js',
   'ui/base/stateButton.js',
   'ui/base/copyButton.js',
@@ -190,7 +191,7 @@ const JS_ORDER = [
 
   // Layer 11 - UI library: overlays
   'ui/overlay/menu.js',
-  'ui/overlay/searchMenu.js',
+  'ui/overlay/quickPick.js',
   'ui/overlay/modal.js',
   'ui/overlay/drawer.js',
   'ui/overlay/banner.js',

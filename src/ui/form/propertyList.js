@@ -106,6 +106,7 @@
         schema: schemaSig,
         groups: groupsSig,
         fieldActions: function (fieldCtx) { return fieldActions(row, fieldCtx) },
+        fieldContextActions: function (fieldCtx) { return fieldContextActions(row, fieldCtx) },
         ctx: function (field) {
           return Object.assign({}, itemCtxSig.peek(), { field: field })
         },
@@ -252,6 +253,20 @@
       const fromOption = resolveValue(o.fieldActions, ctx, null)
       if (fromOption != null) return fromOption
       const fromItem = row.item && row.item.fieldActions
+      return resolveValue(fromItem, ctx, null)
+    }
+
+    function fieldContextActions(row, fieldCtx) {
+      const itemCtx = row.itemCtxSig.peek()
+      const ctx = Object.assign({}, fieldCtx || {}, {
+        itemId: row.id,
+        item: row.item,
+        itemIndex: row.index,
+        itemCtx: itemCtx,
+      })
+      const fromOption = resolveValue(o.fieldContextActions, ctx, null)
+      if (fromOption != null) return fromOption
+      const fromItem = row.item && row.item.fieldContextActions
       return resolveValue(fromItem, ctx, null)
     }
 

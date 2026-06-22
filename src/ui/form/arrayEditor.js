@@ -34,7 +34,7 @@
     let suppressChromeClickKey = null
     const rows = new Map()
 
-    const root = ui.h('div', 'aiditor-ui-array-editor aiditor-ui-array-editor-' + density)
+    const root = ui.h('div', 'aiditor-ui-array-editor aiditor-ui-array-editor-' + density + ' aiditor-ui-array-editor-index-' + indexMode)
     root.setAttribute('role', 'listbox')
     root.setAttribute('tabindex', '0')
     root.setAttribute('aria-label', o.ariaLabel || 'Array editor')

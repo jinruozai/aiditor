@@ -33,19 +33,21 @@ preserved or deliberately replaced.
 | `src/dock/render.js` | [ui.md](./ui.md) | Dock reconciliation and toolbar rendering. |
 | `src/dock/interactions.js` | [ui.md](./ui.md) | Splitter, split, merge, drag hover. |
 | `src/dock/panel-drag.js` | [ui.md](./ui.md) | Panel/tab drag and dock drop. |
-| `src/dock/menu.js` | [ui.md](./ui.md) | Optional built-in dock command/menu contribution. |
+| `src/dock/menu.js` | [ui.md](./ui.md), [quick-pick.md](./quick-pick.md) | Optional built-in dock command/menu contribution. Add Panel should use the canonical `quickPick` primitive rather than a separate searchable menu concept. |
 | `src/dock/migrate.js` | [ui.md](./ui.md) | Pop-out and cross-window migration. |
 | `src/dock/layout.js` | [ui.md](./ui.md) | `createDockLayout`. |
 | `src/ui/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Ordered Inspector selection, provider registry, multi-target edit gates, and formula-ready change helpers. |
 | `src/ui/panel/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Built-in generic Inspector dock panel backed by `aiditor.inspector` and `aiditor.ui.propertyForm`. |
 | `src/ui/panel/history.js` | [core.md](./core.md), [ui.md](./ui.md) | Built-in generic History dock panel backed by an `aiditor.history` instance or named binding. |
 | `src/ui/panel/panel-list.js` | [ui.md](./ui.md) | Built-in searchable panel palette for registered generic panel components. |
+| `src/ui/base/actionMenu.js` | [ui.md](./ui.md) | Shared UiAction-to-menu adapter used by actionBar menus and field context-menu action surfaces. |
 | `src/ui/form/editorFor.js` | [ui.md](./ui.md), [schema-value-encoding.md](./schema-value-encoding.md), [dict-input.md](./dict-input.md) | Schema renderer dispatcher and canonical value encoding boundary; built-in `struct` projects tuple values to record UI, and built-in `dict` delegates dynamic key/value editing to `dictInput`. |
-| `src/ui/form/propertyForm.js` | [ui.md](./ui.md), [inspector.md](./inspector.md) | Schema-driven single/multi-target property form helper with group and field row actions. |
+| `src/ui/form/propertyForm.js` | [ui.md](./ui.md), [inspector.md](./inspector.md) | Schema-driven single/multi-target property form helper with group actions, field row actions, and field context-menu action strategy. |
 | `src/ui/form/propertyList.js` | [property-list.md](./property-list.md), [ui.md](./ui.md) | Keyed expandable object property-list primitive built from section/actionBar/propertyForm. |
 | `src/ui/form/dictInput.js` | [dict-input.md](./dict-input.md), [schema-value-encoding.md](./schema-value-encoding.md), [ui.md](./ui.md) | Dynamic key-value dictionary editor primitive used by the built-in `dict` schema renderer. |
 | `src/ui/form/arrayEditor.js` | [ui.md](./ui.md) | Generic array-row interaction primitive: key-based selection, active item, add/delete/duplicate, reorder feedback, and controlled mutation callbacks. |
 | `src/ui/form/arrayInput.js` | [ui.md](./ui.md) | Compatibility facade over `arrayEditor` for simple property array editing. |
+| `src/ui/overlay/quickPick.js` | [quick-pick.md](./quick-pick.md), [ui.md](./ui.md) | Canonical anchored quick filter picker for opaque item collections. |
 | `src/ui/**` | [ui.md](./ui.md) | Generic UI component library and built-in generic panel components. |
 | `src/style/**` | [ui.md](./ui.md) | Theme, dock, UI, AI, and settings styles. |
 

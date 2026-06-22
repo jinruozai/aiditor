@@ -5815,9 +5815,16 @@
           },
         }
       })
-    aiditor.ui.searchMenu({
+    aiditor.ui.quickPick({
       pos: pos,
       items: items,
+      getKey: function (item) { return item.value },
+      getLabel: function (item) { return item.label },
+      getIcon: function (item) { return item.icon },
+      getGroup: function (item) { return item.group },
+      onSelect: function (item) {
+        if (item.onSelect) item.onSelect()
+      },
       placeholder: 'Add panel...',
       width: 320,
       maxHeight: 420,

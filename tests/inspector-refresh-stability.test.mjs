@@ -158,6 +158,7 @@ ui.iconButton = function (opts) {
 }
 
 for (const file of [
+  'src/ui/base/actionMenu.js',
   'src/ui/base/actionBar.js',
   'src/ui/form/input.js',
   'src/ui/form/searchInput.js',

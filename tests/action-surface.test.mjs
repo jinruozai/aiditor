@@ -134,6 +134,7 @@ ui.menu = function (opts) {
   return { close: function () { menuClosed++ } }
 }
 
+vm.runInThisContext(readFileSync('src/ui/base/actionMenu.js', 'utf8'), { filename: 'src/ui/base/actionMenu.js' })
 vm.runInThisContext(readFileSync('src/ui/base/actionBar.js', 'utf8'), { filename: 'src/ui/base/actionBar.js' })
 vm.runInThisContext(readFileSync('src/ui/container/section.js', 'utf8'), { filename: 'src/ui/container/section.js' })
 
@@ -177,6 +178,7 @@ const menuBar = ui.actionBar({
   }],
 })
 menuBar.querySelector('.aiditor-ui-icon-btn').click()
+assert.equal(openedMenu.behavior, 'dropdown')
 assert.equal(openedMenu.items.length, 1)
 assert.equal(openedMenu.items[0].danger, true)
 openedMenu.items[0].onSelect()

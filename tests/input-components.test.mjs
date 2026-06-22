@@ -222,6 +222,19 @@ ui.popover = function (opts) {
     },
   }
 }
+const openedMenus = []
+let closedMenuCount = 0
+ui.menu = function (opts) {
+  const record = Object.assign({ closed: false }, opts)
+  record.close = function () {
+    if (record.closed) return
+    record.closed = true
+    closedMenuCount++
+    if (opts.onDismiss) opts.onDismiss()
+  }
+  openedMenus.push(record)
+  return record
+}
 
 for (const file of [
   'src/ui/form/input.js',
@@ -232,6 +245,7 @@ for (const file of [
   'src/ui/form/vectorInput.js',
   'src/ui/form/typeconfig.js',
   'src/ui/form/structInput.js',
+  'src/ui/base/actionMenu.js',
   'src/ui/base/actionBar.js',
   'src/ui/form/dictInput.js',
   'src/ui/form/editorFor.js',
@@ -254,6 +268,20 @@ function key(el, name, extra) {
     preventDefault() { this.defaultPrevented = true },
   }, extra || {})
   el.dispatch('keydown', ev)
+  return ev
+}
+
+function contextmenu(el, target, extra) {
+  const ev = Object.assign({
+    target: target || el,
+    clientX: 10,
+    clientY: 20,
+    defaultPrevented: false,
+    propagationStopped: false,
+    preventDefault() { this.defaultPrevented = true },
+    stopPropagation() { this.propagationStopped = true },
+  }, extra || {})
+  el.dispatch('contextmenu', ev)
   return ev
 }
 
@@ -441,6 +469,112 @@ function key(el, name, extra) {
   form.querySelectorAll('.aiditor-ui-icon-btn')[0].click()
   assert.deepEqual(commandRuns[0].input, { field: 'a', value: 'one' })
   assert.equal(commandRuns[0].ctx.field, 'a')
+}
+
+{
+  commandRuns.length = 0
+  openedMenus.length = 0
+  const seen = []
+  const targets = aiditor.signal([{ a: 'one', b: 'two' }])
+  const form = ui.propertyForm({
+    targets,
+    schema: {
+      a: { type: 'string', label: 'Alpha' },
+      b: { type: 'string', label: 'Beta' },
+    },
+    ctx: function (field) { return { source: 'test-form', field } },
+    fieldContextActions: function (fieldCtx) {
+      seen.push(fieldCtx)
+      if (fieldCtx.field !== 'a') return []
+      return [{
+        id: 'copy',
+        label: 'Copy Value',
+        icon: 'copy',
+        command: 'case.fieldAction',
+        args: function (ctx) { return { field: ctx.field, value: ctx.value, source: ctx.ctx.source } },
+      }]
+    },
+  })
+  const rows = form.querySelectorAll('.aiditor-ui-struct-input-row')
+  const labels = form.querySelectorAll('.aiditor-ui-struct-input-label')
+  const ev = contextmenu(rows[0], labels[0], { clientX: 32, clientY: 48 })
+  assert.equal(ev.defaultPrevented, true)
+  assert.equal(ev.propagationStopped, true)
+  assert.equal(openedMenus.length, 1)
+  assert.deepEqual(openedMenus[0].point, { x: 32, y: 48 })
+  assert.equal(openedMenus[0].items[0].label, 'Copy Value')
+  assert.equal(seen[0].field, 'a')
+  assert.equal(seen[0].label, 'Alpha')
+  assert.equal(seen[0].value, 'one')
+  assert.equal(seen[0].resolvedField.type, 'string')
+  openedMenus[0].items[0].onSelect()
+  assert.deepEqual(commandRuns.at(-1).input, { field: 'a', value: 'one', source: 'test-form' })
+
+  const emptyEv = contextmenu(rows[1], labels[1])
+  assert.equal(emptyEv.defaultPrevented, false)
+  assert.equal(openedMenus.length, 1)
+
+  const inputEv = contextmenu(rows[0], rows[0].querySelector('input'))
+  assert.equal(inputEv.defaultPrevented, false)
+  assert.equal(openedMenus.length, 1)
+}
+
+{
+  openedMenus.length = 0
+  closedMenuCount = 0
+  const form = ui.propertyForm({
+    targets: aiditor.signal([{ a: 'one', b: 'two' }]),
+    schema: {
+      a: { type: 'string', label: 'Alpha' },
+      b: { type: 'string', label: 'Beta' },
+    },
+    fieldContextActions: function (fieldCtx) {
+      return [{ id: 'ctx-' + fieldCtx.field, label: 'Menu ' + fieldCtx.field, command: 'case.fieldAction' }]
+    },
+  })
+  const rows = form.querySelectorAll('.aiditor-ui-struct-input-row')
+  const labels = form.querySelectorAll('.aiditor-ui-struct-input-label')
+  contextmenu(rows[0], labels[0])
+  assert.equal(openedMenus.length, 1)
+  assert.equal(openedMenus[0].behavior, 'context')
+  assert.equal(openedMenus[0].closed, false)
+  contextmenu(rows[0], labels[0])
+  assert.equal(openedMenus.length, 2)
+  assert.equal(openedMenus[0].closed, true)
+  assert.equal(openedMenus[1].closed, false)
+  assert.equal(closedMenuCount, 1)
+  contextmenu(rows[1], labels[1])
+  assert.equal(openedMenus.length, 3)
+  assert.equal(openedMenus[1].closed, true)
+  assert.equal(openedMenus[2].closed, false)
+  assert.equal(closedMenuCount, 2)
+  openedMenus[2].close()
+  assert.equal(closedMenuCount, 3)
+  contextmenu(rows[0], labels[0])
+  assert.equal(openedMenus.length, 4)
+  assert.equal(closedMenuCount, 3)
+}
+
+{
+  openedMenus.length = 0
+  let resolveActions
+  const form = ui.propertyForm({
+    targets: aiditor.signal([{ a: 'one' }]),
+    schema: { a: { type: 'string' } },
+    fieldContextActions: function () {
+      return new Promise(function (resolve) { resolveActions = resolve })
+    },
+  })
+  const row = form.querySelector('.aiditor-ui-struct-input-row')
+  const ev = contextmenu(row, row.querySelector('.aiditor-ui-struct-input-label'))
+  assert.equal(ev.defaultPrevented, true)
+  assert.equal(openedMenus.length, 1)
+  assert.equal(openedMenus[0].items[0].type, 'header')
+  assert.equal(openedMenus[0].items[0].label, 'Loading...')
+  resolveActions([{ id: 'loaded', label: 'Loaded', command: 'case.fieldAction' }])
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.equal(openedMenus.length, 2)
+  assert.equal(openedMenus[1].items[0].label, 'Loaded')
 }
 
 {

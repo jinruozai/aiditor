@@ -127,6 +127,7 @@ ui.iconButton = function (opts) {
   return el
 }
 
+vm.runInThisContext(readFileSync('src/ui/base/actionMenu.js', 'utf8'), { filename: 'src/ui/base/actionMenu.js' })
 vm.runInThisContext(readFileSync('src/ui/base/actionBar.js', 'utf8'), { filename: 'src/ui/base/actionBar.js' })
 
 for (const file of [
@@ -152,6 +153,7 @@ const selectionValue = {
   rotation: [0, 0, 0],
   color: '#ffffff',
 }
+let inspectorFieldCtx = null
 
 aiditor.inspector.registerProvider('case.light', {
   inspect() {
@@ -166,6 +168,10 @@ aiditor.inspector.registerProvider('case.light', {
         return groupCtx.groupId === 'render'
           ? [{ id: 'render-menu', icon: 'more-vertical', label: 'Render actions' }]
           : null
+      },
+      fieldContextActions: function (fieldCtx) {
+        inspectorFieldCtx = fieldCtx
+        return [{ id: 'copy-field', label: 'Copy field', args: { field: fieldCtx.field } }]
       },
       schema: {
         name: { type: 'string', label: 'Name', desc: 'Readable display name' },
@@ -220,6 +226,22 @@ assert.equal(groupActionCtx.targets[0].id, 'fill_light')
 assert.equal(groupActionCtx.primary.id, 'fill_light')
 assert.equal(groupActionCtx.values[0], selectionValue)
 assert.equal(formOptions.groupActions(groupActionCtx).length, 1)
+const fieldActions = formOptions.fieldContextActions({
+  field: 'name',
+  label: 'Name',
+  value: 'Fill Light',
+  targets: [selectionValue],
+  rawField: { type: 'string', label: 'Name' },
+  resolvedField: { type: 'string' },
+  ctx: { source: 'aiditor-inspector' },
+})
+assert.equal(fieldActions.length, 1)
+assert.equal(inspectorFieldCtx.source, 'inspector')
+assert.equal(inspectorFieldCtx.targets[0].id, 'fill_light')
+assert.equal(inspectorFieldCtx.primary.id, 'fill_light')
+assert.equal(inspectorFieldCtx.values[0], selectionValue)
+assert.equal(inspectorFieldCtx.primaryValue, selectionValue)
+assert.equal(inspectorFieldCtx.value, 'Fill Light')
 
 const input = search.querySelector('input')
 input.value = 'position'

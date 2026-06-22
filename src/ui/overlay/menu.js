@@ -12,6 +12,7 @@
 //                         | { type: 'header', label }
 //                         | { label, items: MenuItem[] }    nested submenu
 //   side?, align?
+//   behavior?: 'dropdown' | 'context'
 //   onDismiss?
 //
 // Returns a popover handle.
@@ -118,8 +119,9 @@
     let pop = null
     function closeAll() { if (pop) { pop.close(); pop = null } }
     const list = buildMenu(o.items || [], closeAll)
+    const anchor = o.point ? pointAnchor(o.anchor, o.point, o.behavior !== 'context') : o.anchor
     pop = ui.popover({
-      anchor:  o.anchor,
+      anchor:  anchor,
       content: list,
       side:    o.side  || 'bottom',
       align:   o.align || 'start',
@@ -133,5 +135,19 @@
       },
     })
     return pop
+  }
+
+  function pointAnchor(owner, point, keepOwnerAsAnchor) {
+    const x = Number(point && point.x || 0)
+    const y = Number(point && point.y || 0)
+    return {
+      parentNode: owner || null,
+      getBoundingClientRect: function () {
+        return { left: x, right: x, top: y, bottom: y, width: 0, height: 0 }
+      },
+      contains: function (target) {
+        return !!(keepOwnerAsAnchor && owner && owner.contains && owner.contains(target))
+      },
+    }
   }
 })(window.aiditor = window.aiditor || {})

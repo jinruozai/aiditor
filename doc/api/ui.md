@@ -23,6 +23,30 @@ Related: `aiditor.commands.run`
 
 Source: `src/ui/base/actionBar.js`
 
+## `aiditor.ui.actionMenu`
+
+Open a ui.menu from UiAction records at an anchor or pointer position.
+
+```js
+aiditor.ui.actionMenu(opts)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `opts` | `object` | Menu options. |
+| `opts.anchor` | `HTMLElement` | Owner/anchor element for lifecycle and fallback placement. |
+| `opts.point` | `object` | Optional pointer position: { x, y }. |
+| `opts.actions` | `Array\|Function\|Promise` | UiAction records, a function of ctx, or Promise<UiAction[]>. |
+| `opts.ctx` | `object\|Signal<object>` | Context passed to action predicates, args, menus, and commands. |
+| `opts.behavior` | `string` | Optional menu behavior: "dropdown" (default) or "context". |
+| `opts.sourceScope` | `string` | Optional error/log source scope for actions opened from another surface. |
+
+Returns: `object` Handle with close().
+
+Related: `aiditor.ui.actionBar`, `aiditor.ui.menu`
+
+Source: `src/ui/base/actionMenu.js`
+
 ## `aiditor.ui.propertyForm`
 
 Render a schema-driven property editor for one target or a multi-target batch edit. Multi-target reads use the first target value; writes fan out only through enabled fields.
@@ -41,6 +65,7 @@ aiditor.ui.propertyForm(opts)
 | `opts.groupActions` | `Function` | Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions. |
 | `opts.groupActionCtx` | `Function` | Optional mapper for the context passed to group actions. |
 | `opts.fieldActions` | `Function` | Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions. |
+| `opts.fieldContextActions` | `Function` | Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>. |
 | `opts.requireAllTargets` | `boolean` | When true, disable fields missing from any target. |
 | `opts.canEdit` | `Function` | Optional field gate: (field, targets, rawField) => boolean. |
 

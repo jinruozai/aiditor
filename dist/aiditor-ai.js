@@ -5961,6 +5961,62 @@
         "source": "src/ui/base/actionBar.js"
       },
       {
+        "id": "aiditor.ui.actionMenu",
+        "group": "ui",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.ui.actionMenu(opts)",
+        "summary": "Open a ui.menu from UiAction records at an anchor or pointer position.",
+        "params": [
+          {
+            "type": "object",
+            "name": "opts",
+            "description": "Menu options."
+          },
+          {
+            "type": "HTMLElement",
+            "name": "opts.anchor",
+            "description": "Owner/anchor element for lifecycle and fallback placement."
+          },
+          {
+            "type": "object",
+            "name": "opts.point",
+            "description": "Optional pointer position: { x, y }."
+          },
+          {
+            "type": "Array|Function|Promise",
+            "name": "opts.actions",
+            "description": "UiAction records, a function of ctx, or Promise<UiAction[]>."
+          },
+          {
+            "type": "object|Signal<object>",
+            "name": "opts.ctx",
+            "description": "Context passed to action predicates, args, menus, and commands."
+          },
+          {
+            "type": "string",
+            "name": "opts.behavior",
+            "description": "Optional menu behavior: \"dropdown\" (default) or \"context\"."
+          },
+          {
+            "type": "string",
+            "name": "opts.sourceScope",
+            "description": "Optional error/log source scope for actions opened from another surface."
+          }
+        ],
+        "returns": {
+          "type": "object",
+          "description": "Handle with close()."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.ui.actionBar",
+          "aiditor.ui.menu"
+        ],
+        "source": "src/ui/base/actionMenu.js"
+      },
+      {
         "id": "aiditor.ui.propertyForm",
         "group": "ui",
         "layer": "core-ui",
@@ -6007,6 +6063,11 @@
             "type": "Function",
             "name": "opts.fieldActions",
             "description": "Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions."
+          },
+          {
+            "type": "Function",
+            "name": "opts.fieldContextActions",
+            "description": "Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>."
           },
           {
             "type": "boolean",

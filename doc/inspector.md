@@ -146,6 +146,7 @@ compatibility decision, including mixed-type cases.
 | `actions` | Optional `UiAction[]` rendered on the Inspector header's right side. |
 | `groups` | Optional property group metadata passed to `ui.propertyForm`. |
 | `groupActions(groupCtx)` | Optional per-group `UiAction[]` factory passed to `ui.propertyForm`. Returning `null` / `undefined` uses `groups[groupId].actions`; returning `[]` explicitly renders no actions. |
+| `fieldContextActions(fieldCtx)` | Optional field-row context-menu strategy passed to `ui.propertyForm`. Returns `UiAction[]` or `Promise<UiAction[]>`. |
 | `read(target)` | Optional alternative to `values`; called for each target. |
 | `hasField(target, field, value, index)` | Optional field existence override. Default is own-property check on value. |
 | `canWrite(target, field, value, index)` | Optional per-target write gate. |
@@ -233,6 +234,42 @@ and its actions disappear with it.
 The framework never interprets group ids as rules, components, materials,
 tracks, or any other domain concept. Data changes should route through
 `aiditor.commands.run`; `onSelect` is available for local UI-only behavior.
+
+Field row context menus live in `inspection.fieldContextActions(fieldCtx)`.
+The built-in Inspector only forwards the callback to its internal
+`ui.propertyForm`; it does not add built-in field menu items.
+
+```js
+{
+  fieldContextActions: function (fieldCtx) {
+    return [
+      {
+        label: 'Copy Value',
+        icon: 'copy',
+        command: 'editor.copyInspectorField',
+        args: { field: fieldCtx.field },
+      },
+    ]
+  },
+}
+```
+
+The callback is a single strategy for all fields. It may branch by
+`fieldCtx.field`, `fieldCtx.resolvedField`, selection metadata stored in
+`fieldCtx.ctx`, or host-owned permission state. It may return either
+`UiAction[]` or `Promise<UiAction[]>`; async results are only a UI loading/menu
+lifecycle concern for the framework.
+
+`fieldCtx` contains the schema key, displayed label, current value, Inspector
+selection targets, raw schema field, resolved schema field, and the provider
+context. The framework does not interpret any of those values as rule ids,
+component fields, asset paths, animation tracks, AI actions, or project data.
+
+The trigger surface is narrow: right-clicking a field label or row chrome opens
+the field context menu; right-clicking inside an editor control keeps that
+control's native or component-level menu. If the provider does not supply
+`fieldContextActions`, or if the resolved action list is empty, the browser
+context menu is not blocked.
 
 ## Change Shape
 

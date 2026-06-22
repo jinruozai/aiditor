@@ -134,6 +134,7 @@ extension runtime, AI panels, or AI-specific styles.
 - [architecture.md](./architecture.md): full layer model and naming rules.
 - [core.md](./core.md): core infrastructure that already exists.
 - [ui.md](./ui.md): component registry, dock layout/runtime, toolbar records, and UI library.
+- [quick-pick.md](./quick-pick.md): generic quick filter picker for choosing one opaque item from a bounded collection.
 - [schema-value-encoding.md](./schema-value-encoding.md): canonical schema value shapes, including `struct` tuple encoding and `dict` dictionary boundaries.
 - [dict-input.md](./dict-input.md): generic dynamic key-value dictionary editor design and its relationship to `structInput`.
 - [property-list.md](./property-list.md): keyed object property list design, field row actions, and reconcile stability contract.

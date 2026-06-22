@@ -43,7 +43,7 @@
     function render(actions, ctx) {
       closeMenus()
       ui.disposeChildren(root)
-      const list = resolveActions(actions, ctx)
+      const list = ui._actionSurface.resolveActions(actions, ctx)
       let count = 0
       for (let i = 0; i < list.length; i++) {
         const btn = renderAction(list[i], ctx, closeMenus, openMenus)
@@ -59,27 +59,22 @@
     return root
   }
 
-  function resolveActions(actions, ctx) {
-    const list = valueOf(actions, ctx, { id: 'actions' })
-    return Array.isArray(list) ? list : []
-  }
-
   function renderAction(action, ctx, closeMenus, openMenus) {
     if (!action || action.type) return null
-    if (truthy(valueOf(action.hidden, ctx, action))) return null
+    if (ui._actionSurface.truthy(ui._actionSurface.valueOf(action.hidden, ctx, action))) return null
     const hasMenu = action.menu != null
-    const disabled = truthy(valueOf(action.disabled, ctx, action))
-    const label = stringValue(valueOf(action.label, ctx, action) || valueOf(action.title, ctx, action) || action.id || '')
-    const title = stringValue(valueOf(action.title, ctx, action) || label)
-    const icon = stringValue(valueOf(action.icon, ctx, action) || (hasMenu ? 'more-vertical' : ''))
-    const variant = stringValue(valueOf(action.variant, ctx, action) || (action.danger ? 'danger' : 'default'))
+    const disabled = ui._actionSurface.truthy(ui._actionSurface.valueOf(action.disabled, ctx, action))
+    const label = ui._actionSurface.stringValue(ui._actionSurface.valueOf(action.label, ctx, action) || ui._actionSurface.valueOf(action.title, ctx, action) || action.id || '')
+    const title = ui._actionSurface.stringValue(ui._actionSurface.valueOf(action.title, ctx, action) || label)
+    const icon = ui._actionSurface.stringValue(ui._actionSurface.valueOf(action.icon, ctx, action) || (hasMenu ? 'more-vertical' : ''))
+    const variant = ui._actionSurface.stringValue(ui._actionSurface.valueOf(action.variant, ctx, action) || (action.danger ? 'danger' : 'default'))
     const kind = variant === 'danger' ? 'danger' : 'ghost'
     let btn = null
     const onClick = function (ev) {
       if (ev && ev.preventDefault) ev.preventDefault()
       if (ev && ev.stopPropagation) ev.stopPropagation()
       if (hasMenu) openActionMenu(action, btn, ctx, closeMenus, openMenus)
-      else runAction(action, ctx)
+      else ui._actionSurface.runAction(action, ctx, 'ui.actionBar')
     }
     btn = icon
       ? ui.iconButton({ icon: icon, title: title || label || 'Action', ariaLabel: label || title || 'Action', kind: kind, size: 'sm', disabled: disabled, onClick: onClick })
@@ -91,11 +86,11 @@
 
   function openActionMenu(action, anchor, ctx, closeMenus, openMenus) {
     closeMenus()
-    const raw = valueOf(action.menu, ctx, action) || []
-    const items = normalizeMenuItems(raw, ctx)
-    const pop = ui.menu({
+    const pop = ui.actionMenu({
       anchor: anchor,
-      items: items,
+      actions: action.menu,
+      ctx: ctx,
+      sourceScope: 'ui.actionBar',
       side: 'bottom',
       align: 'end',
       onDismiss: function () {
@@ -104,74 +99,5 @@
       },
     })
     openMenus.push(pop)
-  }
-
-  function normalizeMenuItems(items, ctx) {
-    const list = Array.isArray(items) ? items : []
-    const out = []
-    for (let i = 0; i < list.length; i++) {
-      const item = list[i]
-      if (!item) continue
-      if (truthy(valueOf(item.hidden, ctx, item))) continue
-      if (item.type === 'divider' || item.type === 'header') {
-        out.push(Object.assign({}, item, { label: valueOf(item.label, ctx, item) || '' }))
-        continue
-      }
-      const children = item.items || valueOf(item.menu, ctx, item)
-      const disabled = truthy(valueOf(item.disabled, ctx, item))
-      const normalized = {
-        label: valueOf(item.label, ctx, item) || valueOf(item.title, ctx, item) || item.id || '',
-        icon: valueOf(item.icon, ctx, item) || '',
-        kbd: valueOf(item.kbd, ctx, item) || '',
-        disabled: disabled,
-        danger: truthy(item.danger) || valueOf(item.variant, ctx, item) === 'danger',
-      }
-      if (children && children.length) normalized.items = normalizeMenuItems(children, ctx)
-      else normalized.onSelect = disabled ? null : function (it) {
-        return function () { runAction(it, ctx) }
-      }(item)
-      out.push(normalized)
-    }
-    return out
-  }
-
-  function runAction(action, ctx) {
-    const args = valueOf(action.args != null ? action.args : action.input, ctx, action) || {}
-    const actionCtx = Object.assign({ action: action.id || '' }, ctx || {})
-    const source = { scope: 'ui.actionBar', action: 'command', id: action.id || action.command || action.label || '' }
-    if (action.command) {
-      const result = aiditor.safeCall(source, function () {
-        return aiditor.commands.run(action.command, args, actionCtx)
-      })
-      watchAsync(result, source)
-    }
-    if (action.onSelect) {
-      const selectSource = { scope: 'ui.actionBar', action: 'select', id: action.id || action.label || '' }
-      const result = aiditor.safeCall(selectSource, function () {
-        return action.onSelect(actionCtx, action)
-      })
-      watchAsync(result, selectSource)
-    }
-  }
-
-  function watchAsync(result, source) {
-    if (result && typeof result.then === 'function') {
-      Promise.resolve(result).catch(function (err) { aiditor.reportError(source, err) })
-    }
-  }
-
-  function valueOf(value, ctx, action) {
-    if (typeof value !== 'function') return value
-    return aiditor.safeCall({ scope: 'ui.actionBar', action: 'value', id: action && action.id || '' }, function () {
-      return value(ctx || {}, action)
-    })
-  }
-
-  function stringValue(value) {
-    return value == null ? '' : String(value)
-  }
-
-  function truthy(value) {
-    return !!value
   }
 })(window.aiditor = window.aiditor || {})

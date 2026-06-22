@@ -197,6 +197,7 @@ Field action context:
   field,
   label,
   rawField,
+  resolvedField,
   value,
   targets,
   ctx
@@ -206,6 +207,28 @@ Field action context:
 Actions are rendered through `aiditor.ui.actionBar` and use the same `UiAction`
 shape as header and group actions: `icon`, `label`, `title`, `variant:"danger"`,
 `disabled`, `hidden`, `menu`, `command`, `args`, and local `onSelect`.
+
+Visible field row actions are separate from field context-menu actions.
+`propertyForm` can also receive one `fieldContextActions(fieldCtx)` strategy
+function. The same callback is used for every field; it receives the row's
+`fieldCtx` and returns `UiAction[]` or `Promise<UiAction[]>`.
+
+```js
+aiditor.ui.propertyForm({
+  schema,
+  targets,
+  fieldContextActions: function (fieldCtx) {
+    return fieldCtx.resolvedField.type === 'number'
+      ? [{ label: 'Reset', icon: 'refresh', command: 'field.reset' }]
+      : []
+  },
+})
+```
+
+This is not per-field UI wiring. A `propertyList` item can pass its own
+strategy down to the nested `propertyForm`, but the row DOM, menu placement,
+loading state for async actions, and UiAction execution stay in the framework.
+The caller owns the returned actions and their semantics.
 
 ## Field Row Layout
 
@@ -233,6 +256,19 @@ Action clicks must not:
 - steal pointer capture from an active number input;
 - rebuild the row;
 - break current focus unless the action explicitly opens focusable UI.
+
+Field context menus follow the same stability rule. Right-clicking a label or
+row chrome can open a menu, but right-clicking inside text inputs, numberInput,
+select, sliders, comboboxes, buttons, action rails, or popovers must keep the
+control's native/component context behavior. If the strategy is absent or
+resolves to no visible actions, the browser menu is not intercepted.
+
+One `structInput` / nested `propertyForm` owns one field context menu at a
+time. Opening a field menu closes the previous field menu in the same form, and
+dismiss clears the tracked handle so later right-clicks do not close stale
+menus. These menus use context-menu dismissal semantics: clicking the original
+field row is outside the menu and closes it. Button dropdowns rendered by row
+actions keep the normal dropdown anchor behavior.
 
 ## Relationship To Existing Components
 

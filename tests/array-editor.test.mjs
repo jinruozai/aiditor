@@ -452,4 +452,38 @@ function pointer(el, type, extra) {
   ])
 }
 
+{
+  const css = readFileSync('src/style/ui-form.css', 'utf8')
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-row\s*{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\) auto;/s,
+    'arrayEditor row chrome must size to content instead of a fixed label column'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-row\s*{[^}]*gap:\s*2px;/s,
+    'arrayEditor row chrome must keep a tight gap between index, item, and actions'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-index\s*{[^}]*min-width:\s*0;/s,
+    'arrayEditor index button must not reserve a wide fixed minimum'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-index\s*{[^}]*padding:\s*0 2px;/s,
+    'arrayEditor index button must only keep minimal horizontal padding'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-index-none \.aiditor-ui-array-editor-row\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/s,
+    'arrayEditor indexMode none must remove the index column entirely'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-cell > \.aiditor-ui-struct-input \.aiditor-ui-struct-input-row\s*{[^}]*grid-template-columns:\s*minmax\(36px, 48px\) minmax\(0, 1fr\);/s,
+    'nested structInput inside arrayEditor must use a compact label column'
+  )
+}
+
 console.log('array-editor tests passed')
