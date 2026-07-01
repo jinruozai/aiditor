@@ -185,6 +185,10 @@
         fieldDef: subFd,
         label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
         labelMode: rawObj && rawObj.labelMode,
+        fieldLayout: rawObj && rawObj.fieldLayout,
+        defaultCollapsed: rawObj && rawObj.defaultCollapsed,
+        collapsed: rawObj && rawObj.collapsed,
+        onToggle: rawObj && rawObj.onToggle,
         actions: rawObj && rawObj.actions,
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
       }

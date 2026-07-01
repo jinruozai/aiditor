@@ -644,6 +644,75 @@ function contextmenu(el, target, extra) {
 }
 
 {
+  const targets = aiditor.signal([{
+    transform: [
+      [1, 2, 3],
+      [4, 5, 6],
+      [1, 1, 1],
+    ],
+  }])
+  const form = ui.propertyForm({
+    targets,
+    schema: {
+      transform: {
+        type: 'struct',
+        label: 'Transform',
+        fieldLayout: 'block',
+        struct_def: {
+          pos: { type: 'var', type_render: 'test_vector_column' },
+          rot: { type: 'var', type_render: 'test_vector_column' },
+          scale: { type: 'var', type_render: 'test_vector_column' },
+        },
+      },
+    },
+  })
+  const row = form.querySelector('.aiditor-ui-struct-input-row')
+  assert.equal(row.classList.contains('aiditor-ui-struct-input-row-layout-block'), true)
+  assert.equal(row.children[0].textContent, 'Transform')
+  assert.equal(row.children[1].classList.contains('aiditor-ui-struct-input-cell'), true)
+  assert.ok(row.children[1].querySelector('.aiditor-ui-struct-input'))
+  assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
+}
+
+{
+  const value = aiditor.signal({ transform: [[1, 2, 3]] })
+  const el = ui.structInput({
+    value,
+    fields: [{
+      key: 'transform',
+      label: 'Transform',
+      fieldLayout: 'section',
+      defaultCollapsed: true,
+      editor: function () { return ui.h('div', 'inner-editor') },
+    }],
+  })
+  const row = el.querySelector('.aiditor-ui-struct-input-row')
+  const toggle = el.querySelector('.aiditor-ui-struct-input-section-toggle')
+  assert.equal(row.classList.contains('aiditor-ui-struct-input-row-layout-section'), true)
+  assert.equal(row.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(toggle.attributes['aria-expanded'], 'false')
+  toggle.click()
+  assert.equal(row.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(toggle.attributes['aria-expanded'], 'true')
+}
+
+{
+  const value = aiditor.signal({ hidden: 1 })
+  const el = ui.structInput({
+    value,
+    fields: [{
+      key: 'hidden',
+      label: false,
+      fieldLayout: 'section',
+      editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) },
+    }],
+  })
+  const row = el.querySelector('.aiditor-ui-struct-input-row')
+  assert.equal(row.classList.contains('aiditor-ui-struct-input-row-layout-block'), true)
+  assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-section-toggle').length, 0)
+}
+
+{
   assert.deepEqual(ui.resolveType('struct').default, [])
 }
 
@@ -909,6 +978,30 @@ function contextmenu(el, target, extra) {
   })
   assert.ok(addFavorite)
   assert.doesNotThrow(function () { addFavorite.click() })
+}
+
+{
+  const css = readFileSync('src/style/ui-form.css', 'utf8')
+  assert.match(
+    css,
+    /\.aiditor-ui-struct-input-row-layout-block,\s*\.aiditor-ui-struct-input-row-layout-section\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+    'block and section struct rows must put the editor on a full-width line'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-property-form \.aiditor-ui-property-form-struct > \.aiditor-ui-struct-input-row-layout-block,\s*\.aiditor-ui-property-form \.aiditor-ui-property-form-struct > \.aiditor-ui-struct-input-row-layout-section\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+    'propertyForm block and section rows must override the inspector label column'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-struct-input-row-collapsed > \.aiditor-ui-struct-input-cell\s*{[^}]*display:\s*none;/s,
+    'section field rows must hide their editor cell when collapsed'
+  )
+  assert.doesNotMatch(
+    css,
+    /\.aiditor-ui-struct-input-label\[data-has-tip\]\s*{[^}]*cursor:/s,
+    'tooltip markers should not change the mouse cursor'
+  )
 }
 
 console.log('input component tests ok')

@@ -520,6 +520,41 @@ single struct field and repeating the same label would waste space:
 The editor then spans the full property row. `labelMode: "sr-only"` keeps the
 label available to assistive technology while removing the visual column.
 
+Composite fields can also choose a field row layout:
+
+```js
+{
+  transform: {
+    type: 'struct',
+    label: 'Transform',
+    fieldLayout: 'block',
+    struct_def: {
+      pos: 'vec3',
+      rot: 'vec3',
+      scale: 'vec3',
+    },
+  },
+}
+```
+
+`fieldLayout:"row"` is the default `label | editor` layout. Use it for compact
+primitive fields and small controls.
+
+`fieldLayout:"block"` puts the label on its own row and lets the editor span
+the full width below it. This is the preferred layout for fixed composites such
+as structs, vectors, curves, arrays, and dictionaries when horizontal room is
+more valuable than one-line density.
+
+`fieldLayout:"section"` uses the same full-width editor layout but makes the
+field label a local collapsible header. It is still a field row, not a
+`propertyForm` group. Use it for larger outer composites; nested child fields
+remain normal rows unless their own schema explicitly asks for a different
+layout. `defaultCollapsed:true` controls the initial local collapsed state.
+
+If `fieldLayout:"section"` is combined with a hidden or screen-reader-only
+label, the field uses block layout instead. A collapsible field must have a
+visible header.
+
 When `propertyForm` renders grouped fields, its group sections use Inspector
 scoped styling through `.aiditor-ui-property-section`: compact bar headers,
 transparent bodies, and small row insets. Generic `aiditor.ui.section` keeps its

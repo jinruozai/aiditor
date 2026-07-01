@@ -23685,7 +23685,14 @@
 //     support_render?: string[],  // optional whitelist the TypeConfig editor
 //                                 // uses to populate render-kind dropdowns
 //   }
-//   FieldDef = { type: string, mem?: string, type_agv?: object, ... }
+//   FieldDef = {
+//     type: string,
+//     mem?: string,
+//     type_agv?: object,
+//     fieldLayout?: 'row'|'block'|'section',
+//     defaultCollapsed?: boolean,
+//     ...
+//   }
 //
 // The merge in resolveFieldDef is shallow on the top level but DEEP on
 // type_agv, so a field that sets `type_agv: { max: 60 }` doesn't erase
@@ -23822,10 +23829,12 @@
 //
 // opts:
 //   value:    signal<object>                               required; keyed UI projection
-//   fields:   [{ key, label?, labelMode?, tooltip?, editor,
+//   fields:   [{ key, label?, labelMode?, fieldLayout?, defaultCollapsed?,
+//                collapsed?, onToggle?, tooltip?, editor,
 //                actions?, actionCtx?, contextActions?, contextCtx? }] required
 //               label:false or labelMode:'hidden' hides the visual row label
 //               labelMode:'sr-only' keeps an accessible label without a column
+//               fieldLayout:'row'|'block'|'section' controls label/editor layout
 //               editor(slotSig, write, ctx) → HTMLElement
 //               tooltip — optional one-liner shown on label hover
 //               contextActions(ctx) — optional UiAction[] | Promise<UiAction[]>
@@ -23874,10 +23883,14 @@
 
     fields.forEach(function (f) {
       const labelMode = fieldLabelMode(f)
+      const layout = fieldLayout(f, labelMode)
       const row   = ui.h('div', 'aiditor-ui-struct-input-row')
       row.dataset.efFieldKey = String(f.key)
       row.classList.add('aiditor-ui-struct-input-row-label-' + labelMode)
-      const label = ui.h('div', 'aiditor-ui-struct-input-label', { text: fieldLabel(f) })
+      row.classList.add('aiditor-ui-struct-input-row-layout-' + layout)
+      const label = layout === 'section'
+        ? sectionLabel(root, row, f)
+        : ui.h('div', 'aiditor-ui-struct-input-label', { text: fieldLabel(f) })
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
@@ -23955,6 +23968,36 @@
   function fieldLabel(f) {
     if (f.label === false) return String(f.key)
     return f.label || f.key
+  }
+
+  function fieldLayout(f, labelMode) {
+    const layout = f && f.fieldLayout
+    if (labelMode !== 'visible' && layout === 'section') return 'block'
+    return layout === 'block' || layout === 'section' ? layout : 'row'
+  }
+
+  function sectionLabel(root, row, f) {
+    const collapsed = ui.asSig(f.collapsed != null ? f.collapsed : !!f.defaultCollapsed)
+    const writeCollapsed = function (next) {
+      if (typeof f.onToggle === 'function') {
+        aiditor.safeCall({ scope: 'ui.structInput', action: 'toggleFieldSection', field: f.key }, function () { f.onToggle(next) })
+      }
+      else if (typeof collapsed.set === 'function') collapsed.set(next)
+    }
+    const btn = ui.h('button', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-toggle', { type: 'button' })
+    const arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
+    arrow.classList.add('aiditor-ui-struct-input-section-arrow')
+    btn.appendChild(arrow)
+    btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+    btn.addEventListener('click', function () { writeCollapsed(!collapsed.peek()) })
+    const stop = aiditor.effect(function () {
+      const v = collapsed()
+      row.classList.toggle('aiditor-ui-struct-input-row-collapsed', !!v)
+      btn.setAttribute('aria-expanded', v ? 'false' : 'true')
+      arrow.style.transform = v ? 'rotate(-90deg)' : ''
+    })
+    ui.collect(root, stop)
+    return btn
   }
 
   function openFieldContextMenu(ev, row, label, field, closeFieldMenu, setFieldMenu, clearFieldMenu) {
@@ -25349,6 +25392,10 @@
         fieldDef: subFd,
         label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
         labelMode: rawObj && rawObj.labelMode,
+        fieldLayout: rawObj && rawObj.fieldLayout,
+        defaultCollapsed: rawObj && rawObj.defaultCollapsed,
+        collapsed: rawObj && rawObj.collapsed,
+        onToggle: rawObj && rawObj.onToggle,
         actions: rawObj && rawObj.actions,
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
       }
@@ -25664,6 +25711,10 @@
             key:     fname,
             label:   label.value,
             labelMode: label.mode,
+            fieldLayout: raw && raw.fieldLayout,
+            defaultCollapsed: raw && raw.defaultCollapsed,
+            collapsed: raw && raw.collapsed,
+            onToggle: raw && raw.onToggle,
             tooltip: subFd.desc || '',
             actions: action.actions,
             actionCtx: action.ctx,

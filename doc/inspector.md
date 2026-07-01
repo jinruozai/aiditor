@@ -337,6 +337,14 @@ a provider refresh. Only real field structure changes, or search filtering that
 changes the visible field set, rebuild the form rows. Group labels and actions
 update section header chrome without recreating the group body.
 
+Composite fields should not be forced into the default two-column property row
+when that wastes the editor area. Providers can use `fieldLayout:"block"` on a
+schema field to put the field label on one row and the composite editor below
+it, spanning the full Inspector width. Use `fieldLayout:"section"` when that
+field itself should be locally collapsible. This is distinct from `group`: a
+group is an Inspector section that contains multiple fields, while
+`fieldLayout` only changes one field row.
+
 ## Boundaries
 
 - `propertyForm` is a UI form control.

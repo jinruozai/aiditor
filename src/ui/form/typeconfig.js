@@ -30,7 +30,14 @@
 //     support_render?: string[],  // optional whitelist the TypeConfig editor
 //                                 // uses to populate render-kind dropdowns
 //   }
-//   FieldDef = { type: string, mem?: string, type_agv?: object, ... }
+//   FieldDef = {
+//     type: string,
+//     mem?: string,
+//     type_agv?: object,
+//     fieldLayout?: 'row'|'block'|'section',
+//     defaultCollapsed?: boolean,
+//     ...
+//   }
 //
 // The merge in resolveFieldDef is shallow on the top level but DEEP on
 // type_agv, so a field that sets `type_agv: { max: 60 }` doesn't erase

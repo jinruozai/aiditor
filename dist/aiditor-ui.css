@@ -1975,6 +1975,68 @@
 .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
   grid-column: 1;
 }
+.aiditor-ui-struct-input-row-layout-block,
+.aiditor-ui-struct-input-row-layout-section {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  align-items: stretch;
+}
+.aiditor-ui-struct-input-row-layout-block.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
+.aiditor-ui-struct-input-row-layout-section.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-label,
+.aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-label {
+  grid-column: 1;
+}
+.aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-cell,
+.aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell {
+  grid-column: 1 / -1;
+}
+.aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
+.aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-dict-input,
+.aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-array-input,
+.aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-array-editor,
+.aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
+.aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-dict-input,
+.aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-array-input,
+.aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-array-editor {
+  border: 0;
+  padding: 1px 0 0 var(--aiditor-space-1);
+  background: transparent;
+}
+.aiditor-ui-struct-input-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--aiditor-r-1);
+  background: transparent;
+  color: var(--aiditor-fg-2);
+  text-align: left;
+  cursor: pointer;
+}
+.aiditor-ui-struct-input-section-toggle:hover {
+  color: var(--aiditor-fg-0);
+  background: var(--aiditor-hover);
+}
+.aiditor-ui-struct-input-section-arrow {
+  flex: 0 0 auto;
+  color: var(--aiditor-fg-3);
+}
+.aiditor-ui-struct-input-section-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aiditor-ui-struct-input-row-collapsed > .aiditor-ui-struct-input-cell {
+  display: none;
+}
 .aiditor-ui-struct-input-label-hidden { display: none; }
 .aiditor-ui-struct-input-label-sr-only {
   position: absolute;
@@ -2196,9 +2258,25 @@
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
   grid-column: 1;
 }
-/* Help cursor only when the label actually carries a tooltip — otherwise the
- * cursor lies. Marker is set by ui.structInput when a tooltip is wired. */
-.aiditor-ui-struct-input-label[data-has-tip] { cursor: help; }
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block,
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: var(--aiditor-space-1) 0 var(--aiditor-space-2);
+}
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-label,
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-label {
+  grid-column: 1;
+  font-weight: 700;
+}
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block > .aiditor-ui-struct-input-cell,
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell {
+  grid-column: 1 / -1;
+}
 /* Section-wrapped groups: section provides the collapsible header; we
    keep a small inset so rows and nested composite editors do not touch edges. */
 .aiditor-ui-property-section {
