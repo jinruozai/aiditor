@@ -10,6 +10,18 @@
   const DENSITY_ATTR = 'data-aiditor-density'
   const DEFAULT = 'dark'
   const DEFAULT_DENSITY = 'default'
+  const builtInModes = [
+    { id: 'dark', label: 'Dark', scheme: 'dark' },
+    { id: 'dracula', label: 'Violet', scheme: 'dark' },
+    { id: 'harbor', label: 'Harbor', scheme: 'dark' },
+    { id: 'abyss', label: 'Sea', scheme: 'dark' },
+    { id: 'hadal', label: 'Abyss', scheme: 'dark' },
+    { id: 'forest', label: 'Forest', scheme: 'dark' },
+    { id: 'sakura', label: 'Sakura', scheme: 'light' },
+    { id: 'pop', label: 'Pop', scheme: 'light' },
+    { id: 'linen', label: 'Linen', scheme: 'light' },
+    { id: 'light', label: 'Light', scheme: 'light' },
+  ]
 
   const authoringTokens = [
     '--aiditor-surface-canvas',
@@ -98,12 +110,40 @@
     return lines.join('\n')
   }
 
+  function modes() {
+    return builtInModes.map(function (mode) {
+      return { id: mode.id, label: mode.label, scheme: mode.scheme }
+    })
+  }
+
+  function modeIds() {
+    return builtInModes.map(function (mode) { return mode.id })
+  }
+
+  function modeOptions() {
+    return builtInModes.map(function (mode) {
+      return { value: mode.id, label: mode.label }
+    })
+  }
+
+  function hasMode(id) {
+    const key = String(id || '')
+    for (let i = 0; i < builtInModes.length; i++) {
+      if (builtInModes[i].id === key) return true
+    }
+    return false
+  }
+
   aiditor.theme = {
     attr: ATTR,
     densityAttr: DENSITY_ATTR,
     default: DEFAULT,
     defaultDensity: DEFAULT_DENSITY,
     authoringTokens: authoringTokens.slice(),
+    modes: modes,
+    modeIds: modeIds,
+    modeOptions: modeOptions,
+    hasMode: hasMode,
     set: set,
     get: get,
     setDensity: setDensity,

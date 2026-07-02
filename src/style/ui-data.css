@@ -7,8 +7,9 @@
   min-height: 0;
   overflow-y: auto;
   background: var(--aiditor-view-bg);
-  border: 1px solid var(--aiditor-border);
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
   border-radius: var(--aiditor-view-radius);
+  box-shadow: var(--aiditor-shadow-surface);
 }
 .aiditor-ui-list-spacer { position: relative; width: 100%; }
 .aiditor-ui-list-window {
@@ -44,8 +45,9 @@
   min-height: 0;
   overflow-y: auto;
   background: var(--aiditor-view-bg);
-  border: 1px solid var(--aiditor-border);
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
   border-radius: var(--aiditor-view-radius);
+  box-shadow: var(--aiditor-shadow-surface);
   outline: none;
 }
 /* Container focus ring — keyboard only. :focus alone would light up on
@@ -88,7 +90,7 @@
   font-size: var(--aiditor-fs-sm);
   line-height: 1;
   cursor: pointer;
-  border-radius: var(--aiditor-r-1, 2px);
+  border-radius: var(--aiditor-radius-control);
 }
 .aiditor-ui-tree-arrow:hover { color: var(--aiditor-fg-0); background: var(--aiditor-bg-3); }
 .aiditor-ui-tree-leading,
@@ -120,7 +122,7 @@
 .aiditor-ui-tree-match {
   background: color-mix(in srgb, var(--aiditor-accent) 30%, transparent);
   color: var(--aiditor-fg-0);
-  border-radius: var(--aiditor-r-1, 2px);
+  border-radius: var(--aiditor-radius-control);
   padding: 0 1px;
 }
 .aiditor-ui-tree-row-matched { /* subtle tint when in highlight mode */ }
@@ -137,10 +139,10 @@
 .aiditor-ui-tree-ghost {
   background: var(--aiditor-bg-raised, var(--aiditor-bg-2));
   color: var(--aiditor-fg-0);
-  border: 1px solid var(--aiditor-accent);
-  border-radius: var(--aiditor-view-radius);
+  border: var(--aiditor-overlay-border-w) solid var(--aiditor-accent);
+  border-radius: var(--aiditor-radius-overlay);
   padding: 4px 10px;
-  box-shadow: var(--aiditor-shadow-lg, 0 8px 24px rgba(0,0,0,0.4));
+  box-shadow: var(--aiditor-shadow-overlay);
   font-weight: 500;
 }
 .aiditor-ui-tree-drop-indicator {
@@ -157,7 +159,7 @@
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--aiditor-accent) 45%, transparent),
     0 0 10px color-mix(in srgb, var(--aiditor-accent) 30%, transparent);
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-surface);
 }
 .aiditor-ui-tree-drop-indicator.aiditor-ui-tree-drop-reject {
   background: var(--aiditor-error);
@@ -174,8 +176,9 @@
   display: flex;
   flex-direction: column;
   background: var(--aiditor-view-bg);
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-surface);
+  box-shadow: var(--aiditor-shadow-surface);
   overflow: hidden;
 }
 .aiditor-ui-table-head {
@@ -234,10 +237,10 @@
   max-width: 180px;
   padding: 4px 8px;
   border: 1px solid var(--aiditor-accent);
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-overlay);
   background: var(--aiditor-bg-raised);
   color: var(--aiditor-fg-1);
-  box-shadow: var(--aiditor-shadow-3);
+  box-shadow: var(--aiditor-shadow-overlay);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
   white-space: nowrap;
   overflow: hidden;
@@ -250,7 +253,7 @@
   z-index: 6;
   display: none;
   width: 2px;
-  border-radius: var(--aiditor-r-pill);
+  border-radius: var(--aiditor-radius-chip);
   background: var(--aiditor-accent);
   box-shadow: 0 0 8px var(--aiditor-accent);
   pointer-events: none;
@@ -271,7 +274,7 @@
   font: inherit;
   padding: 0 var(--aiditor-space-1);
   cursor: pointer;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
 }
 .aiditor-ui-crumbs-link:hover { background: var(--aiditor-hover); color: var(--aiditor-fg-0); }
 .aiditor-ui-crumbs-static { padding: 0 var(--aiditor-space-1); }
@@ -293,7 +296,7 @@
 .aiditor-ui-progress-linear {
   width: 100%;
   background: var(--aiditor-bg-2);
-  border-radius: var(--aiditor-r-pill);
+  border-radius: var(--aiditor-radius-chip);
   overflow: hidden;
 }
 .aiditor-ui-progress-linear.aiditor-ui-progress-sm { height: 4px; }
@@ -417,7 +420,7 @@
   align-items: stretch;
   margin-bottom: 1px;
   border: 1px solid transparent;
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-control);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
   background: var(--aiditor-bg-2);
   overflow: hidden;
@@ -491,7 +494,7 @@
   height: 16px;
   padding: 0;
   border: 0;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-3);
   color: var(--aiditor-fg-1);
   font: 600 var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -562,8 +565,8 @@
   max-height: 220px;
   overflow: auto;
   padding: var(--aiditor-space-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-1);
   color: var(--aiditor-fg-1);
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -604,7 +607,7 @@
   margin: var(--aiditor-space-2);
   padding: var(--aiditor-space-2);
   border: 1px solid color-mix(in srgb, var(--aiditor-error) 44%, var(--aiditor-border));
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-control);
   background: color-mix(in srgb, var(--aiditor-error) 10%, var(--aiditor-bg-2));
   color: var(--aiditor-error);
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -636,7 +639,7 @@
   margin-bottom: 2px;
   padding: 0 var(--aiditor-space-2) 0 var(--aiditor-space-3);
   border: 1px solid transparent;
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-2);
   color: var(--aiditor-fg-0);
   text-align: left;
@@ -807,8 +810,8 @@
   min-width: 0;
   max-width: 42%;
   padding: 0 var(--aiditor-space-2);
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-1);
   overflow: hidden;
 }
@@ -858,7 +861,7 @@
   padding: 3px;
   box-sizing: border-box;
   border: 1px solid transparent;
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-control);
   color: var(--aiditor-fg-1);
   cursor: default;
   user-select: none;
@@ -892,8 +895,8 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-2);
 }
 .aiditor-ui-assetgrid-list .aiditor-ui-assetthumb {
@@ -993,8 +996,8 @@
 .aiditor-change-review-status {
   flex: 0 0 auto;
   padding: 1px 6px;
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-pill);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-chip);
   color: var(--aiditor-fg-3);
   font-size: var(--aiditor-fs-xs);
   line-height: 16px;
@@ -1019,7 +1022,7 @@
 .aiditor-change-review-validation-item {
   padding: 4px 7px;
   border: 1px solid color-mix(in srgb, var(--aiditor-error) 35%, var(--aiditor-border));
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-control);
   background: color-mix(in srgb, var(--aiditor-error) 10%, var(--aiditor-bg-1));
   color: var(--aiditor-error);
 }
@@ -1030,8 +1033,8 @@
   gap: var(--aiditor-space-1);
 }
 .aiditor-change-review-resource {
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-surface);
   background: var(--aiditor-bg-1);
   overflow: hidden;
 }
@@ -1074,8 +1077,8 @@
   flex: 0 1 auto;
   min-width: 0;
   padding: 1px 6px;
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-pill);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-chip);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1093,8 +1096,8 @@
   grid-template-columns: 54px minmax(0, 1fr);
   flex: 1 1 0;
   min-width: 0;
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-control);
   overflow: hidden;
   background: var(--aiditor-bg-0);
 }

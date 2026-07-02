@@ -270,7 +270,7 @@ assert.match(formCss, /\.aiditor-inspector-body\s*\{[\s\S]*?padding:\s*6px var\(
 assert.match(formCss, /\.aiditor-ui-property-section\s*\{[\s\S]*?border:\s*0;/)
 assert.match(formCss, /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-head\s*\{[\s\S]*?border-radius:/)
 assert.match(formCss, /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-body\s*\{[\s\S]*?background:\s*transparent;/)
-assert.match(containerCss, /\.aiditor-ui-section\s*\{[\s\S]*?border:\s*1px solid var\(--aiditor-border\);/)
+assert.match(containerCss, /\.aiditor-ui-section\s*\{[\s\S]*?border:\s*var\(--aiditor-surface-border-w\) solid var\(--aiditor-border\);/)
 assert.match(containerCss, /\.aiditor-ui-section-body\s*\{[\s\S]*?background:\s*var\(--aiditor-view-bg\);/)
 
 cleanups.forEach(function (fn) { fn() })

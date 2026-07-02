@@ -54,6 +54,8 @@ let env = boot({
 })
 assert.equal(env.root.getAttribute('data-aiditor-theme'), 'forest')
 assert.equal(env.root.getAttribute('data-aiditor-density'), 'compact')
+const modeSchema = env.aiditor.settings.schemas.peek().find((schema) => schema.key === 'theme.mode')
+assert.deepEqual(env.aiditor.settings.resolveOptions(modeSchema.options), env.aiditor.theme.modeOptions())
 
 env = boot({
   'aiditor-theme-mode': 'sakura',

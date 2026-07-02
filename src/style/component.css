@@ -57,11 +57,11 @@
   top: 0; left: 0;
   padding: var(--aiditor-space-1) var(--aiditor-space-3);
   background: var(--aiditor-bg-1);
-  border: 1px solid var(--aiditor-accent);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-overlay-border-w) solid var(--aiditor-accent);
+  border-radius: var(--aiditor-radius-overlay);
   color: var(--aiditor-fg-0);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
-  box-shadow: var(--aiditor-shadow-3);
+  box-shadow: var(--aiditor-shadow-overlay);
   will-change: transform;
 }
 .aiditor-drop-target {

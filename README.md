@@ -327,23 +327,23 @@ persistence, and object semantics stay in the host app.
 
 ### Themes
 
-Built-in themes:
+Built-in theme metadata is exposed by `aiditor.theme`:
 
 ```js
-aiditor.theme.set('dark')     // Dark
-aiditor.theme.set('dracula')  // Violet
-aiditor.theme.set('harbor')   // Harbor
-aiditor.theme.set('abyss')    // Sea
-aiditor.theme.set('hadal')    // Abyss
-aiditor.theme.set('forest')   // Forest
-aiditor.theme.set('sakura')   // Sakura
-aiditor.theme.set('linen')    // Linen
-aiditor.theme.set('light')    // Light
+aiditor.theme.modeOptions()
+aiditor.theme.modeIds()
+aiditor.theme.set('pop')
 ```
 
 Custom themes should start from semantic authoring tokens such as
 `--aiditor-surface-*`, `--aiditor-text-*`, `--aiditor-stroke-*`,
-`--aiditor-brand`, and `--aiditor-state-*`.
+`--aiditor-brand`, and `--aiditor-state-*`. Visual style beyond color is also
+themeable through appearance role tokens for control/surface radius, border
+width, elevation, root texture, and small accent geometry.
+
+Theme ids and labels are framework metadata, not demo-local constants. Runtime
+consumers should read `aiditor.theme.modeOptions()` or
+`aiditor.theme.modeIds()` instead of maintaining duplicate theme lists.
 
 ## Built-In AI Host
 

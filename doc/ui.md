@@ -708,6 +708,39 @@ Themes are token-driven and applied through `aiditor.theme`.
 
 UI components should consume semantic role tokens, not domain-specific colors.
 
+Theme configuration has two deliberately separate sources of truth:
+
+- `src/core/theme.js` owns theme metadata: mode id, display label, color scheme,
+  and public lookup helpers.
+- `src/style/theme.css` owns the visual token implementation for each mode.
+
+Do not derive theme metadata by parsing CSS selectors, and do not duplicate
+theme mode arrays in settings panels, demo helpers, AI tools, or tests. CSS is
+the visual contract; Core metadata is the runtime schema contract.
+
+The public metadata surface is:
+
+```js
+aiditor.theme.modes()        // [{ id, label, scheme }]
+aiditor.theme.modeIds()      // ['dark', 'dracula', ...]
+aiditor.theme.modeOptions()  // [{ value, label }]
+aiditor.theme.hasMode(id)
+```
+
+Consumers should use that surface:
+
+```js
+aiditor.ui.select({
+  value: mode,
+  options: aiditor.theme.modeOptions(),
+})
+
+const schema = {
+  type: 'string',
+  enum: aiditor.theme.modeIds(),
+}
+```
+
 `aiditor.theme.set(mode[, root])` and `aiditor.theme.setDensity(density[, root])`
 are low-level runtime APIs. They update the target root immediately and do not
 persist by themselves, because scoped roots should not overwrite global user
@@ -726,3 +759,214 @@ standalone keys such as `aiditor-theme-mode` and `aiditor-theme-density` are
 migrated into settings when no explicit setting exists. Custom authoring-token
 overrides are restored from the theme override store before the settings effect
 applies the active mode.
+
+Adding a built-in theme requires exactly two authored changes:
+
+1. Add metadata to `aiditor.theme` in `src/core/theme.js`.
+2. Add the matching `[data-aiditor-theme="<id>"]` token block in
+   `src/style/theme.css`.
+
+The settings UI, `theme-config` panel, demo AI theme tools, docs examples, and
+tests must read the Core metadata instead of maintaining their own theme lists.
+
+### Theme Appearance Contract
+
+Theme quality is not only color. AIditor themes define a compact appearance
+contract with five high-leverage axes:
+
+```text
+color
+shape
+stroke
+elevation
+surface texture
+accent geometry
+```
+
+The design goal is to let themes express different visual languages, such as a
+neutral Godot-like dark theme or a cream-paper magenta geometric theme, without
+adding theme-specific component CSS. Components must not branch on a theme id.
+They consume role tokens.
+
+The existing color contract remains:
+
+```css
+--aiditor-bg-*
+--aiditor-fg-*
+--aiditor-border*
+--aiditor-accent*
+--aiditor-success / --aiditor-warn / --aiditor-error / --aiditor-info
+```
+
+The appearance contract adds role tokens for shape:
+
+```css
+--aiditor-radius-control
+--aiditor-radius-surface
+--aiditor-radius-overlay
+--aiditor-radius-tab
+--aiditor-radius-chip
+```
+
+For stroke:
+
+```css
+--aiditor-border-w
+--aiditor-border-w-strong
+--aiditor-border-w-focus
+--aiditor-control-border-w
+--aiditor-surface-border-w
+--aiditor-overlay-border-w
+--aiditor-dock-border-w
+--aiditor-toolbar-border-w
+```
+
+For elevation:
+
+```css
+--aiditor-shadow-control
+--aiditor-shadow-surface
+--aiditor-shadow-raised
+--aiditor-shadow-overlay
+--aiditor-shadow-active
+```
+
+For root-level surface texture:
+
+```css
+--aiditor-root-bg-image
+--aiditor-root-bg-size
+--aiditor-root-bg-position
+--aiditor-root-bg-blend
+```
+
+For small accent geometry:
+
+```css
+--aiditor-corner-accent-size
+--aiditor-corner-accent-color
+--aiditor-corner-accent-opacity
+```
+
+Dock tabs have one additional component-level appearance contract because their
+shape depends on toolbar direction. Component CSS owns the geometry
+(`top` / `bottom` / `left` / `right`), while the theme owns the active fill,
+indicator, overlay, radius, gap, and per-direction shadow:
+
+```css
+--aiditor-dock-tab-bg
+--aiditor-dock-tab-hover-bg
+--aiditor-dock-tab-active-bg
+--aiditor-dock-tab-border-w
+--aiditor-dock-tab-border
+--aiditor-dock-tab-hover-border
+--aiditor-dock-tab-active-border
+--aiditor-dock-tab-fg
+--aiditor-dock-tab-hover-fg
+--aiditor-dock-tab-active-fg
+--aiditor-dock-tab-gap
+--aiditor-dock-tab-radius-top
+--aiditor-dock-tab-radius-bottom
+--aiditor-dock-tab-radius-left
+--aiditor-dock-tab-radius-right
+--aiditor-dock-tab-indicator-bg
+--aiditor-dock-tab-indicator-bg-vertical
+--aiditor-dock-tab-indicator-size
+--aiditor-dock-tab-indicator-inset
+--aiditor-dock-tab-indicator-radius
+--aiditor-dock-tab-indicator-opacity
+--aiditor-dock-tab-active-overlay-top
+--aiditor-dock-tab-active-overlay-bottom
+--aiditor-dock-tab-active-overlay-left
+--aiditor-dock-tab-active-overlay-right
+--aiditor-dock-tab-active-shadow-top
+--aiditor-dock-tab-active-shadow-bottom
+--aiditor-dock-tab-active-shadow-left
+--aiditor-dock-tab-active-shadow-right
+```
+
+Accent geometry is intentionally narrow. It is a small optional marker for
+container-like surfaces, not a general clip-path or illustration system. Default
+themes keep it disabled with zero size and transparent color. A geometric theme
+can enable a small corner marker on dock, section, and card surfaces through
+the shared component CSS.
+
+Component consumption rules:
+
+- Form controls use `radius-control`, `control-border-w`, and
+  `shadow-control`.
+- Dock bodies, views, cards, sections, property groups, and list containers use
+  `radius-surface`, `surface-border-w`, and `shadow-surface`.
+- Popovers, menus, modals, drawers, and toasts use `radius-overlay`,
+  `overlay-border-w`, and `shadow-overlay`.
+- Tabs use `radius-tab`; chips, badges, and pills use `radius-chip`.
+- Dock tabs use the dock-tab token set above so themes can choose between an
+  edge glow, a full active slab, a hard outline, or a flat indicator without
+  changing dock renderer logic.
+- AIditor root/view background may use `root-bg-*`. Ordinary panels and fields
+  should not apply texture, because editor content must remain clear and dense.
+- Components should keep semantic state tokens for hover, selected, active,
+  focus, success, warning, danger, and info.
+
+Non-goals:
+
+- No theme-specific selectors such as `.theme-pop .aiditor-ui-button`.
+- No component logic that checks a theme id.
+- No full CSS parser or automatic theme discovery from selector names.
+- No broad `clip-path` shape system for controls. It is hard to keep accessible,
+  focusable, and text-safe in dense editor UIs.
+- No per-component explosion such as `--aiditor-button-pop-corner-size`.
+
+The Pop-style geometric theme should therefore be expressed by assigning these
+shared appearance roles:
+
+```css
+--aiditor-surface-canvas: #f8eedf;
+--aiditor-surface-panel:  #fffaf2;
+--aiditor-surface-field:  #efe1cb;
+--aiditor-text-primary:   #17131f;
+--aiditor-brand:          #f1126c;
+
+--aiditor-border-w: 1px;
+--aiditor-border-w-strong: 2px;
+--aiditor-surface-border-w: 1px;
+--aiditor-toolbar-border-w: 2px;
+
+--aiditor-radius-control: 4px;
+--aiditor-radius-surface: 5px;
+--aiditor-radius-overlay: 6px;
+--aiditor-radius-tab: 2px;
+
+--aiditor-shadow-control: 2px 2px 0 rgba(23,19,31,.10);
+--aiditor-shadow-surface: 5px 5px 0 rgba(23,19,31,.11);
+--aiditor-shadow-overlay: 9px 9px 0 rgba(23,19,31,.13);
+
+--aiditor-root-bg-image:
+  linear-gradient(135deg, rgba(241,18,108,.16) 0 12%, transparent 12% 100%),
+  linear-gradient(315deg, rgba(255,211,63,.28) 0 16%, transparent 16% 100%),
+  linear-gradient(90deg, rgba(23,19,31,.04) 1px, transparent 1px),
+  linear-gradient(rgba(23,19,31,.04) 1px, transparent 1px),
+  radial-gradient(circle at 14% 10%, rgba(255,255,255,.62), transparent 24%),
+  linear-gradient(135deg, var(--aiditor-surface-canvas), color-mix(in srgb, var(--aiditor-surface-canvas) 82%, var(--aiditor-state-warning)));
+--aiditor-root-bg-size: 320px 220px, 360px 240px, 46px 46px, 46px 46px, auto, auto;
+
+--aiditor-corner-accent-size: 12px;
+--aiditor-corner-accent-color: var(--aiditor-accent);
+--aiditor-corner-accent-opacity: .82;
+
+--aiditor-dock-tab-hover-bg: color-mix(in srgb, var(--aiditor-bg-4) 48%, var(--aiditor-bg-raised));
+--aiditor-dock-tab-active-bg: var(--aiditor-brand);
+--aiditor-dock-tab-indicator-bg: var(--aiditor-state-warning);
+--aiditor-dock-tab-indicator-bg-vertical: var(--aiditor-state-warning);
+--aiditor-dock-tab-indicator-size: 3px;
+--aiditor-dock-tab-indicator-inset: 0px;
+--aiditor-dock-tab-active-overlay-top: none;
+--aiditor-dock-tab-active-overlay-bottom: none;
+--aiditor-dock-tab-active-overlay-left: none;
+--aiditor-dock-tab-active-overlay-right: none;
+```
+
+This gives the theme a cream paper surface, crisp ink chrome, restrained offset
+shadow, yellow hover energy, magenta focus/selection, geometric paper texture,
+small corner accents, and direction-aware magenta slab dock tabs while keeping
+controls normal, readable, and editor-dense.

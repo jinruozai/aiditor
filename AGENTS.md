@@ -254,11 +254,11 @@ aiditor/
 - `src/style/theme.css` 采用 v2 分层:Authoring tokens(给主题作者改:`--aiditor-surface-*` / `--aiditor-text-*` / `--aiditor-stroke-*` / `--aiditor-brand*` / `--aiditor-state-*`) → primitive/ramp 兼容层(`--aiditor-c-00..11`) → role tokens(组件消费:`--aiditor-bg-N` / `--aiditor-fg-N` / `--aiditor-border*` / `--aiditor-accent*`) → 少量 component tokens(`--aiditor-toolbar-h` 等)
 - 新代码不要直接在组件 CSS 里消费 `--aiditor-c-*`;组件只读 role tokens。`--aiditor-c-*` 保留给兼容和高级主题,不是用户自定义主题的主入口
 - 派生半透明色优先从语义/role token 派生,例如 `--aiditor-scrim`、`--aiditor-accent-bg`;不要在 overlay / hover 里直接拿某个数字灰阶推断语义
-- **三套内置主题**,通过 `aiditor.theme.set(mode[, root])` 或 `data-aiditor-theme` 切换。`:root` 不写属性 = dark;`.aiditor-root[data-aiditor-theme=...]` 支持单实例 scoped theme:
-  - **dark(默认)** —— Godot Minimal 风:`#272727` 中性炭灰 ramp,`#569eff` 冷蓝 accent,"inset 输入框"角色映射(`--aiditor-bg-2` 比 `--aiditor-bg-1` 深)
-  - **dracula** —— 冷调深灰 + `#7b6ef6` 紫 accent,"raised 输入框"映射(`--aiditor-bg-2` 比 `--aiditor-bg-1` 亮) + 更强阴影
-  - **light** —— 白面板 + 浅灰 inset 字段 + `#5b4ee0` 深紫 accent;显式锁定 bg/border 角色映射,不继承 :root 的"inset in dark"约定
-- 每个非默认主题块都**显式声明**自己的 bg/border 角色映射 + shadow 级别 —— 因为 :root 的 Godot"inset input"约定不是中性默认,被光亮 primitives 继承会反过来变成"raised in light"。三套各自独立锁定,零耦合
+- 主题能力不只包含颜色。shape / stroke width / elevation / root texture / corner accent 都属于通用 appearance role token。组件 CSS 只能消费这些通用 token,不能写 `.theme-pop .xxx` 这类主题专用分支,也不能在 JS 里判断 theme id 来改变组件结构
+- 内置主题通过 `aiditor.theme.set(mode[, root])` 或 `data-aiditor-theme` 切换。`:root` 不写属性 = dark;`.aiditor-root[data-aiditor-theme=...]` 支持单实例 scoped theme
+- 主题元数据只允许在 Core 的 `aiditor.theme` 配一次:mode id、label、color scheme 通过 `modes()` / `modeIds()` / `modeOptions()` / `hasMode(id)` 暴露。`src/style/theme-settings.js`、demo/AI theme schema、测试、文档示例都必须消费这份元数据,不要各写一份 `THEME_MODES`
+- `src/style/theme.css` 只负责每个 `[data-aiditor-theme="<id>"]` 的视觉 token 实现,不要从 CSS selector 反解析主题列表
+- 每个非默认主题块都**显式声明**自己的 bg/border 角色映射 + shadow 级别 —— 因为 :root 的 Godot"inset input"约定不是中性默认,被光亮 primitives 继承会反过来变成"raised in light"。各主题独立锁定,零耦合
 - 内置 `theme-config` panel 复用 `src/style/theme-settings.js` 的主题设置实现,编辑 v2 authoring tokens,通过 `aiditor.theme` / `documentElement.style.setProperty` 写入并用 localStorage 持久化
 
 **UX 微交互(2026-04-15 那一轮专门打磨)**:

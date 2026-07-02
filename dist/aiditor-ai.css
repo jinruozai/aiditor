@@ -171,7 +171,7 @@
 
 .aiditor-ai-group-count {
   flex: 0 0 auto;
-  border: 1px solid var(--aiditor-border);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
   border-radius: 999px;
   padding: 1px 6px;
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -506,9 +506,9 @@
   min-height: 28px;
   padding: 0 var(--aiditor-space-2);
   border: 1px solid color-mix(in srgb, var(--aiditor-border) 78%, transparent);
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-surface);
   background: color-mix(in srgb, var(--aiditor-bg-1) 86%, transparent);
-  box-shadow: var(--aiditor-shadow-0);
+  box-shadow: var(--aiditor-shadow-surface);
   box-sizing: border-box;
 }
 
@@ -705,7 +705,7 @@
   width: 26px;
   height: 26px;
   margin-top: 2px;
-  border: 1px solid var(--aiditor-border);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
   border-radius: 999px;
   background: var(--aiditor-bg-2);
   color: var(--aiditor-fg-2);
@@ -863,8 +863,8 @@
 
 .aiditor-ai-message-code {
   padding: var(--aiditor-space-2);
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-1);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-0);
   color: var(--aiditor-fg-1);
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -885,7 +885,7 @@
   margin-top: var(--aiditor-space-2);
   padding: var(--aiditor-space-1) var(--aiditor-space-2);
   border: 1px solid color-mix(in srgb, var(--aiditor-error) 42%, var(--aiditor-border));
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   background: color-mix(in srgb, var(--aiditor-error) 10%, var(--aiditor-bg-1));
   color: var(--aiditor-error);
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -947,7 +947,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 2px 6px;
-  border: 1px solid var(--aiditor-border);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
   border-radius: 999px;
   background: var(--aiditor-bg-2);
   color: var(--aiditor-fg-2);
@@ -976,8 +976,8 @@
 }
 
 .aiditor-ai-tool-call {
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-surface);
   background: var(--aiditor-bg-1);
   overflow: hidden;
 }
@@ -1206,7 +1206,7 @@
   min-height: 34px;
   padding: var(--aiditor-space-1) var(--aiditor-space-2);
   border: 1px solid color-mix(in srgb, var(--aiditor-warn) 42%, var(--aiditor-border));
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-surface);
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--aiditor-warn) 18%, transparent), transparent 42%),
     color-mix(in srgb, var(--aiditor-warn) 8%, var(--aiditor-bg-1));
@@ -1279,7 +1279,7 @@
   height: var(--aiditor-size-h-sm);
   padding: 0 10px;
   border: 1px solid color-mix(in srgb, var(--aiditor-warn) 38%, var(--aiditor-border));
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   background: color-mix(in srgb, var(--aiditor-bg-2) 86%, var(--aiditor-warn));
   color: var(--aiditor-fg-0);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);

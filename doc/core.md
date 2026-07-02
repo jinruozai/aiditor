@@ -204,6 +204,16 @@ Host apps register their own commands, scopes, bindings, and panel metadata.
 `aiditor.theme` owns theme mode and token application. UI components should read
 semantic CSS tokens instead of domain colors.
 
+`aiditor.theme` also owns built-in theme metadata. Theme ids, labels, and color
+schemes are declared once in Core and exposed through `modes()`, `modeIds()`,
+`modeOptions()`, and `hasMode(id)`. Settings UI, demo tooling, AI tool schemas,
+and tests consume those helpers instead of duplicating their own theme arrays.
+The CSS theme blocks remain the visual token implementation.
+
+Theme tokens cover color and appearance. Shape, stroke width, elevation, root
+texture, and small accent geometry are role tokens consumed by UI components;
+Core does not provide a theme-specific component override system.
+
 `aiditor.i18n` owns language selection and string lookup. It is framework
 infrastructure; dictionaries are provided outside Core.
 

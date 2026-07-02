@@ -11,8 +11,8 @@
   width: 100%;
   height: var(--aiditor-size-h-md);
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   padding: 0 var(--aiditor-control-px);
   gap: var(--aiditor-space-1);
   box-sizing: border-box;
@@ -67,8 +67,8 @@
   min-height: 60px;
   box-sizing: border-box;
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   padding: var(--aiditor-space-1) var(--aiditor-space-2);
   color: var(--aiditor-fg-0);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
@@ -103,8 +103,8 @@
   flex: 1 1 auto;
   overflow: hidden;
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   box-sizing: border-box;
 }
 .aiditor-ui-num:hover .aiditor-ui-num-body { border-color: var(--aiditor-border-strong); }
@@ -185,9 +185,9 @@
 .aiditor-ui-vec > .aiditor-ui-vec-axis-field .aiditor-ui-num-label {
   min-width: 18px;
   padding: 0 var(--aiditor-space-1);
-  border: 1px solid color-mix(in srgb, var(--aiditor-vec-axis) 28%, var(--aiditor-border-input));
+  border: var(--aiditor-control-border-w) solid color-mix(in srgb, var(--aiditor-vec-axis) 28%, var(--aiditor-border-input));
   border-right: 0;
-  border-radius: var(--aiditor-r-2) 0 0 var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-control) 0 0 var(--aiditor-radius-control);
   background: color-mix(in srgb, var(--aiditor-vec-axis) 15%, var(--aiditor-bg-2));
   color: color-mix(in srgb, var(--aiditor-vec-axis) 70%, var(--aiditor-fg-0));
   font-weight: 700;
@@ -223,15 +223,15 @@
   position: relative;
   height: 4px;
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-pill);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-chip);
   cursor: pointer;
 }
 .aiditor-ui-slider-fill {
   position: absolute;
   left: 0; top: 0; bottom: 0;
   background: var(--aiditor-accent);
-  border-radius: var(--aiditor-r-pill);
+  border-radius: var(--aiditor-radius-chip);
 }
 .aiditor-ui-slider-thumb {
   position: absolute;
@@ -285,8 +285,8 @@
   width: 16px; height: 16px;
   flex: 0 0 auto;                   /* never let narrow rows squash the mark into an ellipse */
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -337,8 +337,8 @@
   width: 30px; height: 16px;
   flex: 0 0 auto;                   /* fixed-geometry indicator — no flex-shrink */
   background: var(--aiditor-bg-3);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-pill);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-chip);
   transition: background var(--aiditor-dur-med) var(--aiditor-ease),
               border-color var(--aiditor-dur-med) var(--aiditor-ease),
               box-shadow var(--aiditor-dur-med) var(--aiditor-ease);
@@ -405,7 +405,7 @@
 .aiditor-ui-radio-dot {
   width: 14px; height: 14px;
   flex: 0 0 auto;                   /* fixed-geometry indicator — no flex-shrink */
-  border: 1px solid var(--aiditor-border-input);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
   background: var(--aiditor-bg-2);
   border-radius: 50%;
   display: inline-flex;
@@ -446,8 +446,8 @@
   max-width: 100%;
   min-width: 0;
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   padding: 2px;
   gap: 2px;
   overflow-x: auto;
@@ -467,7 +467,7 @@
   background: transparent;
   color: var(--aiditor-fg-2);
   border: 0;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
   cursor: pointer;
   flex-shrink: 0;
@@ -506,8 +506,8 @@
   width: 100%;
   height: var(--aiditor-size-h-md);
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   padding: 0 var(--aiditor-control-px);
   color: var(--aiditor-fg-0);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
@@ -545,7 +545,7 @@
   min-width: 0;
   padding: 0 var(--aiditor-space-2);
   border-color: transparent;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   background: transparent;
   color: var(--aiditor-fg-1);
   box-shadow: none;
@@ -580,9 +580,9 @@
   min-width: 120px;
   max-width: min(420px, calc(100vw - 24px));
   background: var(--aiditor-bg-raised);
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
-  box-shadow: var(--aiditor-shadow-md);
+  border: var(--aiditor-overlay-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-overlay);
+  box-shadow: var(--aiditor-shadow-overlay);
 }
 .aiditor-ui-menu-item {
   display: inline-flex;
@@ -595,7 +595,7 @@
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
   cursor: pointer;
   text-align: left;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   position: relative;
   transition: background var(--aiditor-dur-fast) var(--aiditor-ease),
               color var(--aiditor-dur-fast) var(--aiditor-ease),
@@ -678,8 +678,8 @@
   width: 24px;
   height: 24px;
   padding: 0;
-  border-radius: var(--aiditor-r-2);
-  border: 1px solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
   background:
     linear-gradient(45deg, color-mix(in srgb, var(--aiditor-fg-0) 14%, transparent) 25%, transparent 25%),
     linear-gradient(-45deg, color-mix(in srgb, var(--aiditor-fg-0) 14%, transparent) 25%, transparent 25%),
@@ -817,8 +817,8 @@
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: 3px;
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   overflow: hidden;
   background:
     linear-gradient(45deg, rgba(255,255,255,.18) 25%, transparent 25%),
@@ -865,8 +865,8 @@
   min-width: 0;
   height: 22px;
   padding: 0 4px;
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: 3px;
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   background: var(--aiditor-bg-2);
   color: var(--aiditor-fg-0);
   font: 10px var(--aiditor-font-ui);
@@ -924,8 +924,8 @@
   padding: 0 var(--aiditor-space-2);
   box-sizing: border-box;
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
   color: var(--aiditor-fg-2);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
   cursor: pointer;
@@ -1012,7 +1012,8 @@
   justify-content: center;
   background: transparent;
   border: 0;
-  border-right: 1px solid var(--aiditor-border);
+  border-right: var(--aiditor-toolbar-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-tab) var(--aiditor-radius-tab) 0 0;
   color: var(--aiditor-fg-2);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
   cursor: pointer;
@@ -1070,7 +1071,7 @@
   border: 0;
   background: transparent;
   color: var(--aiditor-fg-3);
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   cursor: pointer;
   font: var(--aiditor-fs-xl) var(--aiditor-font-ui);
   line-height: 1;
@@ -1095,7 +1096,7 @@
   padding: 0 4px;
   background: var(--aiditor-error);
   color: var(--aiditor-error-fg);
-  border-radius: var(--aiditor-r-pill);
+  border-radius: var(--aiditor-radius-chip);
   font: 600 var(--aiditor-fs-xs) var(--aiditor-font-ui);
   margin-left: 2px;
 }
@@ -1138,7 +1139,7 @@
 /* vertical (auto for sidebar) */
 .aiditor-ui-tab-vertical .aiditor-ui-tab-btn {
   border-right: 0;
-  border-bottom: 1px solid var(--aiditor-border);
+  border-bottom: var(--aiditor-toolbar-border-w) solid var(--aiditor-border);
   justify-content: center;
 }
 .aiditor-ui-tab-vertical .aiditor-ui-tab-btn::after {
@@ -1164,17 +1165,32 @@
 }
 .aiditor-ui-tab-icon-only .aiditor-ui-tab-icon { font-size: 16px; }
 
-/* dock tabs: active tabs glow only on the edge away from panel content. */
+/* dock tabs: geometry follows toolbar direction; visual language is themed. */
 .aiditor-dock-tabs .aiditor-ui-tab-btn {
+  box-sizing: border-box;
+  background: var(--aiditor-dock-tab-bg);
+  border: var(--aiditor-dock-tab-border-w) solid var(--aiditor-dock-tab-border);
   color: var(--aiditor-dock-tab-fg);
   overflow: hidden;
+  transition: background var(--aiditor-dur-fast) var(--aiditor-ease),
+              border-color var(--aiditor-dur-fast) var(--aiditor-ease),
+              box-shadow var(--aiditor-dur-fast) var(--aiditor-ease),
+              color var(--aiditor-dur-fast) var(--aiditor-ease),
+              transform var(--aiditor-dur-fast) var(--aiditor-ease);
+}
+.aiditor-dock-tabs .aiditor-ui-tab-btn:hover {
+  background: var(--aiditor-dock-tab-hover-bg);
+  border-color: var(--aiditor-dock-tab-hover-border);
+  color: var(--aiditor-dock-tab-hover-fg);
 }
 .aiditor-dock-tabs .aiditor-ui-tab-btn-active {
-  background: var(--aiditor-bg-1);
+  background: var(--aiditor-dock-tab-active-bg);
+  border-color: var(--aiditor-dock-tab-active-border);
   color: var(--aiditor-dock-tab-active-fg);
 }
 .aiditor-dock-tabs .aiditor-ui-tab-btn-active:hover {
-  background: var(--aiditor-bg-1);
+  background: var(--aiditor-dock-tab-active-bg);
+  border-color: var(--aiditor-dock-tab-active-border);
   color: var(--aiditor-dock-tab-active-fg);
 }
 .aiditor-dock-tabs .aiditor-ui-tab-btn::before {
@@ -1194,7 +1210,7 @@
   transform: none;
 }
 .aiditor-dock-tabs .aiditor-ui-tab-btn-active::before { opacity: 1; }
-.aiditor-dock-tabs .aiditor-ui-tab-btn-active::after  { opacity: .66; }
+.aiditor-dock-tabs .aiditor-ui-tab-btn-active::after  { opacity: var(--aiditor-dock-tab-indicator-opacity); }
 
 .aiditor-toolbar-item > .aiditor-dock-tabs {
   align-self: stretch;
@@ -1203,28 +1219,23 @@
 .aiditor-dock-toolbar-top .aiditor-dock-tabs .aiditor-ui-tab-btn,
 .aiditor-dock-toolbar-bottom .aiditor-dock-tabs .aiditor-ui-tab-btn {
   border-right: 0;
-  margin-inline-end: 1px;
+  margin-inline-end: var(--aiditor-dock-tab-gap);
   height: auto;
   min-height: var(--aiditor-toolbar-h);
 }
 .aiditor-dock-toolbar-top .aiditor-dock-tabs .aiditor-ui-tab-btn {
-  border-radius: var(--aiditor-r-4) var(--aiditor-r-4) 0 0;
+  border-radius: var(--aiditor-dock-tab-radius-top);
 }
 .aiditor-dock-toolbar-bottom .aiditor-dock-tabs .aiditor-ui-tab-btn {
-  border-radius: 0 0 var(--aiditor-r-4) var(--aiditor-r-4);
+  border-radius: var(--aiditor-dock-tab-radius-bottom);
 }
 .aiditor-dock-toolbar-top .aiditor-dock-tabs .aiditor-ui-tab-btn::after,
 .aiditor-dock-toolbar-bottom .aiditor-dock-tabs .aiditor-ui-tab-btn::after {
-  left: 10px;
-  right: 10px;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--aiditor-accent) 78%, white 12%) 18%,
-    color-mix(in srgb, var(--aiditor-accent) 66%, transparent) 82%,
-    transparent
-  );
+  left: var(--aiditor-dock-tab-indicator-inset);
+  right: var(--aiditor-dock-tab-indicator-inset);
+  height: var(--aiditor-dock-tab-indicator-size);
+  background: var(--aiditor-dock-tab-indicator-bg);
+  border-radius: var(--aiditor-dock-tab-indicator-radius);
 }
 .aiditor-dock-toolbar-top .aiditor-dock-tabs .aiditor-ui-tab-btn::after {
   top: 0;
@@ -1235,52 +1246,22 @@
   bottom: 0;
 }
 .aiditor-dock-toolbar-top .aiditor-dock-tabs .aiditor-ui-tab-btn::before {
-  background:
-    radial-gradient(95px 24px at 50% 0,
-      color-mix(in srgb, var(--aiditor-accent) 31%, transparent),
-      color-mix(in srgb, var(--aiditor-accent) 8%, transparent) 54%,
-      transparent 78%
-    ),
-    linear-gradient(to bottom,
-      color-mix(in srgb, var(--aiditor-accent) 13%, transparent),
-      transparent 42%
-    );
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
-  mask-image: linear-gradient(to bottom, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
+  background: var(--aiditor-dock-tab-active-overlay-top);
 }
 .aiditor-dock-toolbar-bottom .aiditor-dock-tabs .aiditor-ui-tab-btn::before {
-  background:
-    radial-gradient(95px 24px at 50% 100%,
-      color-mix(in srgb, var(--aiditor-accent) 31%, transparent),
-      color-mix(in srgb, var(--aiditor-accent) 8%, transparent) 54%,
-      transparent 78%
-    ),
-    linear-gradient(to top,
-      color-mix(in srgb, var(--aiditor-accent) 13%, transparent),
-      transparent 42%
-    );
-  -webkit-mask-image: linear-gradient(to top, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
-  mask-image: linear-gradient(to top, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
+  background: var(--aiditor-dock-tab-active-overlay-bottom);
 }
 .aiditor-dock-toolbar-top .aiditor-dock-tabs .aiditor-ui-tab-btn-active {
-  box-shadow:
-    0 -1px 0 color-mix(in srgb, var(--aiditor-accent) 16%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent) 35%, transparent),
-    inset 1px 0 0 color-mix(in srgb, var(--aiditor-accent) 12%, transparent),
-    inset -1px 0 0 color-mix(in srgb, var(--aiditor-accent) 10%, transparent);
+  box-shadow: var(--aiditor-dock-tab-active-shadow-top);
 }
 .aiditor-dock-toolbar-bottom .aiditor-dock-tabs .aiditor-ui-tab-btn-active {
-  box-shadow:
-    0 1px 0 color-mix(in srgb, var(--aiditor-accent) 16%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-accent) 35%, transparent),
-    inset 1px 0 0 color-mix(in srgb, var(--aiditor-accent) 12%, transparent),
-    inset -1px 0 0 color-mix(in srgb, var(--aiditor-accent) 10%, transparent);
+  box-shadow: var(--aiditor-dock-tab-active-shadow-bottom);
 }
 
 .aiditor-dock-toolbar-left .aiditor-dock-tabs .aiditor-ui-tab-btn,
 .aiditor-dock-toolbar-right .aiditor-dock-tabs .aiditor-ui-tab-btn {
   border-bottom: 0;
-  margin-block-end: 1px;
+  margin-block-end: var(--aiditor-dock-tab-gap);
   width: auto;
   min-width: var(--aiditor-toolbar-h);
 }
@@ -1290,24 +1271,19 @@
   min-height: var(--aiditor-tab-h);
 }
 .aiditor-dock-toolbar-left .aiditor-dock-tabs .aiditor-ui-tab-btn {
-  border-radius: var(--aiditor-r-4) 0 0 var(--aiditor-r-4);
+  border-radius: var(--aiditor-dock-tab-radius-left);
 }
 .aiditor-dock-toolbar-right .aiditor-dock-tabs .aiditor-ui-tab-btn {
-  border-radius: 0 var(--aiditor-r-4) var(--aiditor-r-4) 0;
+  border-radius: var(--aiditor-dock-tab-radius-right);
 }
 .aiditor-dock-toolbar-left .aiditor-dock-tabs .aiditor-ui-tab-btn::after,
 .aiditor-dock-toolbar-right .aiditor-dock-tabs .aiditor-ui-tab-btn::after {
-  top: 10px;
-  bottom: 10px;
-  width: 1px;
+  top: var(--aiditor-dock-tab-indicator-inset);
+  bottom: var(--aiditor-dock-tab-indicator-inset);
+  width: var(--aiditor-dock-tab-indicator-size);
   height: auto;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    color-mix(in srgb, var(--aiditor-accent) 78%, white 12%) 18%,
-    color-mix(in srgb, var(--aiditor-accent) 66%, transparent) 82%,
-    transparent
-  );
+  background: var(--aiditor-dock-tab-indicator-bg-vertical);
+  border-radius: var(--aiditor-dock-tab-indicator-radius);
 }
 .aiditor-dock-toolbar-left .aiditor-dock-tabs .aiditor-ui-tab-btn::after {
   left: 0;
@@ -1318,46 +1294,16 @@
   right: 0;
 }
 .aiditor-dock-toolbar-left .aiditor-dock-tabs .aiditor-ui-tab-btn::before {
-  background:
-    radial-gradient(24px 95px at 0 50%,
-      color-mix(in srgb, var(--aiditor-accent) 31%, transparent),
-      color-mix(in srgb, var(--aiditor-accent) 8%, transparent) 54%,
-      transparent 78%
-    ),
-    linear-gradient(to right,
-      color-mix(in srgb, var(--aiditor-accent) 13%, transparent),
-      transparent 42%
-    );
-  -webkit-mask-image: linear-gradient(to right, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
-  mask-image: linear-gradient(to right, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
+  background: var(--aiditor-dock-tab-active-overlay-left);
 }
 .aiditor-dock-toolbar-right .aiditor-dock-tabs .aiditor-ui-tab-btn::before {
-  background:
-    radial-gradient(24px 95px at 100% 50%,
-      color-mix(in srgb, var(--aiditor-accent) 31%, transparent),
-      color-mix(in srgb, var(--aiditor-accent) 8%, transparent) 54%,
-      transparent 78%
-    ),
-    linear-gradient(to left,
-      color-mix(in srgb, var(--aiditor-accent) 13%, transparent),
-      transparent 42%
-    );
-  -webkit-mask-image: linear-gradient(to left, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
-  mask-image: linear-gradient(to left, #000 0, #000 25px, rgba(0,0,0,.35) 39px, transparent 56px);
+  background: var(--aiditor-dock-tab-active-overlay-right);
 }
 .aiditor-dock-toolbar-left .aiditor-dock-tabs .aiditor-ui-tab-btn-active {
-  box-shadow:
-    -1px 0 0 color-mix(in srgb, var(--aiditor-accent) 16%, transparent),
-    inset 1px 0 0 color-mix(in srgb, var(--aiditor-accent) 35%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent) 12%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-accent) 10%, transparent);
+  box-shadow: var(--aiditor-dock-tab-active-shadow-left);
 }
 .aiditor-dock-toolbar-right .aiditor-dock-tabs .aiditor-ui-tab-btn-active {
-  box-shadow:
-    1px 0 0 color-mix(in srgb, var(--aiditor-accent) 16%, transparent),
-    inset -1px 0 0 color-mix(in srgb, var(--aiditor-accent) 35%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent) 12%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-accent) 10%, transparent);
+  box-shadow: var(--aiditor-dock-tab-active-shadow-right);
 }
 
 /* drop indicator (used by dock panel drag) */
@@ -1404,10 +1350,11 @@
 .aiditor-ui-dict-input,
 .aiditor-ui-array-input,
 .aiditor-ui-array-editor {
-  border: 1px solid var(--aiditor-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
+  border-radius: var(--aiditor-radius-surface);
   padding: var(--aiditor-space-1) var(--aiditor-space-2);
   background: color-mix(in srgb, var(--aiditor-bg-1) 84%, var(--aiditor-bg-2));
+  box-shadow: var(--aiditor-shadow-surface);
 }
 .aiditor-ui-struct-input-row,
 .aiditor-ui-dict-input-row,
@@ -1465,8 +1412,8 @@
   height: var(--aiditor-size-h-md);
   box-sizing: border-box;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--aiditor-r-1);
+  border: var(--aiditor-control-border-w) solid transparent;
+  border-radius: var(--aiditor-radius-control);
   outline: 0;
   color: var(--aiditor-fg-2);
   font: inherit;
@@ -1562,7 +1509,7 @@
   min-height: 22px;
   padding: 0;
   border: 0;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   background: transparent;
   color: var(--aiditor-fg-2);
   text-align: left;
@@ -1633,8 +1580,8 @@
   min-width: 0;
   min-height: var(--aiditor-size-h-md);
   padding: 1px;
-  border: 1px solid transparent;
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid transparent;
+  border-radius: var(--aiditor-radius-control);
 }
 .aiditor-ui-array-editor-compact .aiditor-ui-array-editor-row {
   min-height: var(--aiditor-size-h-sm);
@@ -1659,7 +1606,7 @@
   background: var(--aiditor-selected-hover);
 }
 .aiditor-ui-array-editor-row.is-active {
-  box-shadow: inset 2px 0 0 var(--aiditor-accent);
+  box-shadow: var(--aiditor-shadow-active);
 }
 .aiditor-ui-array-editor-row.is-dragging {
   opacity: .55;
@@ -1677,7 +1624,7 @@
   padding: 0 2px;
   overflow: hidden;
   border: 0;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   background: transparent;
   color: var(--aiditor-fg-3);
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
@@ -1838,7 +1785,7 @@
   height: 24px;
   min-height: 24px;
   padding: 0 var(--aiditor-space-2);
-  border-radius: var(--aiditor-r-2);
+  border-radius: var(--aiditor-radius-surface);
   background: color-mix(in srgb, var(--aiditor-bg-2) 76%, var(--aiditor-bg-3));
   color: var(--aiditor-fg-1);
   font: 700 var(--aiditor-fs-xs) var(--aiditor-font-ui);

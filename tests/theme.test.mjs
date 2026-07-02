@@ -60,8 +60,60 @@ const css = aiditor.theme.exportCss(null, ['--aiditor-brand'])
 assert.equal(css, ':root {\n  --aiditor-brand: #569eff;\n}')
 
 const themeCss = readFileSync('src/style/theme.css', 'utf8')
-const themeModes = ['dark', 'dracula', 'harbor', 'abyss', 'hadal', 'forest', 'sakura', 'linen', 'light']
-for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura']) {
+const uiFormCss = readFileSync('src/style/ui-form.css', 'utf8')
+const themeModes = aiditor.theme.modeIds()
+assert.ok(aiditor.theme.hasMode('pop'))
+assert.equal(aiditor.theme.hasMode('missing-theme'), false)
+assert.deepEqual(aiditor.theme.modeOptions().map((mode) => mode.value), themeModes)
+assert.equal(aiditor.theme.modeOptions().find((mode) => mode.value === 'pop').label, 'Pop')
+assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'pop').scheme, 'light')
+for (const token of [
+  '--aiditor-radius-control',
+  '--aiditor-radius-surface',
+  '--aiditor-radius-overlay',
+  '--aiditor-radius-tab',
+  '--aiditor-radius-chip',
+  '--aiditor-border-w',
+  '--aiditor-border-w-strong',
+  '--aiditor-border-w-focus',
+  '--aiditor-control-border-w',
+  '--aiditor-surface-border-w',
+  '--aiditor-overlay-border-w',
+  '--aiditor-dock-border-w',
+  '--aiditor-shadow-control',
+  '--aiditor-shadow-surface',
+  '--aiditor-shadow-overlay',
+  '--aiditor-shadow-active',
+  '--aiditor-root-bg-image',
+  '--aiditor-root-bg-size',
+  '--aiditor-root-bg-position',
+  '--aiditor-root-bg-blend',
+  '--aiditor-corner-accent-size',
+  '--aiditor-corner-accent-color',
+  '--aiditor-corner-accent-opacity',
+  '--aiditor-dock-tab-bg',
+  '--aiditor-dock-tab-hover-bg',
+  '--aiditor-dock-tab-active-bg',
+  '--aiditor-dock-tab-border-w',
+  '--aiditor-dock-tab-radius-top',
+  '--aiditor-dock-tab-radius-bottom',
+  '--aiditor-dock-tab-radius-left',
+  '--aiditor-dock-tab-radius-right',
+  '--aiditor-dock-tab-indicator-bg',
+  '--aiditor-dock-tab-indicator-bg-vertical',
+  '--aiditor-dock-tab-indicator-size',
+  '--aiditor-dock-tab-active-overlay-top',
+  '--aiditor-dock-tab-active-overlay-bottom',
+  '--aiditor-dock-tab-active-overlay-left',
+  '--aiditor-dock-tab-active-overlay-right',
+  '--aiditor-dock-tab-active-shadow-top',
+  '--aiditor-dock-tab-active-shadow-bottom',
+  '--aiditor-dock-tab-active-shadow-left',
+  '--aiditor-dock-tab-active-shadow-right',
+]) {
+  assert.match(themeCss, new RegExp(token.replace(/-/g, '\\-')))
+}
+for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura', 'pop']) {
   assert.match(themeCss, new RegExp('data-aiditor-theme="' + mode + '"'))
   for (const token of [
     '--aiditor-surface-canvas',
@@ -80,6 +132,40 @@ for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura']) {
     assert.match(themeCss, new RegExp('data-aiditor-theme="' + mode + '"[\\s\\S]*' + token.replace(/-/g, '\\-')))
   }
 }
+
+const popBlock = themeCss.slice(themeCss.indexOf('data-aiditor-theme="pop"'))
+for (const token of [
+  '--aiditor-radius-control',
+  '--aiditor-radius-surface',
+  '--aiditor-radius-overlay',
+  '--aiditor-border-w-strong',
+  '--aiditor-surface-border-w',
+  '--aiditor-overlay-border-w',
+  '--aiditor-dock-border-w',
+  '--aiditor-shadow-control',
+  '--aiditor-shadow-surface',
+  '--aiditor-shadow-overlay',
+  '--aiditor-root-bg-image',
+  '--aiditor-corner-accent-size',
+  '--aiditor-dock-tab-hover-bg',
+  '--aiditor-dock-tab-active-bg',
+  '--aiditor-dock-tab-indicator-bg',
+  '--aiditor-dock-tab-indicator-bg-vertical',
+  '--aiditor-dock-tab-indicator-size',
+  '--aiditor-dock-tab-active-overlay-top',
+  '--aiditor-dock-tab-active-shadow-top',
+]) {
+  assert.match(popBlock, new RegExp(token.replace(/-/g, '\\-')))
+}
+
+assert.match(uiFormCss, /--aiditor-dock-tab-active-overlay-top/)
+assert.match(uiFormCss, /--aiditor-dock-tab-active-shadow-right/)
+assert.match(uiFormCss, /--aiditor-dock-tab-indicator-bg-vertical/)
+assert.doesNotMatch(uiFormCss, /radial-gradient\(95px 24px/)
+assert.doesNotMatch(uiFormCss, /mask-image: linear-gradient\(to bottom/)
+assert.match(popBlock, /--aiditor-border-w-strong:\s*2px/)
+assert.match(popBlock, /--aiditor-dock-tab-active-bg:\s*var\(--aiditor-brand\)/)
+assert.match(popBlock, /--aiditor-dock-tab-indicator-bg:\s*var\(--aiditor-state-warning\)/)
 
 function themeBlock(mode) {
   const marker = '.aiditor-root[data-aiditor-theme="' + mode + '"] {'
@@ -144,13 +230,24 @@ for (const mode of themeModes) {
 }
 
 const themeSettings = readFileSync('src/style/theme-settings.js', 'utf8')
-assert.match(themeSettings, /value: 'linen', label: 'Linen'/)
-assert.match(themeSettings, /value: 'abyss', label: 'Sea'/)
-assert.match(themeSettings, /value: 'hadal', label: 'Abyss'/)
-assert.match(themeSettings, /value: 'forest', label: 'Forest'/)
-assert.match(themeSettings, /value: 'sakura', label: 'Sakura'/)
+assert.doesNotMatch(themeSettings, /const THEME_OPTIONS/)
+assert.match(themeSettings, /aiditor\.theme\.modeOptions/)
 
 const demoTargets = readFileSync('demo/ai-targets.js', 'utf8')
-assert.match(demoTargets, /THEME_MODES = \['dark', 'dracula', 'harbor', 'abyss', 'hadal', 'forest', 'sakura', 'linen', 'light'\]/)
+assert.doesNotMatch(demoTargets, /const THEME_MODES/)
+assert.match(demoTargets, /aiditor\.theme\.modeIds/)
+
+for (const file of [
+  'src/style/ui-base.css',
+  'src/style/ui-container.css',
+  'src/style/ui-data.css',
+  'src/style/ui-editor.css',
+  'src/style/ui-form.css',
+  'src/style/ui-overlay.css',
+]) {
+  const cssText = readFileSync(file, 'utf8')
+  assert.doesNotMatch(cssText, /--aiditor-shadow-(md|lg|0)/, file + ' should use appearance shadow roles')
+  assert.doesNotMatch(cssText, /--aiditor-dur-1|--aiditor-ease-standard/, file + ' should use current motion tokens')
+}
 
 console.log('theme tests ok')

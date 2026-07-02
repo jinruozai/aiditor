@@ -71,15 +71,15 @@
   padding: 0 var(--aiditor-space-3);
   background: var(--aiditor-button-bg);
   color: var(--aiditor-fg-1);
-  border: 1px solid var(--aiditor-button-border);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-button-border);
+  border-radius: var(--aiditor-radius-control);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
   isolation: isolate;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--aiditor-bg-0) 42%, transparent), inset 0 1px 0 var(--aiditor-highlight-subtle);
+  box-shadow: var(--aiditor-shadow-control);
   transform: translateZ(0);
   transition:
     background  var(--aiditor-dur-fast) var(--aiditor-ease),
@@ -121,13 +121,13 @@
   color: var(--aiditor-fg-0);
   border-color: var(--aiditor-button-hover-border);
   transform: translateY(-1px);
-  box-shadow: var(--aiditor-shadow-1), inset 0 1px 0 var(--aiditor-highlight-subtle);
+  box-shadow: var(--aiditor-shadow-raised);
 }
 .aiditor-ui-btn:active {
   background: var(--aiditor-button-active-bg);
   border-color: var(--aiditor-button-active-border);
   transform: translateY(0) scale(0.985);
-  box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
+  box-shadow: var(--aiditor-shadow-active);
   transition-duration: 40ms;
 }
 .aiditor-ui-btn:active::before {
@@ -204,8 +204,8 @@
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid transparent;
+  border-radius: var(--aiditor-radius-control);
   color: var(--aiditor-fg-2);
   cursor: pointer;
   padding: 0;
@@ -284,10 +284,10 @@
   padding: var(--aiditor-space-1) var(--aiditor-space-2);
   background: var(--aiditor-bg-3);
   color: var(--aiditor-fg-0);
-  border: 1px solid var(--aiditor-border-strong);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-overlay-border-w) solid var(--aiditor-border-strong);
+  border-radius: var(--aiditor-radius-overlay);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
-  box-shadow: var(--aiditor-shadow-2);
+  box-shadow: var(--aiditor-shadow-overlay);
   pointer-events: none;
   z-index: var(--aiditor-z-popover);
   max-width: 240px;
@@ -300,9 +300,9 @@
   position: fixed;
   background: var(--aiditor-bg-2);
   color: var(--aiditor-fg-0);
-  border: 1px solid var(--aiditor-border-strong);
-  border-radius: var(--aiditor-r-3);
-  box-shadow: var(--aiditor-shadow-3);
+  border: var(--aiditor-overlay-border-w) solid var(--aiditor-border-strong);
+  border-radius: var(--aiditor-radius-overlay);
+  box-shadow: var(--aiditor-shadow-overlay);
   z-index: var(--aiditor-z-popover);
   min-width: 120px;
   transform-origin: top center;
@@ -326,9 +326,9 @@
   display: inline-block;
   padding: 1px var(--aiditor-space-1);
   background: var(--aiditor-bg-2);
-  border: 1px solid var(--aiditor-border-strong);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-strong);
   border-bottom-width: 2px;
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
   color: var(--aiditor-fg-1);
   line-height: 1.2;
@@ -342,7 +342,7 @@
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: var(--aiditor-r-pill);
+  border-radius: var(--aiditor-radius-chip);
   font: 600 var(--aiditor-fs-xs) var(--aiditor-font-ui);
   background: var(--aiditor-bg-3);
   color: var(--aiditor-fg-0);
@@ -362,8 +362,8 @@
   padding: 1px var(--aiditor-space-1) 1px var(--aiditor-space-2);
   background: var(--aiditor-bg-3);
   color: var(--aiditor-fg-0);
-  border: 1px solid var(--aiditor-border-strong);
-  border-radius: var(--aiditor-r-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-strong);
+  border-radius: var(--aiditor-radius-chip);
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
   height: var(--aiditor-size-h-sm);
   box-sizing: border-box;
@@ -374,7 +374,7 @@
   border: 0;
   background: transparent;
   color: var(--aiditor-fg-2);
-  border-radius: var(--aiditor-r-1);
+  border-radius: var(--aiditor-radius-control);
   cursor: pointer;
   font: 14px/1 var(--aiditor-font-ui);
   padding: 0;
