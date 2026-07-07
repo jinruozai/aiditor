@@ -154,6 +154,11 @@ for (const token of [
   '--aiditor-dock-tab-indicator-size',
   '--aiditor-dock-tab-active-overlay-top',
   '--aiditor-dock-tab-active-shadow-top',
+  '--aiditor-button-fg',
+  '--aiditor-button-hover-fg',
+  '--aiditor-button-active-fg',
+  '--aiditor-button-primary-bg',
+  '--aiditor-button-primary-hover-fg',
 ]) {
   assert.match(popBlock, new RegExp(token.replace(/-/g, '\\-')))
 }
@@ -164,10 +169,14 @@ assert.match(uiFormCss, /--aiditor-dock-tab-indicator-bg-vertical/)
 assert.doesNotMatch(uiFormCss, /radial-gradient\(95px 24px/)
 assert.doesNotMatch(uiFormCss, /mask-image: linear-gradient\(to bottom/)
 assert.match(popBlock, /--aiditor-border-w-strong:\s*2px/)
-assert.match(popBlock, /--aiditor-surface-canvas:\s*#00020d/)
+assert.match(popBlock, /--aiditor-surface-canvas:\s*#00020a/)
+assert.match(popBlock, /--aiditor-surface-panel:\s*#030916/)
 assert.match(popBlock, /--aiditor-stroke-strong:\s*#00eaff/)
 assert.match(popBlock, /--aiditor-dock-tab-active-bg:\s*#facf01/)
 assert.match(popBlock, /--aiditor-dock-tab-indicator-bg:\s*var\(--aiditor-state-warning\)/)
+assert.match(popBlock, /--aiditor-button-bg:\s*linear-gradient\(180deg, #125bff 0%, #0837a8 100%\)/)
+assert.match(popBlock, /--aiditor-button-active-bg:\s*#facf01/)
+assert.match(popBlock, /--aiditor-button-active-fg:\s*#171000/)
 
 function themeBlock(mode) {
   const marker = '.aiditor-root[data-aiditor-theme="' + mode + '"] {'

@@ -6,6 +6,7 @@
   const providerMeta = {}
   const selectionSig = aiditor.signal([])
   const metaSig = aiditor.signal({})
+  const schemaUtil = aiditor.ui.schema
   let formulaEvaluator = null
 
   function cloneTargets(targets) {
@@ -40,7 +41,7 @@
    *       values: targets.map(function (target) { return target.value }),
    *       write: function (field, change, ctx) {
    *         ctx.targets.forEach(function (target, index) {
-   *           target.value[field] = ctx.valueForChange(change, target, index)
+   *           target.value = ctx.applyChange(target.value, change, ctx.schema)
    *         })
    *       },
    *     }
@@ -111,6 +112,8 @@
       targets: list,
       primary: list[0],
       valueForChange: valueForChange,
+      applyChange: applyChange,
+      pathChange: pathChange,
     }, ctx || {})) })
     if (!raw) return null
     const out = Object.assign({}, raw)
@@ -164,14 +167,240 @@
     return true
   }
 
+  /**
+   * @aiditorApi aiditor.inspector.literalChange
+   * @group inspector
+   * @layer core-ui
+   * @kind js-api
+   * @signature aiditor.inspector.literalChange(field, value)
+   * @summary Create a whole-field replacement change for providers that intentionally replace a complete top-level field value.
+   * @param {string} field - Top-level schema field name.
+   * @param {*} value - Replacement value for that field.
+   * @returns {object} Change object with mode "literal".
+   * @example
+   * const change = aiditor.inspector.literalChange('transform', [[0, 1, 2], 1])
+   * @related aiditor.inspector.pathChange,aiditor.inspector.applyChange
+   */
   function literalChange(field, value) {
     return { field: field, mode: 'literal', value: value }
   }
 
+  /**
+   * @aiditorApi aiditor.inspector.pathChange
+   * @group inspector
+   * @layer core-ui
+   * @kind js-api
+   * @signature aiditor.inspector.pathChange(fieldPath, value)
+   * @summary Create a leaf-level inspector change whose field is a dotted/bracketed schema path such as transform.pos.x or items[2].name.
+   * @param {string} fieldPath - Schema path. Field keys are path tokens; keys containing "." or "[]" are invalid schema usage.
+   * @param {*} value - Leaf replacement value.
+   * @returns {object} Change object with mode "path".
+   * @example
+   * const change = aiditor.inspector.pathChange('transform.pos.x', 12)
+   * @related aiditor.inspector.applyChange,aiditor.inspector.formatFieldPath
+   */
+  function pathChange(field, value) {
+    return { field: field, mode: 'path', value: value }
+  }
+
   function valueForChange(change, target, index, ctx) {
-    if (!change || change.mode === 'literal') return change ? change.value : undefined
+    if (!change || change.mode === 'literal' || change.mode === 'path') return change ? change.value : undefined
     if (change.mode === 'formula' && formulaEvaluator) return formulaEvaluator(change, target, index, ctx || {})
     throw new Error('inspector.valueForChange: unsupported change mode "' + change.mode + '"')
+  }
+
+  /**
+   * @aiditorApi aiditor.inspector.applyChange
+   * @group inspector
+   * @layer core-ui
+   * @kind js-api
+   * @signature aiditor.inspector.applyChange(value, change, schema)
+   * @summary Apply a literal or path inspector change to a schema-encoded value without mutating the original value.
+   * @param {*} value - Current top-level inspected value.
+   * @param {object} change - Change created by pathChange or literalChange.
+   * @param {object} schema - PropertyForm/Inspector schema used to preserve struct tuple, array, and dict encoding.
+   * @returns {*} Updated value.
+   * @example
+   * const next = aiditor.inspector.applyChange(
+   *   current,
+   *   aiditor.inspector.pathChange('transform.pos.x', 12),
+   *   schema
+   * )
+   * @related aiditor.inspector.pathChange,aiditor.inspector.literalChange
+   */
+  function applyChange(value, change, schema) {
+    if (!change) return value
+    if (change.mode !== 'literal' && change.mode !== 'path') {
+      throw new Error('inspector.applyChange: unsupported change mode "' + change.mode + '"')
+    }
+    const segments = parseFieldPath(change.field)
+    return writeRootPath(value, segments, change.value, schema || {})
+  }
+
+  /**
+   * @aiditorApi aiditor.inspector.parseFieldPath
+   * @group inspector
+   * @layer core-ui
+   * @kind js-api
+   * @signature aiditor.inspector.parseFieldPath(fieldPath)
+   * @summary Parse an inspector field path into string and numeric segments.
+   * @param {string} fieldPath - Path such as "items[2].transform.pos.x".
+   * @returns {Array} Path segments.
+   * @example
+   * aiditor.inspector.parseFieldPath('items[2].name')
+   * // ['items', 2, 'name']
+   * @related aiditor.inspector.formatFieldPath,aiditor.inspector.pathChange
+   */
+  function parseFieldPath(field) {
+    const text = String(field == null ? '' : field)
+    const out = []
+    let i = 0
+    while (i < text.length) {
+      const ch = text[i]
+      if (ch === '.') { i++; continue }
+      if (ch === '[') {
+        const end = findBracketEnd(text, i)
+        const body = text.slice(i + 1, end)
+        if (body[0] === '"') out.push(JSON.parse(body))
+        else if (/^\d+$/.test(body)) out.push(Number(body))
+        else throw new Error('inspector.parseFieldPath: invalid segment "' + body + '"')
+        i = end + 1
+        continue
+      }
+      let j = i
+      while (j < text.length && text[j] !== '.' && text[j] !== '[') j++
+      out.push(text.slice(i, j))
+      i = j
+    }
+    return out
+  }
+
+  function findBracketEnd(text, start) {
+    let quote = ''
+    for (let i = start + 1; i < text.length; i++) {
+      const ch = text[i]
+      if (quote) {
+        if (ch === '\\') { i++; continue }
+        if (ch === quote) quote = ''
+        continue
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue }
+      if (ch === ']') return i
+    }
+    throw new Error('inspector.parseFieldPath: invalid path "' + text + '"')
+  }
+
+  /**
+   * @aiditorApi aiditor.inspector.formatFieldPath
+   * @group inspector
+   * @layer core-ui
+   * @kind js-api
+   * @signature aiditor.inspector.formatFieldPath(segments)
+   * @summary Format string and numeric path segments into the inspector field path syntax.
+   * @param {Array} segments - String field names and numeric array indices.
+   * @returns {string} Formatted field path.
+   * @example
+   * aiditor.inspector.formatFieldPath(['items', 2, 'name'])
+   * // 'items[2].name'
+   * @related aiditor.inspector.parseFieldPath,aiditor.inspector.pathChange
+   */
+  function formatFieldPath(segments) {
+    const arr = Array.isArray(segments) ? segments : []
+    let out = ''
+    for (let i = 0; i < arr.length; i++) {
+      const seg = arr[i]
+      if (typeof seg === 'number') {
+        out += '[' + seg + ']'
+      } else if (isIdentifier(seg)) {
+        out += (out ? '.' : '') + seg
+      } else {
+        out += '[' + JSON.stringify(String(seg)) + ']'
+      }
+    }
+    return out
+  }
+
+  function writeRootPath(value, segments, nextValue, schema) {
+    if (!segments.length) return nextValue
+    const key = segments[0]
+    const rest = segments.slice(1)
+    const next = cloneObject(value)
+    next[key] = writeFieldPath(value && value[key], rest, nextValue, schema && schema[key])
+    return next
+  }
+
+  function writeFieldPath(value, segments, nextValue, fieldDef) {
+    if (!segments.length) return nextValue
+    const fd = resolveFieldDef(fieldDef)
+    if (schemaUtil.isStructField(fd)) return writeStructPath(value, segments, nextValue, fd)
+    if (schemaUtil.isArrayField(fd)) return writeArrayPath(value, segments, nextValue, fd)
+    if (schemaUtil.isDictField(fd)) return writeDictPath(value, segments, nextValue, fd)
+    return writeGenericPath(value, segments, nextValue)
+  }
+
+  function writeStructPath(value, segments, nextValue, fieldDef) {
+    const def = schemaUtil.normalizeStructDef(fieldDef && fieldDef.struct_def) || {}
+    const keys = Object.keys(def || {})
+    const key = segments[0]
+    const index = keys.indexOf(String(key))
+    if (index < 0) return writeGenericPath(value, segments, nextValue)
+    const rawSub = def[key]
+    const subFd = resolveFieldDef(typeof rawSub === 'string' ? { type: rawSub } : rawSub)
+    const tuple = Array.isArray(value) ? value : []
+    const len = Math.max(tuple.length, index + 1)
+    const next = new Array(len)
+    for (let i = 0; i < len; i++) next[i] = i < tuple.length ? tuple[i] : schemaUtil.cloneDefault(resolveFieldDef(typeof def[keys[i]] === 'string' ? { type: def[keys[i]] } : def[keys[i]]))
+    next[index] = writeFieldPath(index < tuple.length ? tuple[index] : schemaUtil.cloneDefault(subFd), segments.slice(1), nextValue, subFd)
+    return next
+  }
+
+  function writeArrayPath(value, segments, nextValue, fieldDef) {
+    const index = Number(segments[0])
+    const elemFd = schemaUtil.resolveArrayElemFieldDef(fieldDef)
+    const arr = Array.isArray(value) ? value : []
+    const len = Math.max(arr.length, index + 1)
+    const next = new Array(len)
+    for (let i = 0; i < len; i++) next[i] = i < arr.length ? arr[i] : schemaUtil.cloneDefault(elemFd)
+    next[index] = writeFieldPath(index < arr.length ? arr[index] : schemaUtil.cloneDefault(elemFd), segments.slice(1), nextValue, elemFd)
+    return next
+  }
+
+  function writeDictPath(value, segments, nextValue, fieldDef) {
+    const key = String(segments[0])
+    const valueFd = schemaUtil.resolveDictValueFieldDef(fieldDef)
+    const dict = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    const next = Object.assign({}, dict)
+    next[key] = writeFieldPath(dict[key], segments.slice(1), nextValue, valueFd)
+    return next
+  }
+
+  function writeGenericPath(value, segments, nextValue) {
+    if (!segments.length) return nextValue
+    const key = segments[0]
+    if (typeof key === 'number') {
+      const arr = Array.isArray(value) ? value : []
+      const len = Math.max(arr.length, key + 1)
+      const next = new Array(len)
+      for (let i = 0; i < len; i++) next[i] = i < arr.length ? arr[i] : undefined
+      next[key] = writeGenericPath(arr[key], segments.slice(1), nextValue)
+      return next
+    }
+    const obj = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    const next = Object.assign({}, obj)
+    next[key] = writeGenericPath(obj[key], segments.slice(1), nextValue)
+    return next
+  }
+
+  function resolveFieldDef(fieldDef) {
+    return schemaUtil.resolveFieldDef(fieldDef)
+  }
+
+  function cloneObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? Object.assign({}, value) : {}
+  }
+
+  function isIdentifier(value) {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(String(value))
   }
 
   function emitSelection() {
@@ -237,6 +466,10 @@
     providerMeta: function (type) { return Object.assign({}, providerMeta[type] || {}) },
     canEditField: canEditField,
     literalChange: literalChange,
+    pathChange: pathChange,
+    parseFieldPath: parseFieldPath,
+    formatFieldPath: formatFieldPath,
+    applyChange: applyChange,
     valueForChange: valueForChange,
     setFormulaEvaluator: function (fn) { formulaEvaluator = fn || null },
   }

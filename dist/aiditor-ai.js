@@ -5629,6 +5629,166 @@
         "source": "src/extensions/ai.js"
       },
       {
+        "id": "aiditor.inspector.applyChange",
+        "group": "inspector",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.inspector.applyChange(value, change, schema)",
+        "summary": "Apply a literal or path inspector change to a schema-encoded value without mutating the original value.",
+        "params": [
+          {
+            "type": "*",
+            "name": "value",
+            "description": "Current top-level inspected value."
+          },
+          {
+            "type": "object",
+            "name": "change",
+            "description": "Change created by pathChange or literalChange."
+          },
+          {
+            "type": "object",
+            "name": "schema",
+            "description": "PropertyForm/Inspector schema used to preserve struct tuple, array, and dict encoding."
+          }
+        ],
+        "returns": {
+          "type": "*",
+          "description": "Updated value."
+        },
+        "examples": [
+          "const next = aiditor.inspector.applyChange(\n  current,\n  aiditor.inspector.pathChange('transform.pos.x', 12),\n  schema\n)"
+        ],
+        "wrong": [],
+        "related": [
+          "aiditor.inspector.pathChange",
+          "aiditor.inspector.literalChange"
+        ],
+        "source": "src/ui/inspector.js"
+      },
+      {
+        "id": "aiditor.inspector.formatFieldPath",
+        "group": "inspector",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.inspector.formatFieldPath(segments)",
+        "summary": "Format string and numeric path segments into the inspector field path syntax.",
+        "params": [
+          {
+            "type": "Array",
+            "name": "segments",
+            "description": "String field names and numeric array indices."
+          }
+        ],
+        "returns": {
+          "type": "string",
+          "description": "Formatted field path."
+        },
+        "examples": [
+          "aiditor.inspector.formatFieldPath(['items', 2, 'name'])\n// 'items[2].name'"
+        ],
+        "wrong": [],
+        "related": [
+          "aiditor.inspector.parseFieldPath",
+          "aiditor.inspector.pathChange"
+        ],
+        "source": "src/ui/inspector.js"
+      },
+      {
+        "id": "aiditor.inspector.literalChange",
+        "group": "inspector",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.inspector.literalChange(field, value)",
+        "summary": "Create a whole-field replacement change for providers that intentionally replace a complete top-level field value.",
+        "params": [
+          {
+            "type": "string",
+            "name": "field",
+            "description": "Top-level schema field name."
+          },
+          {
+            "type": "*",
+            "name": "value",
+            "description": "Replacement value for that field."
+          }
+        ],
+        "returns": {
+          "type": "object",
+          "description": "Change object with mode \"literal\"."
+        },
+        "examples": [
+          "const change = aiditor.inspector.literalChange('transform', [[0, 1, 2], 1])"
+        ],
+        "wrong": [],
+        "related": [
+          "aiditor.inspector.pathChange",
+          "aiditor.inspector.applyChange"
+        ],
+        "source": "src/ui/inspector.js"
+      },
+      {
+        "id": "aiditor.inspector.parseFieldPath",
+        "group": "inspector",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.inspector.parseFieldPath(fieldPath)",
+        "summary": "Parse an inspector field path into string and numeric segments.",
+        "params": [
+          {
+            "type": "string",
+            "name": "fieldPath",
+            "description": "Path such as \"items[2].transform.pos.x\"."
+          }
+        ],
+        "returns": {
+          "type": "Array",
+          "description": "Path segments."
+        },
+        "examples": [
+          "aiditor.inspector.parseFieldPath('items[2].name')\n// ['items', 2, 'name']"
+        ],
+        "wrong": [],
+        "related": [
+          "aiditor.inspector.formatFieldPath",
+          "aiditor.inspector.pathChange"
+        ],
+        "source": "src/ui/inspector.js"
+      },
+      {
+        "id": "aiditor.inspector.pathChange",
+        "group": "inspector",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.inspector.pathChange(fieldPath, value)",
+        "summary": "Create a leaf-level inspector change whose field is a dotted/bracketed schema path such as transform.pos.x or items[2].name.",
+        "params": [
+          {
+            "type": "string",
+            "name": "fieldPath",
+            "description": "Schema path. Field keys are path tokens; keys containing \".\" or \"[]\" are invalid schema usage."
+          },
+          {
+            "type": "*",
+            "name": "value",
+            "description": "Leaf replacement value."
+          }
+        ],
+        "returns": {
+          "type": "object",
+          "description": "Change object with mode \"path\"."
+        },
+        "examples": [
+          "const change = aiditor.inspector.pathChange('transform.pos.x', 12)"
+        ],
+        "wrong": [],
+        "related": [
+          "aiditor.inspector.applyChange",
+          "aiditor.inspector.formatFieldPath"
+        ],
+        "source": "src/ui/inspector.js"
+      },
+      {
         "id": "aiditor.inspector.refresh",
         "group": "inspector",
         "layer": "core-ui",
@@ -5679,7 +5839,7 @@
           "description": "unregister callback."
         },
         "examples": [
-          "aiditor.inspector.registerProvider('cube', {\n  inspect: function (targets) {\n    return {\n      schema: {\n        x: { type: 'number', label: 'X', step: 0.1 },\n        color: { type: 'color', label: 'Color' },\n      },\n      values: targets.map(function (target) { return target.value }),\n      write: function (field, change, ctx) {\n        ctx.targets.forEach(function (target, index) {\n          target.value[field] = ctx.valueForChange(change, target, index)\n        })\n      },\n    }\n  },\n})"
+          "aiditor.inspector.registerProvider('cube', {\n  inspect: function (targets) {\n    return {\n      schema: {\n        x: { type: 'number', label: 'X', step: 0.1 },\n        color: { type: 'color', label: 'Color' },\n      },\n      values: targets.map(function (target) { return target.value }),\n      write: function (field, change, ctx) {\n        ctx.targets.forEach(function (target, index) {\n          target.value = ctx.applyChange(target.value, change, ctx.schema)\n        })\n      },\n    }\n  },\n})"
         ],
         "wrong": [
           "aiditor.inspector.registerProvider({\n  id: 'cube',\n  getProperties: function () {},\n  patchProperties: function () {},\n})"
@@ -6042,7 +6202,7 @@
           {
             "type": "Function",
             "name": "opts.onChange",
-            "description": "Optional persistence hook: (field, newValue, targets, meta) => void."
+            "description": "Optional persistence hook: (fieldPath, newValue, targets, meta) => void."
           },
           {
             "type": "object|Signal<object>",

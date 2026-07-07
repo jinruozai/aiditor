@@ -176,7 +176,7 @@
 
     function writeField(row, field, value, meta) {
       const itemCtx = row.itemCtxSig.peek()
-      const nextValue = Object.assign({}, row.valueSig.peek() || {}, { [field]: value })
+      const nextValue = nextValueForChange(row, field, value, meta)
       const outMeta = Object.assign({}, meta || {}, {
         itemId: row.id,
         item: row.item,
@@ -196,6 +196,14 @@
         return
       }
       defaultWrite(row, nextValue)
+    }
+
+    function nextValueForChange(row, field, value, meta) {
+      const change = meta && meta.change
+      if (change && aiditor.inspector && aiditor.inspector.applyChange) {
+        return aiditor.inspector.applyChange(row.valueSig.peek() || {}, change, row.schemaSig.peek() || {})
+      }
+      return Object.assign({}, row.valueSig.peek() || {}, { [field]: value })
     }
 
     function defaultWrite(row, nextValue) {

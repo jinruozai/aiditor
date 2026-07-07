@@ -138,6 +138,17 @@ Editing `transform.position.y` writes only the nested tuples needed for that
 path. The outer value stays an array tuple, and the inner `transform` value
 stays an array tuple.
 
+The Inspector/propertyForm change path for that edit is still the logical
+schema path:
+
+```js
+{ field: 'transform.position.y', mode: 'path', value: 9 }
+```
+
+Tuple indexes are not used in the external field path because they are only the
+canonical storage shape for `struct`. The path follows the names the user sees
+from `struct_def`.
+
 ## Array Of Struct
 
 `array<struct>` uses the same rule for every element. The array renderer owns
@@ -171,6 +182,20 @@ Editing the second element's `num` writes:
   [123, 1],
   [456, 3],
 ]
+```
+
+The change path includes the real array index because the outer value is a
+list:
+
+```js
+{ field: 'items[1].num', mode: 'path', value: 3 }
+```
+
+This is the rule for every real array/list. `struct` members use field names;
+array items use `[index]`; nested combinations concatenate naturally:
+
+```js
+{ field: 'aaa.metalist[5].transform.pos.x', mode: 'path', value: 10 }
 ```
 
 ## Dict Contract
@@ -233,6 +258,19 @@ Editing `pear.weight` writes:
 }
 ```
 
+The corresponding change path is:
+
+```js
+{ field: 'fruit.pear.weight', mode: 'path', value: 0.7 }
+```
+
+If a dictionary key is not a plain identifier, the canonical path uses quoted
+bracket syntax:
+
+```js
+{ field: 'fruit["red.pear"].weight', mode: 'path', value: 0.7 }
+```
+
 ## Implementation Ownership
 
 `editorFor` is the public renderer boundary. Its built-in `struct` renderer
@@ -266,6 +304,26 @@ fixed-field struct editor.
 dictionary logic. They pass field definitions and values into `editorFor`; value
 encoding stays at the renderer boundary.
 
+Path change generation is also renderer-owned:
+
+- `propertyForm` starts each top-level field path from the schema key;
+- the `struct` renderer appends `.` plus the `struct_def` field name;
+- the `array` renderer appends `[index]` for real list items;
+- the `dict` renderer appends a key segment, using quoted bracket syntax when
+  the key is not identifier-like;
+- each nested renderer passes through the same current path context.
+
+The external Inspector change shape stays simple:
+
+```js
+{ field: 'aaa.metalist[5].transform.pos.x', mode: 'path', value: newValue }
+```
+
+The framework's `applyChange(value, change, schema)` helper is responsible for
+turning that path back into canonical values. For `struct`, it resolves
+`struct_def` names to tuple indexes while preserving tuple encoding. For real
+arrays, it uses numeric indexes. For `dict`, it uses object keys.
+
 ## Acceptance Tests
 
 Framework tests should cover:
@@ -277,6 +335,11 @@ Framework tests should cover:
 - editing one member preserves other tuple members;
 - nested structs preserve each layer's tuple encoding;
 - `array` elements whose renderer is `struct` stay tuple encoded;
+- path changes for struct members use logical field names, not tuple indexes;
+- path changes for real arrays include `[index]`;
+- path changes through dict keys use dot syntax for identifier-like keys and
+  quoted bracket syntax for other keys;
+- `applyChange` writes path changes back to canonical tuple/array/dict shapes;
 - empty struct default is `[]`;
 - dictionary editing is not routed through the `struct` renderer;
 - dict writes JavaScript object dictionaries;

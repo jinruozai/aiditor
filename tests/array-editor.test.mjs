@@ -188,6 +188,7 @@ for (const file of [
   'src/ui/form/arrayEditor.js',
   'src/ui/form/arrayInput.js',
   'src/ui/form/typeconfig.js',
+  'src/ui/form/schema.js',
   'src/ui/form/editorFor.js',
   'src/ui/form/structInput.js',
 ]) {
@@ -449,6 +450,38 @@ function pointer(el, type, extra) {
   assert.deepEqual(value.peek(), [
     ['a', '1'],
     ['b', '3'],
+  ])
+}
+
+{
+  const value = aiditor.signal([
+    ['a', '1'],
+    ['b', '2'],
+  ])
+  const writes = []
+  const el = ui.editorFor({
+    type: 'array',
+    type_render: 'array_editor',
+    type_agv: {
+      elem_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          num: 'string',
+        },
+      },
+    },
+  }, value, function (next, meta) {
+    writes.push({ next: next, change: meta && meta.change })
+    value.set(next)
+  }, { fieldPath: 'items' })
+  const inputs = el.querySelectorAll('input')
+  inputs[3].value = '4'
+  inputs[3].dispatch('input', { target: inputs[3] })
+  assert.deepEqual(writes.at(-1).change, { field: 'items[1].num', mode: 'path', value: '4' })
+  assert.deepEqual(value.peek(), [
+    ['a', '1'],
+    ['b', '4'],
   ])
 }
 

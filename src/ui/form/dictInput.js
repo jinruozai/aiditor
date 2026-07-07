@@ -129,9 +129,9 @@
         content: null,
         actionBar: null,
       }
-      state.content = renderValue(readOnly(valueSig), function (next) {
-        writeValue(state.key, next, null)
-      }, entryCtx(key, itemValue, index, currentDict(), null))
+      state.content = renderValue(readOnly(valueSig), function (next, meta) {
+        writeValue(state.key, next, null, meta)
+      }, entryCtx(key, itemValue, index, currentDict(), null, state))
       valueCell.appendChild(state.content)
       state.actionBar = ui.actionBar({ actions: actionSig, ctx: actionCtxSig, density: 'compact' })
       actions.appendChild(state.actionBar)
@@ -231,15 +231,15 @@
       row.keyInput.blur()
     }
 
-    function writeValue(key, nextValue, event) {
+    function writeValue(key, nextValue, event, meta) {
       const dict = currentDict()
       if (!Object.prototype.hasOwnProperty.call(dict, key)) return
       if (Object.is(dict[key], nextValue)) return
       const ectx = entryCtx(key, dict[key], Object.keys(dict).indexOf(key), dict, event)
       if (!canMutate('editValue', ectx)) return
-      if (typeof o.onValueChange === 'function') { o.onValueChange(key, nextValue, entryMeta(key, event)); return }
+      if (typeof o.onValueChange === 'function') { o.onValueChange(key, nextValue, entryMeta(key, event, meta)); return }
       const next = Object.assign({}, dict, { [key]: nextValue })
-      writeWhole(next, { op: 'value', key: key, event: event || null })
+      writeWhole(next, Object.assign({ op: 'value', key: key, event: event || null }, meta || {}))
     }
 
     function writeWhole(next, meta) {
@@ -287,8 +287,16 @@
       row.el.classList.remove('has-error')
     }
 
-    function entryCtx(key, itemValue, index, dict, event) {
-      return { key: key, value: itemValue, index: index, dict: dict, ctx: ctx, event: event || null }
+    function entryCtx(key, itemValue, index, dict, event, row) {
+      return {
+        key: key,
+        keyRef: row ? function () { return row.key } : null,
+        value: itemValue,
+        index: index,
+        dict: dict,
+        ctx: ctx,
+        event: event || null,
+      }
     }
 
     function collectionCtx(event) {
@@ -299,8 +307,8 @@
       return { dict: currentDict(), ctx: ctx, event: event || null }
     }
 
-    function entryMeta(key, event) {
-      return { key: key, dict: currentDict(), ctx: ctx, event: event || null }
+    function entryMeta(key, event, meta) {
+      return Object.assign({ key: key, dict: currentDict(), ctx: ctx, event: event || null }, meta || {})
     }
 
     function disposeRow(row) {

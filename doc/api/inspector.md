@@ -2,6 +2,126 @@
 
 Generated from structured API comments in `src/`.
 
+## `aiditor.inspector.applyChange`
+
+Apply a literal or path inspector change to a schema-encoded value without mutating the original value.
+
+```js
+aiditor.inspector.applyChange(value, change, schema)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `value` | `*` | Current top-level inspected value. |
+| `change` | `object` | Change created by pathChange or literalChange. |
+| `schema` | `object` | PropertyForm/Inspector schema used to preserve struct tuple, array, and dict encoding. |
+
+Returns: `*` Updated value.
+
+```js
+const next = aiditor.inspector.applyChange(
+  current,
+  aiditor.inspector.pathChange('transform.pos.x', 12),
+  schema
+)
+```
+
+Related: `aiditor.inspector.pathChange`, `aiditor.inspector.literalChange`
+
+Source: `src/ui/inspector.js`
+
+## `aiditor.inspector.formatFieldPath`
+
+Format string and numeric path segments into the inspector field path syntax.
+
+```js
+aiditor.inspector.formatFieldPath(segments)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `segments` | `Array` | String field names and numeric array indices. |
+
+Returns: `string` Formatted field path.
+
+```js
+aiditor.inspector.formatFieldPath(['items', 2, 'name'])
+// 'items[2].name'
+```
+
+Related: `aiditor.inspector.parseFieldPath`, `aiditor.inspector.pathChange`
+
+Source: `src/ui/inspector.js`
+
+## `aiditor.inspector.literalChange`
+
+Create a whole-field replacement change for providers that intentionally replace a complete top-level field value.
+
+```js
+aiditor.inspector.literalChange(field, value)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `field` | `string` | Top-level schema field name. |
+| `value` | `*` | Replacement value for that field. |
+
+Returns: `object` Change object with mode "literal".
+
+```js
+const change = aiditor.inspector.literalChange('transform', [[0, 1, 2], 1])
+```
+
+Related: `aiditor.inspector.pathChange`, `aiditor.inspector.applyChange`
+
+Source: `src/ui/inspector.js`
+
+## `aiditor.inspector.parseFieldPath`
+
+Parse an inspector field path into string and numeric segments.
+
+```js
+aiditor.inspector.parseFieldPath(fieldPath)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `fieldPath` | `string` | Path such as "items[2].transform.pos.x". |
+
+Returns: `Array` Path segments.
+
+```js
+aiditor.inspector.parseFieldPath('items[2].name')
+// ['items', 2, 'name']
+```
+
+Related: `aiditor.inspector.formatFieldPath`, `aiditor.inspector.pathChange`
+
+Source: `src/ui/inspector.js`
+
+## `aiditor.inspector.pathChange`
+
+Create a leaf-level inspector change whose field is a dotted/bracketed schema path such as transform.pos.x or items[2].name.
+
+```js
+aiditor.inspector.pathChange(fieldPath, value)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `fieldPath` | `string` | Schema path. Field keys are path tokens; keys containing "." or "[]" are invalid schema usage. |
+| `value` | `*` | Leaf replacement value. |
+
+Returns: `object` Change object with mode "path".
+
+```js
+const change = aiditor.inspector.pathChange('transform.pos.x', 12)
+```
+
+Related: `aiditor.inspector.applyChange`, `aiditor.inspector.formatFieldPath`
+
+Source: `src/ui/inspector.js`
+
 ## `aiditor.inspector.refresh`
 
 Notify inspector panels to re-read the current selection after external state changes.
@@ -48,7 +168,7 @@ aiditor.inspector.registerProvider('cube', {
       values: targets.map(function (target) { return target.value }),
       write: function (field, change, ctx) {
         ctx.targets.forEach(function (target, index) {
-          target.value[field] = ctx.valueForChange(change, target, index)
+          target.value = ctx.applyChange(target.value, change, ctx.schema)
         })
       },
     }

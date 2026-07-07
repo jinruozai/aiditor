@@ -244,13 +244,17 @@ for (const file of [
   'src/ui/form/colorInput.js',
   'src/ui/form/vectorInput.js',
   'src/ui/form/typeconfig.js',
+  'src/ui/form/schema.js',
   'src/ui/form/structInput.js',
   'src/ui/base/actionMenu.js',
   'src/ui/base/actionBar.js',
   'src/ui/form/dictInput.js',
+  'src/ui/form/arrayEditor.js',
+  'src/ui/form/arrayInput.js',
   'src/ui/form/editorFor.js',
   'src/ui/container/section.js',
   'src/ui/form/propertyForm.js',
+  'src/ui/inspector.js',
   'src/ui/form/propertyList.js',
   'src/ui/editor/codeInput.js',
   'src/ui/editor/assetPicker.js',
@@ -783,6 +787,47 @@ function contextmenu(el, target, extra) {
 }
 
 {
+  const changes = []
+  const el = ui.propertyForm({
+    targets: [{ transform: [['1', '2', '3'], ['0', '0', '0']] }],
+    schema: {
+      transform: {
+        type: 'struct',
+        struct_def: {
+          pos: {
+            type: 'struct',
+            struct_def: {
+              x: 'string',
+              y: 'string',
+              z: 'string',
+            },
+          },
+          rot: {
+            type: 'struct',
+            struct_def: {
+              x: 'string',
+              y: 'string',
+              z: 'string',
+            },
+          },
+        },
+      },
+    },
+    onChange: function (field, value, _targets, meta) {
+      changes.push({ field: field, value: value, change: meta.change })
+    },
+  })
+  const input = el.querySelector('input')
+  input.value = '10'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(changes.at(-1), {
+    field: 'transform.pos.x',
+    value: '10',
+    change: { field: 'transform.pos.x', mode: 'path', value: '10' },
+  })
+}
+
+{
   const value = aiditor.signal({ id: 'object-id', num: 'object-num' })
   const el = ui.editorFor({
     type: 'struct',
@@ -892,6 +937,66 @@ function contextmenu(el, target, extra) {
   assert.deepEqual(value.peek(), {
     apple: ['101', '0.8'],
     pear: ['102', '0.7'],
+  })
+}
+
+{
+  const value = aiditor.signal([
+    ['a', '1'],
+    ['b', '2'],
+  ])
+  const writes = []
+  const el = ui.editorFor({
+    type: 'array',
+    type_agv: {
+      elem_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          num: 'string',
+        },
+      },
+    },
+  }, value, function (next, meta) {
+    writes.push({ next: next, change: meta.change })
+    value.set(next)
+  }, { fieldPath: 'items' })
+  const inputs = el.querySelectorAll('input')
+  inputs[3].value = '3'
+  inputs[3].dispatch('input', { target: inputs[3] })
+  assert.deepEqual(writes.at(-1).change, { field: 'items[1].num', mode: 'path', value: '3' })
+  assert.deepEqual(value.peek(), [
+    ['a', '1'],
+    ['b', '3'],
+  ])
+}
+
+{
+  const value = aiditor.signal({
+    'red.pear': ['102', '0.6'],
+  })
+  const writes = []
+  const el = ui.editorFor({
+    type: 'dict',
+    type_agv: {
+      value_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          weight: 'string',
+        },
+      },
+    },
+  }, value, function (next, meta) {
+    writes.push({ next: next, change: meta.change })
+    value.set(next)
+  }, { fieldPath: 'fruit' })
+  const inputs = el.querySelectorAll('input')
+  inputs[2].value = '0.7'
+  inputs[2].dispatch('input', { target: inputs[2] })
+  assert.deepEqual(writes.at(-1).change, { field: 'fruit["red.pear"].weight', mode: 'path', value: '0.7' })
+  assert.deepEqual(value.peek(), {
+    'red.pear': ['102', '0.7'],
   })
 }
 

@@ -155,7 +155,11 @@
           primary: currentTargets[0],
           values: values,
           primaryValue: values[0],
+          schema: currentInspection.schema || {},
+          applyChange: aiditor.inspector.applyChange,
+          pathChange: aiditor.inspector.pathChange,
           valueForChange: aiditor.inspector.valueForChange,
+          commands: aiditor.commands || null,
         })
       })
     }

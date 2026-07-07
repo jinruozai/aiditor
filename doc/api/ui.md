@@ -60,7 +60,7 @@ aiditor.ui.propertyForm(opts)
 | `opts` | `object` | Form options. |
 | `opts.targets` | `Signal<object[]>\|object[]` | Targets to edit. |
 | `opts.schema` | `Signal<object>\|object` | Field schema passed to editorFor. |
-| `opts.onChange` | `Function` | Optional persistence hook: (field, newValue, targets, meta) => void. |
+| `opts.onChange` | `Function` | Optional persistence hook: (fieldPath, newValue, targets, meta) => void. |
 | `opts.groups` | `object\|Signal<object>` | Optional grouped section metadata, including labels and UiAction arrays. |
 | `opts.groupActions` | `Function` | Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions. |
 | `opts.groupActionCtx` | `Function` | Optional mapper for the context passed to group actions. |

@@ -161,7 +161,7 @@
           disabled: readOnly(disabledSig),
           dragging: readOnly(draggingSig),
         },
-        writeItem: function (next) { writeItem(state.key, next) },
+        writeItem: function (next, meta) { writeItem(state.key, next, meta) },
         setActive: function () { setActiveKey(state.key, { source: 'item' }) },
         select: function (event) { selectKey(state.key, event || {}, state.index) },
         requestDelete: function (event) { requestDelete(keysForRow(state.key), event || null) },
@@ -279,14 +279,14 @@
       return out
     }
 
-    function writeItem(key, next) {
+    function writeItem(key, next, meta) {
       if (!writeItems) return
       const arr = currentItems()
       const index = indexOfKey(key)
       if (index < 0 || arr[index] === next) return
       const nextItems = arr.slice()
       nextItems[index] = next
-      writeItems(nextItems, { kind: 'item', key: key, index: index, item: arr[index], nextItem: next, items: arr, nextItems: nextItems })
+      writeItems(nextItems, Object.assign({ kind: 'item', key: key, index: index, item: arr[index], nextItem: next, items: arr, nextItems: nextItems }, meta || {}))
     }
 
     function selectedKeys() {

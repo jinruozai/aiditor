@@ -127,7 +127,7 @@ aiditor.inspector.registerProvider('three.cube', {
       },
       values: [cubeState],
       write: function (field, change, writeCtx) {
-        cubeState[field] = writeCtx.valueForChange(change, writeCtx.primary, 0, writeCtx)
+        Object.assign(cubeState, writeCtx.applyChange(cubeState, change, writeCtx.schema))
         applyCubeState(cubeState)
         aiditor.inspector.refresh()
       },

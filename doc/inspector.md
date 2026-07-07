@@ -77,9 +77,7 @@ aiditor.inspector.registerProvider('game.achievement', {
       },
       write: function (field, change, writeCtx) {
         writeCtx.targets.forEach(function (target, index) {
-          achievementStore.patch(target.id, {
-            [field]: writeCtx.valueForChange(change, target, index, writeCtx),
-          })
+          achievementStore.patch(target.id, field, writeCtx.valueForChange(change, target, index, writeCtx))
         })
       },
       subscribe: function (refresh) {
@@ -117,7 +115,7 @@ aiditor.inspector.registerProvider('three.cube', {
       },
       values: [cube],
       write: function (field, change, ctx) {
-        cube[field] = ctx.valueForChange(change, ctx.primary, 0, ctx)
+        Object.assign(cube, ctx.applyChange(cube, change, ctx.schema))
         aiditor.inspector.refresh()
       },
     }
@@ -150,7 +148,7 @@ compatibility decision, including mixed-type cases.
 | `read(target)` | Optional alternative to `values`; called for each target. |
 | `hasField(target, field, value, index)` | Optional field existence override. Default is own-property check on value. |
 | `canWrite(target, field, value, index)` | Optional per-target write gate. |
-| `write(field, change, ctx)` | Applies a field change. Absence makes the form read-only. |
+| `write(field, change, ctx)` | Applies a field change. `field` is `change.field`; for normal edits it is a full logical property path. Absence makes the form read-only. |
 | `readonly` | Disables the whole form. |
 | `defaults` | Optional default values for reset buttons. |
 | `subscribe(refresh, ctx)` | Optional external data subscription. Returns cleanup. |
@@ -273,30 +271,146 @@ context menu is not blocked.
 
 ## Change Shape
 
-PropertyForm currently emits literal changes:
+Inspector changes describe what the user edited in the schema UI. They do not
+describe project commands, undo groups, validation rules, or persistence.
+
+Normal schema-driven edits emit path changes:
 
 ```js
-{ field: 'name', mode: 'literal', value: 'Name 1' }
+{
+  field: 'aaa.metalist[5].transform.pos.x',
+  mode: 'path',
+  value: 10,
+}
 ```
 
-The protocol reserves formula changes for future batch workflows:
+`field` is the canonical logical path string. The same string is passed as the
+first argument to provider `write(field, change, ctx)` so simple providers do
+not need to open `change` just to route the write.
+
+Path syntax is intentionally compact:
+
+| Segment | Syntax | Example |
+| --- | --- | --- |
+| Struct field | `.name` | `transform.pos.x` |
+| Dictionary/object key | `.name` when identifier-like | `render.material` |
+| Array/list item | `[index]` | `metalist[5]` |
+| Non-identifier key | `["key.with.dot"]` | `tags["ui.primary"]` |
+
+The path is a UI/schema path, not a storage dump. A `struct` value may be stored
+as a tuple array, but its path still uses `struct_def` field names. A real
+array/list item uses its numeric index:
 
 ```js
-{ field: 'name', mode: 'formula', expression: 'Name ${index + 1}' }
+// struct tuple encoding, but logical field path
+{ field: 'transform.pos.x', mode: 'path', value: 10 }
+
+// real array item path
+{ field: 'vertices[3].x', mode: 'path', value: 10 }
 ```
 
-The framework does not define a formula language yet and does not `eval`
-expressions. Hosts can later install a formula evaluator with:
+`literal` remains the explicit whole-value replacement mode:
 
 ```js
-aiditor.inspector.setFormulaEvaluator(function (change, target, index, ctx) {
-  // return the value for this target
-})
+{ field: 'transform', mode: 'literal', value: nextTransform }
 ```
 
-Provider `write` implementations should call `ctx.valueForChange(change,
-target, index, ctx)` instead of reading `change.value` directly when they want
-to be formula-ready.
+Use `literal` only when a renderer or provider is replacing the complete value
+identified by `field`. It is not the default for editing a nested property such
+as `transform.pos.x`.
+
+The Inspector helper surface should be:
+
+```js
+aiditor.inspector.pathChange(field, value)
+aiditor.inspector.literalChange(field, value)
+aiditor.inspector.parseFieldPath(field)
+aiditor.inspector.formatFieldPath(segments)
+aiditor.inspector.applyChange(targetValue, change, schema)
+aiditor.inspector.valueForChange(change, target, index, ctx)
+```
+
+`parseFieldPath` and `formatFieldPath` are framework utilities so hosts do not
+hand-roll parsers for bracket escaping. `applyChange` applies a `path` or
+`literal` change to a plain inspected value using the schema to resolve struct
+tuple positions. Providers that store plain objects can use it directly:
+
+```js
+write: function (field, change, ctx) {
+  const next = ctx.applyChange(ctx.values[0], change, ctx.schema)
+  store.replace(ctx.primary.id, next)
+}
+```
+
+Providers with their own command system can route the path directly:
+
+```js
+write: function (field, change, ctx) {
+  ctx.commands.run('object.setProperty', {
+    target: ctx.primary,
+    path: field,
+    value: ctx.valueForChange(change, ctx.primary, 0, ctx),
+  })
+}
+```
+
+`valueForChange` resolves the value part of a change for one target. For
+`mode:"path"` and `mode:"literal"` it returns `change.value`. It exists so
+computed or batch modes can resolve target-specific values without changing the
+provider write contract.
+
+### Implementation Plan
+
+The implementation should be a narrow Inspector/schema-form change, not a new
+domain patch system.
+
+1. Add path helpers in `src/ui/inspector.js`.
+   - `pathChange(field, value)` creates `{ field, mode:"path", value }`.
+   - `parseFieldPath(field)` parses dotted/bracket paths into segments.
+   - `formatFieldPath(segments)` emits canonical strings, using `[index]` for
+     numeric array segments and `["key.with.dot"]` for unsafe keys.
+   - `applyChange(value, change, schema)` applies `path` and `literal` changes
+     to canonical schema values.
+
+2. Pass schema/write helpers through the built-in Inspector panel.
+   - `writeCtx.schema` is the current inspection schema.
+   - `writeCtx.applyChange` is `aiditor.inspector.applyChange`.
+   - `writeCtx.valueForChange` remains available for providers that route
+     command payloads directly.
+
+3. Carry path context through schema renderers.
+   - `propertyForm` starts a top-level field path from the schema key.
+   - `editorFor` passes `ctx.fieldPath` to renderers.
+   - `struct` appends field names from `struct_def`.
+   - `array` appends `[index]` for item value editors.
+   - `dict` appends key segments.
+
+4. Let visual inputs stay visual.
+   - `structInput` continues to edit keyed UI projections.
+   - `dictInput` continues to own dynamic key rows.
+   - `arrayEditor` continues to own row interaction.
+   - These controls can forward `meta.change` from child editors, but they
+     should not learn project semantics or canonical encoding rules.
+
+5. Preserve value stability.
+   - A child field edit emits the child `path` change.
+   - The renderer still computes and writes the updated parent signal so the UI
+     stays in sync.
+   - The provider receives the child path, not the rewritten parent composite.
+
+6. Test the path contract.
+   - flat field: `name`;
+   - nested struct tuple: `transform.pos.x`;
+   - array item: `metalist[5].name`;
+   - array of struct tuple: `items[1].num`;
+   - dict key: `fruit.pear.weight`;
+   - escaped key: `fruit["red.pear"].weight`;
+   - `literal` whole replacement remains available;
+   - `applyChange` preserves struct tuple, array, and dict canonical encoding.
+
+If the implementation starts requiring `structInput` or `propertyForm` to know
+about project objects, history, commands, or business validation, that is the
+wrong direction. The path contract belongs to generic schema editing only.
 
 ## Panel
 

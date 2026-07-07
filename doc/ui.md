@@ -502,6 +502,28 @@ rhythm, while the value cell is produced by `editorFor(value_type)`. `dictInput`
 owns add/delete/rename key interactions and stable rows for unchanged keys; it
 does not reuse `structInput`'s fixed-field data model.
 
+Schema-driven value edits should propagate as path changes. `propertyForm`
+starts the path with the top-level schema key, and nested renderers append their
+own logical segment:
+
+```js
+{
+  field: 'aaa.metalist[5].transform.pos.x',
+  mode: 'path',
+  value: 10,
+}
+```
+
+This keeps `onChange(field, value, targets, meta)` simple: `field` is the same
+canonical path string as `meta.change.field`, and `value` is the leaf value for
+that path. `struct` renderers append field names from `struct_def`; real arrays
+append `[index]`; dictionaries append key segments. Renderers must not bubble a
+whole parent composite just because a child field changed.
+
+Whole-value replacement remains explicit with `mode:"literal"` and should be
+used only when a renderer intentionally replaces the complete value identified
+by `field`.
+
 Composite fields can explicitly hide their row label with `label: false` or
 `labelMode: "hidden"`. This is useful when a named Inspector section contains a
 single struct field and repeating the same label would waste space:
@@ -885,6 +907,29 @@ indicator, overlay, radius, gap, and per-direction shadow:
 --aiditor-dock-tab-active-shadow-right
 ```
 
+Buttons have a small component-level color contract because bright themed
+button fills need matching foreground colors to stay readable:
+
+```css
+--aiditor-button-bg
+--aiditor-button-fg
+--aiditor-button-border
+--aiditor-button-hover-bg
+--aiditor-button-hover-fg
+--aiditor-button-hover-border
+--aiditor-button-active-bg
+--aiditor-button-active-fg
+--aiditor-button-active-border
+--aiditor-button-primary-bg
+--aiditor-button-primary-fg
+--aiditor-button-primary-border
+--aiditor-button-primary-hover-bg
+--aiditor-button-primary-hover-fg
+--aiditor-button-primary-hover-border
+--aiditor-button-primary-active-bg
+--aiditor-button-primary-active-fg
+```
+
 Accent geometry is intentionally narrow. It is a small optional marker for
 container-like surfaces, not a general clip-path or illustration system. Default
 themes keep it disabled with zero size and transparent color. A geometric theme
@@ -921,11 +966,13 @@ The Pop-style neon arcade theme should therefore be expressed by assigning these
 shared appearance roles:
 
 ```css
---aiditor-surface-canvas: #00020d;
---aiditor-surface-panel:  #031026;
---aiditor-surface-field:  #000718;
---aiditor-text-primary:   #f8fbff;
+--aiditor-surface-canvas: #00020a;
+--aiditor-surface-panel:  #030916;
+--aiditor-surface-field:  #00040d;
+--aiditor-text-primary:   #fbfcff;
 --aiditor-brand:          #ff2b93;
+--aiditor-state-info:     #13bfff;
+--aiditor-state-warning:  #facf01;
 
 --aiditor-border-w: 1px;
 --aiditor-border-w-strong: 2px;
@@ -938,30 +985,40 @@ shared appearance roles:
 --aiditor-radius-tab: 10px;
 
 --aiditor-shadow-control:
-  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-field) 42%, transparent),
-  inset 0 1px 0 color-mix(in srgb, var(--aiditor-stroke-hover) 18%, transparent);
+  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 22%, transparent),
+  0 0 10px color-mix(in srgb, var(--aiditor-state-info) 10%, transparent),
+  inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent);
 --aiditor-shadow-surface:
   0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 24%, transparent),
-  0 0 18px rgba(0,234,255,.16),
-  inset 0 0 24px rgba(22,135,255,.08);
+  0 0 18px rgba(0,234,255,.13),
+  inset 0 0 24px rgba(19,191,255,.055);
 --aiditor-shadow-overlay:
-  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 38%, transparent),
-  0 0 28px rgba(0,234,255,.24),
-  0 14px 38px rgba(0,0,0,.56);
+  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 42%, transparent),
+  0 0 30px rgba(0,234,255,.22),
+  0 0 46px rgba(255,43,147,.12),
+  0 14px 42px rgba(0,0,0,.60);
 
 --aiditor-root-bg-image:
-  linear-gradient(112deg, transparent 0 53%, rgba(0,234,255,.22) 53.3% 55.2%, rgba(22,135,255,.38) 55.4% 57.1%, transparent 57.4% 100%),
-  radial-gradient(circle at 78% 18%, rgba(22,135,255,.36), transparent 28%),
-  radial-gradient(circle at 18% 86%, rgba(255,43,147,.24), transparent 30%),
-  radial-gradient(circle, rgba(0,234,255,.18) 0 1.2px, transparent 1.6px),
-  linear-gradient(135deg, #00020d, #02081f 48%, #040c28);
+  linear-gradient(112deg, transparent 0 58%, rgba(19,191,255,.18) 58.2% 59.4%, rgba(22,88,255,.28) 59.6% 61.4%, transparent 61.8% 100%),
+  radial-gradient(circle at 78% 16%, rgba(19,191,255,.18), transparent 30%),
+  radial-gradient(circle at 16% 86%, rgba(255,43,147,.20), transparent 30%),
+  radial-gradient(circle, rgba(19,191,255,.13) 0 1px, transparent 1.4px),
+  linear-gradient(135deg, #00020a, #000413 50%, #01030b);
 --aiditor-root-bg-size: auto, auto, auto, 34px 34px, auto;
 
---aiditor-corner-accent-size: 13px;
+--aiditor-corner-accent-size: 14px;
 --aiditor-corner-accent-color: var(--aiditor-accent);
 --aiditor-corner-accent-opacity: .95;
 
---aiditor-dock-tab-hover-bg: color-mix(in srgb, var(--aiditor-state-info) 28%, var(--aiditor-bg-raised));
+--aiditor-selected: color-mix(in srgb, var(--aiditor-state-warning) 82%, #08357f);
+--aiditor-selected-fg: #151000;
+--aiditor-button-bg: linear-gradient(180deg, #125bff 0%, #0837a8 100%);
+--aiditor-button-fg: #ffffff;
+--aiditor-button-hover-bg: linear-gradient(180deg, #21f4ff 0%, #1687ff 100%);
+--aiditor-button-hover-fg: #001426;
+--aiditor-button-active-bg: #facf01;
+--aiditor-button-active-fg: #171000;
+--aiditor-dock-tab-hover-bg: linear-gradient(180deg, #13bfff 0%, #1658ff 100%);
 --aiditor-dock-tab-active-bg: #facf01;
 --aiditor-dock-tab-indicator-bg: var(--aiditor-state-warning);
 --aiditor-dock-tab-indicator-bg-vertical: var(--aiditor-state-warning);
@@ -972,7 +1029,7 @@ shared appearance roles:
   radial-gradient(90px 24px at 50% 0, rgba(255,43,147,.40), transparent 74%);
 ```
 
-This gives the theme a blue-black editor chassis, cyan neon rails, restrained
-panel glow, magenta focus/selection energy, yellow arcade accents, geometric
-background bands, and direction-aware blue slab dock tabs while keeping ordinary
-fields readable and editor-dense.
+This gives the theme a near-black editor stage, cyan neon rails, restrained
+edge glow, magenta focus/selection energy, yellow arcade accents, sparse
+geometric background energy, and direction-aware yellow dock tabs while keeping
+ordinary fields readable and editor-dense.

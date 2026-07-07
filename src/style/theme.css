@@ -367,11 +367,22 @@
     inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent) 12%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--aiditor-accent) 10%, transparent);
   --aiditor-button-bg:    var(--aiditor-bg-2);
+  --aiditor-button-fg:    var(--aiditor-fg-1);
   --aiditor-button-border: var(--aiditor-border-strong);
   --aiditor-button-hover-bg: var(--aiditor-bg-3);
+  --aiditor-button-hover-fg: var(--aiditor-fg-0);
   --aiditor-button-hover-border: var(--aiditor-border-hover);
   --aiditor-button-active-bg: var(--aiditor-bg-4);
+  --aiditor-button-active-fg: var(--aiditor-fg-0);
   --aiditor-button-active-border: var(--aiditor-button-border);
+  --aiditor-button-primary-bg: var(--aiditor-accent);
+  --aiditor-button-primary-fg: var(--aiditor-accent-fg);
+  --aiditor-button-primary-border: var(--aiditor-accent);
+  --aiditor-button-primary-hover-bg: color-mix(in srgb, var(--aiditor-accent-soft) 72%, var(--aiditor-accent));
+  --aiditor-button-primary-hover-fg: var(--aiditor-accent-fg);
+  --aiditor-button-primary-hover-border: var(--aiditor-accent-soft);
+  --aiditor-button-primary-active-bg: var(--aiditor-accent);
+  --aiditor-button-primary-active-fg: var(--aiditor-accent-fg);
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */
@@ -1230,52 +1241,53 @@
   --aiditor-shadow-raised: 0 1px 2px rgba(3,9,5,.32), 0 3px 10px rgba(3,9,5,.38);
 }
 
-/* Pop theme - neon arcade poster chrome with cyan rails and magenta energy. */
+/* Pop theme - near-black geometric poster stage with blue rails, yellow slabs,
+   and magenta/cyan arcade accents. */
 :root[data-aiditor-theme="pop"],
 .aiditor-root[data-aiditor-theme="pop"] {
   color-scheme: dark;
 
-  --aiditor-surface-canvas: #00020d;
-  --aiditor-surface-lower:  #000615;
-  --aiditor-surface-frame:  #020b22;
-  --aiditor-surface-panel:  #031026;
-  --aiditor-surface-field:  #000718;
-  --aiditor-surface-hover:  #082a55;
-  --aiditor-surface-active: #123d9b;
-  --aiditor-surface-raised: #061a36;
+  --aiditor-surface-canvas: #00020a;
+  --aiditor-surface-lower:  #010412;
+  --aiditor-surface-frame:  #020817;
+  --aiditor-surface-panel:  #030916;
+  --aiditor-surface-field:  #00040d;
+  --aiditor-surface-hover:  #071f4a;
+  --aiditor-surface-active: #0d3478;
+  --aiditor-surface-raised: #06142f;
 
-  --aiditor-text-primary:  #f8fbff;
-  --aiditor-text-body:     #e7eefc;
-  --aiditor-text-label:    #b7c7e8;
-  --aiditor-text-muted:    #7f91bd;
-  --aiditor-text-disabled: #53658c;
+  --aiditor-text-primary:  #fbfcff;
+  --aiditor-text-body:     #e9f2ff;
+  --aiditor-text-label:    #bdd8ff;
+  --aiditor-text-muted:    #90add9;
+  --aiditor-text-disabled: #5f79a1;
 
-  --aiditor-stroke-subtle: #123564;
+  --aiditor-stroke-subtle: #0b2c58;
   --aiditor-stroke-strong: #00eaff;
-  --aiditor-stroke-field:  #155c8f;
-  --aiditor-stroke-hover:  #13f4ff;
+  --aiditor-stroke-field:  #105a90;
+  --aiditor-stroke-hover:  #21f4ff;
 
   --aiditor-brand:          #ff2b93;
-  --aiditor-brand-hover:    #ff65b3;
+  --aiditor-brand-hover:    #ff63b8;
   --aiditor-brand-contrast: #ffffff;
 
-  --aiditor-state-success: #22f59f;
-  --aiditor-state-warning: #ffd400;
-  --aiditor-state-danger:  #ff3d7f;
-  --aiditor-state-info:    #1687ff;
+  --aiditor-state-success: #00f5a8;
+  --aiditor-state-warning: #facf01;
+  --aiditor-state-danger:  #ff347e;
+  --aiditor-state-info:    #13bfff;
 
-  --aiditor-c-00: #00020d;
-  --aiditor-c-01: #000615;
-  --aiditor-c-02: #020b22;
-  --aiditor-c-03: #031026;
-  --aiditor-c-04: #061a36;
-  --aiditor-c-05: #082a55;
-  --aiditor-c-06: #123564;
-  --aiditor-c-07: #155c8f;
-  --aiditor-c-08: #53658c;
-  --aiditor-c-09: #7f91bd;
-  --aiditor-c-10: #b7c7e8;
-  --aiditor-c-11: #f8fbff;
+  --aiditor-c-00: #00020a;
+  --aiditor-c-01: #010412;
+  --aiditor-c-02: #020817;
+  --aiditor-c-03: #030916;
+  --aiditor-c-04: #06142f;
+  --aiditor-c-05: #071f4a;
+  --aiditor-c-06: #0b2c58;
+  --aiditor-c-07: #105a90;
+  --aiditor-c-08: #5f79a1;
+  --aiditor-c-09: #90add9;
+  --aiditor-c-10: #bdd8ff;
+  --aiditor-c-11: #fbfcff;
 
   --aiditor-c-accent:      var(--aiditor-brand);
   --aiditor-c-accent-soft: var(--aiditor-brand-hover);
@@ -1304,34 +1316,34 @@
   --aiditor-accent:      var(--aiditor-brand);
   --aiditor-accent-soft: var(--aiditor-brand-hover);
   --aiditor-accent-fg:   var(--aiditor-brand-contrast);
-  --aiditor-accent-bg:   color-mix(in srgb, var(--aiditor-brand) 18%, transparent);
-  --aiditor-accent-bg-strong: color-mix(in srgb, var(--aiditor-brand) 31%, transparent);
+  --aiditor-accent-bg:   color-mix(in srgb, var(--aiditor-brand) 22%, transparent);
+  --aiditor-accent-bg-strong: color-mix(in srgb, var(--aiditor-brand) 40%, transparent);
 
-  --aiditor-hover:       color-mix(in srgb, var(--aiditor-state-info) 18%, transparent);
-  --aiditor-active:      color-mix(in srgb, var(--aiditor-brand) 20%, transparent);
-  --aiditor-selected:    color-mix(in srgb, var(--aiditor-brand) 22%, var(--aiditor-bg-1));
-  --aiditor-selected-hover: color-mix(in srgb, var(--aiditor-brand) 32%, var(--aiditor-bg-1));
-  --aiditor-selected-border: color-mix(in srgb, var(--aiditor-brand) 78%, var(--aiditor-stroke-hover));
-  --aiditor-selected-fg: var(--aiditor-fg-0);
-  --aiditor-scrim:       color-mix(in srgb, #00020d 76%, transparent);
+  --aiditor-hover:       color-mix(in srgb, var(--aiditor-state-info) 18%, var(--aiditor-bg-raised));
+  --aiditor-active:      color-mix(in srgb, var(--aiditor-state-warning) 24%, var(--aiditor-bg-1));
+  --aiditor-selected:    color-mix(in srgb, var(--aiditor-state-warning) 82%, #08357f);
+  --aiditor-selected-hover: color-mix(in srgb, var(--aiditor-state-warning) 92%, #0b48aa);
+  --aiditor-selected-border: color-mix(in srgb, var(--aiditor-state-warning) 70%, var(--aiditor-stroke-hover));
+  --aiditor-selected-fg: #151000;
+  --aiditor-scrim:       color-mix(in srgb, #00020a 80%, transparent);
 
   --aiditor-success:    var(--aiditor-c-success);
-  --aiditor-success-bg: color-mix(in srgb, var(--aiditor-c-success) 16%, transparent);
+  --aiditor-success-bg: color-mix(in srgb, var(--aiditor-c-success) 20%, transparent);
   --aiditor-success-fg: #00160d;
   --aiditor-warn:       var(--aiditor-c-warn);
-  --aiditor-warn-bg:    color-mix(in srgb, var(--aiditor-c-warn) 18%, transparent);
+  --aiditor-warn-bg:    color-mix(in srgb, var(--aiditor-c-warn) 26%, transparent);
   --aiditor-warn-fg:    #171000;
   --aiditor-error:      var(--aiditor-c-error);
-  --aiditor-error-bg:   color-mix(in srgb, var(--aiditor-c-error) 17%, transparent);
+  --aiditor-error-bg:   color-mix(in srgb, var(--aiditor-c-error) 22%, transparent);
   --aiditor-error-fg:   #ffffff;
   --aiditor-info:       var(--aiditor-c-info);
-  --aiditor-info-bg:    color-mix(in srgb, var(--aiditor-c-info) 17%, transparent);
-  --aiditor-info-fg:    #ffffff;
+  --aiditor-info-bg:    color-mix(in srgb, var(--aiditor-c-info) 24%, transparent);
+  --aiditor-info-fg:    #001426;
 
-  --aiditor-radius-control: 8px;
-  --aiditor-radius-surface: 12px;
-  --aiditor-radius-overlay: 12px;
-  --aiditor-radius-tab: 10px;
+  --aiditor-radius-control: 9px;
+  --aiditor-radius-surface: 14px;
+  --aiditor-radius-overlay: 14px;
+  --aiditor-radius-tab: 11px;
   --aiditor-radius-chip: var(--aiditor-r-pill);
 
   --aiditor-border-w: 1px;
@@ -1344,54 +1356,58 @@
   --aiditor-toolbar-border-w: var(--aiditor-border-w-strong);
 
   --aiditor-shadow-control:
-    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-field) 42%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--aiditor-stroke-hover) 18%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 22%, transparent),
+    0 0 10px color-mix(in srgb, var(--aiditor-state-info) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent);
   --aiditor-shadow-surface:
     0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 24%, transparent),
-    0 0 18px rgba(0,234,255,.16),
-    inset 0 0 24px rgba(22,135,255,.08);
+    0 0 18px rgba(0,234,255,.13),
+    inset 0 0 24px rgba(19,191,255,.055);
   --aiditor-shadow-overlay:
-    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 38%, transparent),
-    0 0 28px rgba(0,234,255,.24),
-    0 14px 38px rgba(0,0,0,.56);
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 42%, transparent),
+    0 0 30px rgba(0,234,255,.22),
+    0 0 46px rgba(255,43,147,.12),
+    0 14px 42px rgba(0,0,0,.60);
   --aiditor-shadow-active:
-    inset 3px 0 0 var(--aiditor-brand),
-    0 0 14px color-mix(in srgb, var(--aiditor-brand) 34%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
+    0 0 18px color-mix(in srgb, var(--aiditor-state-warning) 36%, transparent);
 
   --aiditor-root-bg-image:
-    linear-gradient(112deg, transparent 0 53%, rgba(0,234,255,.22) 53.3% 55.2%, rgba(22,135,255,.38) 55.4% 57.1%, transparent 57.4% 100%),
-    radial-gradient(circle at 78% 18%, rgba(22,135,255,.36), transparent 28%),
-    radial-gradient(circle at 18% 86%, rgba(255,43,147,.24), transparent 30%),
-    radial-gradient(circle at 72% 78%, rgba(255,212,0,.13), transparent 24%),
-    radial-gradient(circle, rgba(0,234,255,.18) 0 1.2px, transparent 1.6px),
-    linear-gradient(90deg, rgba(0,234,255,.055) 1px, transparent 1px),
-    linear-gradient(rgba(0,234,255,.045) 1px, transparent 1px),
-    linear-gradient(135deg, #00020d, #02081f 48%, #040c28);
-  --aiditor-root-bg-size: auto, auto, auto, auto, 34px 34px, 80px 80px, 80px 80px, auto;
-  --aiditor-root-bg-position: center, right top, left bottom, right bottom, 0 0, 0 0, 0 0, 0 0;
-  --aiditor-root-bg-blend: screen, screen, screen, screen, screen, normal, normal, normal;
+    linear-gradient(112deg, transparent 0 58%, rgba(19,191,255,.18) 58.2% 59.4%, rgba(22,88,255,.28) 59.6% 61.4%, transparent 61.8% 100%),
+    linear-gradient(132deg, transparent 0 78%, rgba(250,207,1,.18) 78.2% 78.8%, transparent 79% 100%),
+    radial-gradient(circle at 78% 16%, rgba(19,191,255,.18), transparent 30%),
+    radial-gradient(circle at 16% 86%, rgba(255,43,147,.20), transparent 30%),
+    radial-gradient(circle at 72% 82%, rgba(250,207,1,.12), transparent 24%),
+    radial-gradient(circle, rgba(19,191,255,.13) 0 1px, transparent 1.4px),
+    radial-gradient(circle, rgba(255,43,147,.16) 0 1px, transparent 1.5px),
+    linear-gradient(90deg, rgba(19,191,255,.032) 1px, transparent 1px),
+    linear-gradient(rgba(19,191,255,.024) 1px, transparent 1px),
+    linear-gradient(135deg, #00020a, #000413 50%, #01030b);
+  --aiditor-root-bg-size: auto, auto, auto, auto, auto, 34px 34px, 46px 46px, 84px 84px, 84px 84px, auto;
+  --aiditor-root-bg-position: center, center, right top, left bottom, right bottom, 0 0, 17px 19px, 0 0, 0 0, 0 0;
+  --aiditor-root-bg-blend: screen, screen, screen, screen, screen, screen, screen, normal, normal, normal;
 
-  --aiditor-corner-accent-size: 13px;
+  --aiditor-corner-accent-size: 14px;
   --aiditor-corner-accent-color: var(--aiditor-brand);
   --aiditor-corner-accent-opacity: .95;
 
-  --aiditor-toolbar-bg: var(--aiditor-bg-raised);
+  --aiditor-toolbar-bg: linear-gradient(180deg, #07183a 0%, #020611 100%);
   --aiditor-toolbar-border: var(--aiditor-border-strong);
   --aiditor-dock-border: var(--aiditor-border-strong);
   --aiditor-chrome-border: var(--aiditor-border);
   --aiditor-view-bg: var(--aiditor-bg-0);
   --aiditor-view-radius: var(--aiditor-radius-surface);
-  --aiditor-splitter-bg: color-mix(in srgb, var(--aiditor-stroke-strong) 54%, var(--aiditor-bg-0));
+  --aiditor-splitter-bg: color-mix(in srgb, var(--aiditor-stroke-strong) 36%, var(--aiditor-bg-0));
   --aiditor-splitter-active-bg: var(--aiditor-accent);
-  --aiditor-dock-tab-bg: color-mix(in srgb, var(--aiditor-bg-raised) 78%, transparent);
-  --aiditor-dock-tab-hover-bg: color-mix(in srgb, var(--aiditor-state-info) 28%, var(--aiditor-bg-raised));
+  --aiditor-dock-tab-bg: linear-gradient(180deg, #07183a 0%, #020611 100%);
+  --aiditor-dock-tab-hover-bg: linear-gradient(180deg, #13bfff 0%, #1658ff 100%);
   --aiditor-dock-tab-active-bg: #facf01;
   --aiditor-dock-tab-border-w: 1px;
-  --aiditor-dock-tab-border: color-mix(in srgb, var(--aiditor-stroke-hover) 36%, transparent);
+  --aiditor-dock-tab-border: color-mix(in srgb, var(--aiditor-stroke-hover) 56%, transparent);
   --aiditor-dock-tab-hover-border: var(--aiditor-stroke-hover);
-  --aiditor-dock-tab-active-border: var(--aiditor-stroke-hover);
-  --aiditor-dock-tab-fg: var(--aiditor-fg-2);
-  --aiditor-dock-tab-hover-fg: var(--aiditor-fg-0);
+  --aiditor-dock-tab-active-border: #21f4ff;
+  --aiditor-dock-tab-fg: #d9ebff;
+  --aiditor-dock-tab-hover-fg: #001426;
   --aiditor-dock-tab-active-fg: #171000;
   --aiditor-dock-tab-gap: 4px;
   --aiditor-dock-tab-indicator-bg: var(--aiditor-state-warning);
@@ -1402,34 +1418,45 @@
   --aiditor-dock-tab-indicator-opacity: 1;
   --aiditor-dock-tab-active-overlay-top:
     linear-gradient(to bottom, rgba(255,255,255,.24), transparent 58%),
-    radial-gradient(90px 24px at 50% 0, rgba(255,43,147,.40), transparent 74%);
+    radial-gradient(90px 24px at 50% 0, rgba(255,43,147,.34), transparent 74%);
   --aiditor-dock-tab-active-overlay-bottom:
     linear-gradient(to top, rgba(255,255,255,.20), transparent 58%),
-    radial-gradient(90px 24px at 50% 100%, rgba(255,43,147,.36), transparent 74%);
+    radial-gradient(90px 24px at 50% 100%, rgba(255,43,147,.32), transparent 74%);
   --aiditor-dock-tab-active-overlay-left:
     linear-gradient(to right, rgba(255,255,255,.20), transparent 58%),
-    radial-gradient(24px 90px at 0 50%, rgba(255,43,147,.36), transparent 74%);
+    radial-gradient(24px 90px at 0 50%, rgba(255,43,147,.32), transparent 74%);
   --aiditor-dock-tab-active-overlay-right:
     linear-gradient(to left, rgba(255,255,255,.20), transparent 58%),
-    radial-gradient(24px 90px at 100% 50%, rgba(255,43,147,.36), transparent 74%);
+    radial-gradient(24px 90px at 100% 50%, rgba(255,43,147,.32), transparent 74%);
   --aiditor-dock-tab-active-shadow-top:
-    0 0 16px rgba(22,135,255,.48),
+    0 0 12px rgba(250,207,1,.24),
     inset 0 0 0 1px rgba(255,255,255,.22);
   --aiditor-dock-tab-active-shadow-bottom:
-    0 0 16px rgba(22,135,255,.46),
+    0 0 12px rgba(250,207,1,.22),
     inset 0 0 0 1px rgba(255,255,255,.20);
   --aiditor-dock-tab-active-shadow-left:
-    0 0 16px rgba(22,135,255,.46),
+    0 0 12px rgba(250,207,1,.22),
     inset 0 0 0 1px rgba(255,255,255,.20);
   --aiditor-dock-tab-active-shadow-right:
-    0 0 16px rgba(22,135,255,.46),
+    0 0 12px rgba(250,207,1,.22),
     inset 0 0 0 1px rgba(255,255,255,.20);
-  --aiditor-button-bg: var(--aiditor-bg-raised);
-  --aiditor-button-border: color-mix(in srgb, var(--aiditor-stroke-hover) 68%, var(--aiditor-border));
-  --aiditor-button-hover-bg: color-mix(in srgb, var(--aiditor-state-info) 26%, var(--aiditor-bg-raised));
+  --aiditor-button-bg: linear-gradient(180deg, #125bff 0%, #0837a8 100%);
+  --aiditor-button-fg: #ffffff;
+  --aiditor-button-border: #13bfff;
+  --aiditor-button-hover-bg: linear-gradient(180deg, #21f4ff 0%, #1687ff 100%);
+  --aiditor-button-hover-fg: #001426;
   --aiditor-button-hover-border: var(--aiditor-border-hover);
-  --aiditor-button-active-bg: color-mix(in srgb, var(--aiditor-state-warning) 86%, var(--aiditor-bg-1));
-  --aiditor-button-active-border: var(--aiditor-border-strong);
+  --aiditor-button-active-bg: #facf01;
+  --aiditor-button-active-fg: #171000;
+  --aiditor-button-active-border: #21f4ff;
+  --aiditor-button-primary-bg: linear-gradient(180deg, #ff4fb2 0%, #ff2b93 58%, #b713ff 100%);
+  --aiditor-button-primary-fg: #ffffff;
+  --aiditor-button-primary-border: #ff8ccc;
+  --aiditor-button-primary-hover-bg: linear-gradient(180deg, #ff77c4 0%, #ff2b93 52%, #21f4ff 130%);
+  --aiditor-button-primary-hover-fg: #ffffff;
+  --aiditor-button-primary-hover-border: #facf01;
+  --aiditor-button-primary-active-bg: #facf01;
+  --aiditor-button-primary-active-fg: #171000;
 
   --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 10%, transparent);
   --aiditor-highlight-strong: color-mix(in srgb, #ffffff 18%, transparent);
@@ -1438,8 +1465,9 @@
   --aiditor-shadow-3: 0 6px 24px rgba(0,0,0,.58);
   --aiditor-shadow-4: 0 14px 48px rgba(0,0,0,.68);
   --aiditor-shadow-raised:
-    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 20%, transparent),
-    0 0 18px rgba(0,234,255,.14);
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 22%, transparent),
+    0 0 16px rgba(19,191,255,.18),
+    0 0 22px rgba(255,43,147,.08);
 }
 
 :root[data-aiditor-theme="light"],

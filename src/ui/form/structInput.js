@@ -17,7 +17,7 @@
 //               tooltip — optional one-liner shown on label hover
 //               contextActions(ctx) — optional UiAction[] | Promise<UiAction[]>
 //                 opened from label / row chrome contextmenu, never editor controls
-//   onChange?: (nextObj, changedKey, newValue) => void
+//   onChange?: (nextObj, changedKey, newValue, meta?) => void
 //               if absent, writes go straight into `value`
 //   ctx?:     any                                           forwarded to editor()
 //
@@ -86,11 +86,11 @@
       })
       ui.collect(root, fieldSig.dispose)
 
-      const writeSlot = function (nv) {
+      const writeSlot = function (nv, meta) {
         const cur = value.peek() || {}
         if (cur[f.key] === nv) return
         const next = Object.assign({}, cur, { [f.key]: nv })
-        if (onChange) onChange(next, f.key, nv)
+        if (onChange) onChange(next, f.key, nv, meta)
         else value.set(next)
       }
 

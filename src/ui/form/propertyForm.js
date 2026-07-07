@@ -6,7 +6,7 @@
 // opts:
 //   targets:  signal<T[]> | T[]                       required (single-edit = [obj])
 //   schema:   signal<StructDef> | StructDef           field shape; rare changes rebuild rows
-//   onChange?:(field, newValue, targets, meta) => void app persistence; if omitted writes are
+//   onChange?:(fieldPath, newValue, targets, meta) => void app persistence; if omitted writes are
 //                                                     fan-out into `targets` directly
 //   disabled?:signal<boolean> | boolean               toggles `inert` on the root
 //   defaults?:object                                  per-key reset-to-default values; when
@@ -50,7 +50,7 @@
    * @param {object} opts - Form options.
    * @param {Signal<object[]>|object[]} opts.targets - Targets to edit.
    * @param {Signal<object>|object} opts.schema - Field schema passed to editorFor.
-   * @param {Function} opts.onChange - Optional persistence hook: (field, newValue, targets, meta) => void.
+   * @param {Function} opts.onChange - Optional persistence hook: (fieldPath, newValue, targets, meta) => void.
    * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels and UiAction arrays.
    * @param {Function} opts.groupActions - Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions.
    * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
@@ -92,9 +92,10 @@
     })
     ui.collect(root, composite.dispose)
 
-    function fanOut(field, nv) {
-      const change = { field: field, mode: 'literal', value: nv }
-      if (onChange) { onChange(field, nv, targets.peek(), { change: change }); return }
+    function fanOut(field, nv, meta) {
+      const change = meta && meta.change || pathChange(field, nv)
+      const outMeta = Object.assign({}, meta || {}, { change: change })
+      if (onChange) { onChange(change.field, change.value, targets.peek(), outMeta); return }
       const arr = (targets.peek() || []).map(function (t) {
         const next = Object.assign({}, t || {})
         next[field] = nv
@@ -161,7 +162,7 @@
         const body = ui.structInput({
           value:    composite,
           fields:   fields,
-          onChange: function (_next, key, nv) { fanOut(key, nv) },
+          onChange: function (_next, key, nv, meta) { fanOut(key, nv, meta) },
           ctx:      ctx,
         })
         body.classList.add('aiditor-ui-property-form-struct')
@@ -319,7 +320,10 @@
   }
 
   function fieldCtx(ctx, field) {
-    return typeof ctx === 'function' ? ctx(field) : ctx
+    const base = typeof ctx === 'function' ? ctx(field) : ctx
+    const out = Object.assign({}, base || {})
+    out.fieldPath = out.fieldPath || field
+    return out
   }
 
   function fieldDisabled(targets, requireAllTargets, canEdit, field, raw) {
@@ -404,5 +408,11 @@
     if (a == null || b == null) return false
     if (typeof a !== 'object' || typeof b !== 'object') return false
     return JSON.stringify(a) === JSON.stringify(b)
+  }
+
+  function pathChange(field, value) {
+    return aiditor.inspector && aiditor.inspector.pathChange
+      ? aiditor.inspector.pathChange(field, value)
+      : { field: field, mode: 'path', value: value }
   }
 })(window.aiditor = window.aiditor || {})

@@ -36,7 +36,7 @@
       },
       createItem: defaultValue,
       renderItem: function (_, index, ctx) {
-        return editor(ctx.value, ctx.writeItem, o.ctx, index)
+        return editor(ctx.value, ctx.writeItem, o.ctx, index, ctx)
       },
       onChange: o.onChange,
       emptyText: o.emptyText || 'No items',

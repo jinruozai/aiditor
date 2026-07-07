@@ -20,6 +20,8 @@ for (const file of [
   'src/core/registry.js',
   'src/ai/registries.js',
   'src/ai/reference.js',
+  'src/ui/form/typeconfig.js',
+  'src/ui/form/schema.js',
   'src/ui/inspector.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })

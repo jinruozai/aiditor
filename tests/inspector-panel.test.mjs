@@ -133,6 +133,8 @@ vm.runInThisContext(readFileSync('src/ui/base/actionBar.js', 'utf8'), { filename
 for (const file of [
   'src/ui/form/input.js',
   'src/ui/form/searchInput.js',
+  'src/ui/form/typeconfig.js',
+  'src/ui/form/schema.js',
   'src/ui/inspector.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })

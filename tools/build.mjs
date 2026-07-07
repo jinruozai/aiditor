@@ -149,6 +149,7 @@ const JS_ORDER = [
   // TypeConfig + schema-driven property editing depends on the form widgets
   // above; it dispatches to them. Keep at the end of the form layer.
   'ui/form/typeconfig.js',
+  'ui/form/schema.js',
   'ui/form/structInput.js',
   'ui/form/dictInput.js',
   'ui/form/arrayEditor.js',

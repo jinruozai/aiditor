@@ -164,6 +164,7 @@ for (const file of [
   'src/ui/form/searchInput.js',
   'src/ui/form/numberInput.js',
   'src/ui/form/typeconfig.js',
+  'src/ui/form/schema.js',
   'src/ui/form/editorFor.js',
   'src/ui/form/structInput.js',
   'src/ui/container/section.js',

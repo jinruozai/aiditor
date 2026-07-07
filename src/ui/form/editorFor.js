@@ -3,7 +3,7 @@
 //   aiditor.ui.editorFor(fieldDef, value, onChange, [ctx]) → HTMLElement
 //     fieldDef: FieldDef (raw or already-resolved TypeDef)
 //     value   : current value (plain) OR a signal — plain values are wrapped
-//     onChange: (nv) => void   callback invoked when the picked renderer commits
+//     onChange: (nv, meta?) => void   callback invoked when the picked renderer commits
 //     ctx?    : free-form context forwarded to the renderer (opaque to us)
 //
 // The renderer is resolved by FieldDef.type_render against the registry
@@ -19,6 +19,7 @@
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
+  const schema = ui.schema
 
   function editorFor(fieldDef, value, onChange, ctx) {
     const resolved = fieldDef && fieldDef._resolved
@@ -27,8 +28,9 @@
     if (resolved) resolved._resolved = true
 
     const sig = ui.isSignal(value) ? value : aiditor.signal(value)
-    const write = function (nv) {
-      if (typeof onChange === 'function') onChange(nv)
+    const write = function (nv, meta) {
+      const outMeta = meta && meta.change ? meta : changeMeta(ctx, nv, meta)
+      if (typeof onChange === 'function') onChange(nv, outMeta)
       else if (typeof sig.set === 'function') sig.set(nv)
     }
 
@@ -170,7 +172,7 @@
 
   // ── struct / array: delegate to the general-purpose ui.* components.
   ui.registerRenderer('struct', function (a) {
-    const def = normalizeStructDef(a.fieldDef.struct_def)
+    const def = schema.normalizeStructDef(a.fieldDef.struct_def)
     if (!def) {
       const err = ui.h('div', 'aiditor-ui-struct-input', { text: '(invalid struct_def)' })
       return err
@@ -190,7 +192,7 @@
         collapsed: rawObj && rawObj.collapsed,
         onToggle: rawObj && rawObj.onToggle,
         actions: rawObj && rawObj.actions,
-        editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, ctx) },
+        editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, withFieldPath(ctx, fname)) },
       }
     })
     const projection = aiditor.derived(function () {
@@ -199,9 +201,9 @@
     const el = ui.structInput({
       value: projection,
       fields: fields,
-      onChange: function (_nextRecord, key, nv) {
+      onChange: function (_nextRecord, key, nv, meta) {
         const next = writeTupleMember(asPlain(a.sig), fields, key, nv)
-        if (next) a.write(next)
+        if (next) a.write(next, meta)
       },
       ctx: a.ctx,
     })
@@ -211,13 +213,15 @@
 
   ui.registerRenderer('array', function (a) {
     const agv      = a.fieldDef.type_agv || {}
-    const elemFd   = resolveArrayElemFieldDef(a.fieldDef, agv)
+    const elemFd   = schema.resolveArrayElemFieldDef(a.fieldDef, agv)
     return ui.arrayInput({
       value:        a.sig,
-      editor:       function (sig, write, ctx) { return editorFor(elemFd, sig, write, ctx) },
+      editor:       function (sig, write, ctx, index, rowCtx) {
+        return editorFor(elemFd, sig, write, withFieldPath(ctx, function () { return rowCtx ? rowCtx.index : index }))
+      },
       defaultValue: function () {
         return elemFd && elemFd.default !== undefined
-          ? JSON.parse(JSON.stringify(elemFd.default))
+          ? schema.cloneValue(elemFd.default)
           : null
       },
       onChange: a.write,
@@ -227,7 +231,7 @@
 
   ui.registerRenderer('array_editor', function (a) {
     const agv      = a.fieldDef.type_agv || {}
-    const elemFd   = resolveArrayElemFieldDef(a.fieldDef, agv)
+    const elemFd   = schema.resolveArrayElemFieldDef(a.fieldDef, agv)
     const hasKey   = typeof agv.getKey === 'function'
     return ui.arrayEditor({
       items:         a.sig,
@@ -241,7 +245,7 @@
       createItem: function () { return cloneDefault(elemFd) },
       duplicateItem: function (item) { return cloneItem(item) },
       renderItem: function (_, __, rowCtx) {
-        return editorFor(elemFd, rowCtx.value, rowCtx.writeItem, a.ctx)
+        return editorFor(elemFd, rowCtx.value, rowCtx.writeItem, withFieldPath(a.ctx, function () { return rowCtx.index }))
       },
       emptyText: agv.emptyText || 'No items',
     })
@@ -249,14 +253,18 @@
 
   ui.registerRenderer('dict', function (a) {
     const agv = a.fieldDef.type_agv || {}
-    const valueFd = resolveValueFieldDef(agv.value_type || 'string')
+    const valueFd = schema.resolveDictValueFieldDef(a.fieldDef, agv)
     return ui.dictInput({
       value: a.sig,
       onChange: a.write,
       valueType: valueFd,
       defaultValue: cloneDefault(valueFd),
       createValue: function () { return cloneDefault(valueFd) },
-      renderValue: function (sig, write, ctx) { return editorFor(valueFd, sig, write, ctx) },
+      renderValue: function (sig, write, ctx) {
+        return editorFor(valueFd, sig, write, withFieldPath(a.ctx, function () {
+          return ctx && typeof ctx.keyRef === 'function' ? ctx.keyRef() : ctx && ctx.key
+        }))
+      },
       ctx: a.ctx,
     })
   })
@@ -278,30 +286,14 @@
     })
   }
 
-  function parseArrayElemType(typeName) {
-    if (typeof typeName !== 'string') return null
-    const m = /^array\[(.+)\]$/.exec(typeName)
-    return m ? m[1] : null
-  }
-
-  function resolveArrayElemFieldDef(fieldDef, agv) {
-    const elem = agv.elem_type || parseArrayElemType(fieldDef.type) || 'string'
-    return resolveValueFieldDef(elem)
-  }
-
-  function resolveValueFieldDef(valueType) {
-    return ui.resolveFieldDef(typeof valueType === 'string' ? { type: valueType } : valueType)
-  }
-
   function cloneDefault(fieldDef) {
     return fieldDef && fieldDef.default !== undefined
-      ? cloneItem(fieldDef.default)
+      ? schema.cloneValue(fieldDef.default)
       : null
   }
 
   function cloneItem(item) {
-    if (item == null || typeof item !== 'object') return item
-    return JSON.parse(JSON.stringify(item))
+    return schema.cloneValue(item)
   }
 
   function tupleToRecord(value, fields) {
@@ -333,27 +325,59 @@
   }
 
   function cloneFieldDefault(fieldDef) {
-    return fieldDef && fieldDef.default !== undefined
-      ? cloneItem(fieldDef.default)
-      : undefined
+    return schema.cloneDefault(fieldDef)
   }
 
-  // Accept two struct_def shapes for convenience:
-  //   { field1: typeName, field2: typeName }                  (flat)
-  //   { wrapperKey: { field1: typeName, field2: typeName } }  (wrapped)
-  function normalizeStructDef(def) {
-    if (!def || typeof def !== 'object') return null
-    const keys = Object.keys(def)
-    if (keys.length === 1 && def[keys[0]] && typeof def[keys[0]] === 'object') {
-      const inner = def[keys[0]]
-      const allString = Object.keys(inner).every(function (k) { return typeof inner[k] === 'string' })
-      if (allString) {
-        const norm = {}
-        Object.keys(inner).forEach(function (k) { norm[k] = { type: inner[k] } })
-        return norm
-      }
-      return inner
-    }
-    return def
+  function changeMeta(ctx, value, meta) {
+    const fieldPath = readFieldPath(ctx)
+    if (!fieldPath) return meta
+    const change = aiditor.inspector && aiditor.inspector.pathChange
+      ? aiditor.inspector.pathChange(fieldPath, value)
+      : { field: fieldPath, mode: 'path', value: value }
+    return Object.assign({}, meta || {}, { change: change })
   }
+
+  function withFieldPath(ctx, segment) {
+    const base = ctx || {}
+    const next = Object.assign({}, base)
+    next.fieldPath = function () {
+      return appendFieldPath(readFieldPath(base), typeof segment === 'function' ? segment() : segment)
+    }
+    return next
+  }
+
+  function readFieldPath(ctx) {
+    const path = ctx && ctx.fieldPath
+    return typeof path === 'function' ? path() : path
+  }
+
+  function appendFieldPath(base, segment) {
+    const parts = []
+    if (base) {
+      if (aiditor.inspector && aiditor.inspector.parseFieldPath) parts.push.apply(parts, aiditor.inspector.parseFieldPath(base))
+      else return fallbackAppendPath(base, segment)
+    }
+    parts.push(segment)
+    if (aiditor.inspector && aiditor.inspector.formatFieldPath) return aiditor.inspector.formatFieldPath(parts)
+    return fallbackFormatPath(parts)
+  }
+
+  function fallbackAppendPath(base, segment) {
+    return String(base || '') + fallbackFormatSegment(segment, true)
+  }
+
+  function fallbackFormatPath(segments) {
+    let out = ''
+    for (let i = 0; i < segments.length; i++) {
+      out += fallbackFormatSegment(segments[i], !!out)
+    }
+    return out
+  }
+
+  function fallbackFormatSegment(segment, hasBase) {
+    if (typeof segment === 'number') return '[' + segment + ']'
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(String(segment))) return (hasBase ? '.' : '') + segment
+    return '[' + JSON.stringify(String(segment)) + ']'
+  }
+
 })(window.aiditor = window.aiditor || {})

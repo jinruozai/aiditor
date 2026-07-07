@@ -76,7 +76,7 @@
   max-width: 100%;
   padding: 0 var(--aiditor-space-3);
   background: var(--aiditor-button-bg);
-  color: var(--aiditor-fg-1);
+  color: var(--aiditor-button-fg);
   border: var(--aiditor-control-border-w) solid var(--aiditor-button-border);
   border-radius: var(--aiditor-radius-control);
   font: var(--aiditor-fs-md) var(--aiditor-font-ui);
@@ -124,13 +124,14 @@
 .aiditor-ui-btn-lg { height: var(--aiditor-size-h-lg); padding: 0 var(--aiditor-space-4); font-size: var(--aiditor-fs-lg); }
 .aiditor-ui-btn:hover {
   background: var(--aiditor-button-hover-bg);
-  color: var(--aiditor-fg-0);
+  color: var(--aiditor-button-hover-fg);
   border-color: var(--aiditor-button-hover-border);
   transform: translateY(-1px);
   box-shadow: var(--aiditor-shadow-raised);
 }
 .aiditor-ui-btn:active {
   background: var(--aiditor-button-active-bg);
+  color: var(--aiditor-button-active-fg);
   border-color: var(--aiditor-button-active-border);
   transform: translateY(0) scale(0.985);
   box-shadow: var(--aiditor-shadow-active);
@@ -156,18 +157,20 @@
 }
 
 .aiditor-ui-btn-primary {
-  background: var(--aiditor-accent);
-  color: var(--aiditor-accent-fg);
-  border-color: var(--aiditor-accent);
+  background: var(--aiditor-button-primary-bg);
+  color: var(--aiditor-button-primary-fg);
+  border-color: var(--aiditor-button-primary-border);
   box-shadow: inset 0 1px 0 var(--aiditor-highlight-strong);
 }
 .aiditor-ui-btn-primary:hover {
-  background: color-mix(in srgb, var(--aiditor-accent-soft) 72%, var(--aiditor-accent));
-  border-color: var(--aiditor-accent-soft);
+  background: var(--aiditor-button-primary-hover-bg);
+  color: var(--aiditor-button-primary-hover-fg);
+  border-color: var(--aiditor-button-primary-hover-border);
   box-shadow: 0 0 0 2px var(--aiditor-accent-bg), inset 0 1px 0 var(--aiditor-highlight-strong);
 }
 .aiditor-ui-btn-primary:active {
-  background: var(--aiditor-accent);
+  background: var(--aiditor-button-primary-active-bg);
+  color: var(--aiditor-button-primary-active-fg);
   box-shadow:
     inset 0 2px 4px color-mix(in srgb, var(--aiditor-bg-0) 48%, transparent),
     0 0 0 0 transparent;

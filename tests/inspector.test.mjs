@@ -8,6 +8,8 @@ for (const file of [
   'src/core/signal.js',
   'src/core/log.js',
   'src/core/bus.js',
+  'src/ui/form/typeconfig.js',
+  'src/ui/form/schema.js',
   'src/ui/inspector.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
@@ -66,6 +68,74 @@ inspection.write('name', aiditor.inspector.literalChange('name', 'Renamed'), {
 })
 assert.equal(store.a.name, 'Renamed')
 assert.equal(store.b.name, 'Renamed')
+
+assert.deepEqual(aiditor.inspector.parseFieldPath('aaa.metalist[5].transform.pos.x'), ['aaa', 'metalist', 5, 'transform', 'pos', 'x'])
+assert.equal(aiditor.inspector.formatFieldPath(['fruit', 'red.pear', 'weight']), 'fruit["red.pear"].weight')
+assert.deepEqual(aiditor.inspector.pathChange('hp', 30), { field: 'hp', mode: 'path', value: 30 })
+
+const encodedSchema = {
+  transform: {
+    type: 'struct',
+    struct_def: {
+      pos: {
+        type: 'struct',
+        struct_def: {
+          x: 'int',
+          y: 'int',
+          z: 'int',
+        },
+      },
+      enabled: 'bool',
+    },
+  },
+  items: {
+    type: 'array',
+    type_agv: {
+      elem_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          num: 'int',
+        },
+      },
+    },
+  },
+  fruit: {
+    type: 'dict',
+    type_agv: {
+      value_type: {
+        type: 'struct',
+        struct_def: {
+          id: 'string',
+          weight: 'float',
+        },
+      },
+    },
+  },
+}
+const encodedValue = {
+  transform: [[1, 2, 3], 1],
+  items: [['a', 1], ['b', 2]],
+  fruit: {
+    apple: ['101', 0.8],
+    'red.pear': ['102', 0.6],
+  },
+}
+const changedTransform = aiditor.inspector.applyChange(encodedValue, aiditor.inspector.pathChange('transform.pos.x', 10), encodedSchema)
+assert.deepEqual(changedTransform.transform, [[10, 2, 3], 1])
+assert.deepEqual(encodedValue.transform, [[1, 2, 3], 1])
+
+const changedItem = aiditor.inspector.applyChange(encodedValue, aiditor.inspector.pathChange('items[1].num', 3), encodedSchema)
+assert.deepEqual(changedItem.items, [['a', 1], ['b', 3]])
+
+const changedDict = aiditor.inspector.applyChange(encodedValue, aiditor.inspector.pathChange('fruit["red.pear"].weight', 0.7), encodedSchema)
+assert.deepEqual(changedDict.fruit, {
+  apple: ['101', 0.8],
+  'red.pear': ['102', 0.7],
+})
+
+const literalApplied = aiditor.inspector.applyChange(encodedValue, aiditor.inspector.literalChange('transform', [[4, 5, 6], 0]), encodedSchema)
+assert.deepEqual(literalApplied.transform, [[4, 5, 6], 0])
 
 const locked = aiditor.inspector.inspect([
   { type: 'case.unit', id: 'a' },
