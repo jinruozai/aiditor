@@ -784,8 +784,8 @@ accent geometry
 ```
 
 The design goal is to let themes express different visual languages, such as a
-neutral Godot-like dark theme or a cream-paper magenta geometric theme, without
-adding theme-specific component CSS. Components must not branch on a theme id.
+neutral Godot-like dark theme or a neon arcade poster theme, without adding
+theme-specific component CSS. Components must not branch on a theme id.
 They consume role tokens.
 
 The existing color contract remains:
@@ -917,56 +917,62 @@ Non-goals:
   focusable, and text-safe in dense editor UIs.
 - No per-component explosion such as `--aiditor-button-pop-corner-size`.
 
-The Pop-style geometric theme should therefore be expressed by assigning these
+The Pop-style neon arcade theme should therefore be expressed by assigning these
 shared appearance roles:
 
 ```css
---aiditor-surface-canvas: #f8eedf;
---aiditor-surface-panel:  #fffaf2;
---aiditor-surface-field:  #efe1cb;
---aiditor-text-primary:   #17131f;
---aiditor-brand:          #f1126c;
+--aiditor-surface-canvas: #00020d;
+--aiditor-surface-panel:  #031026;
+--aiditor-surface-field:  #000718;
+--aiditor-text-primary:   #f8fbff;
+--aiditor-brand:          #ff2b93;
 
 --aiditor-border-w: 1px;
 --aiditor-border-w-strong: 2px;
 --aiditor-surface-border-w: 1px;
 --aiditor-toolbar-border-w: 2px;
 
---aiditor-radius-control: 4px;
---aiditor-radius-surface: 5px;
---aiditor-radius-overlay: 6px;
---aiditor-radius-tab: 2px;
+--aiditor-radius-control: 8px;
+--aiditor-radius-surface: 12px;
+--aiditor-radius-overlay: 12px;
+--aiditor-radius-tab: 10px;
 
---aiditor-shadow-control: 2px 2px 0 rgba(23,19,31,.10);
---aiditor-shadow-surface: 5px 5px 0 rgba(23,19,31,.11);
---aiditor-shadow-overlay: 9px 9px 0 rgba(23,19,31,.13);
+--aiditor-shadow-control:
+  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-field) 42%, transparent),
+  inset 0 1px 0 color-mix(in srgb, var(--aiditor-stroke-hover) 18%, transparent);
+--aiditor-shadow-surface:
+  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 24%, transparent),
+  0 0 18px rgba(0,234,255,.16),
+  inset 0 0 24px rgba(22,135,255,.08);
+--aiditor-shadow-overlay:
+  0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 38%, transparent),
+  0 0 28px rgba(0,234,255,.24),
+  0 14px 38px rgba(0,0,0,.56);
 
 --aiditor-root-bg-image:
-  linear-gradient(135deg, rgba(241,18,108,.16) 0 12%, transparent 12% 100%),
-  linear-gradient(315deg, rgba(255,211,63,.28) 0 16%, transparent 16% 100%),
-  linear-gradient(90deg, rgba(23,19,31,.04) 1px, transparent 1px),
-  linear-gradient(rgba(23,19,31,.04) 1px, transparent 1px),
-  radial-gradient(circle at 14% 10%, rgba(255,255,255,.62), transparent 24%),
-  linear-gradient(135deg, var(--aiditor-surface-canvas), color-mix(in srgb, var(--aiditor-surface-canvas) 82%, var(--aiditor-state-warning)));
---aiditor-root-bg-size: 320px 220px, 360px 240px, 46px 46px, 46px 46px, auto, auto;
+  linear-gradient(112deg, transparent 0 53%, rgba(0,234,255,.22) 53.3% 55.2%, rgba(22,135,255,.38) 55.4% 57.1%, transparent 57.4% 100%),
+  radial-gradient(circle at 78% 18%, rgba(22,135,255,.36), transparent 28%),
+  radial-gradient(circle at 18% 86%, rgba(255,43,147,.24), transparent 30%),
+  radial-gradient(circle, rgba(0,234,255,.18) 0 1.2px, transparent 1.6px),
+  linear-gradient(135deg, #00020d, #02081f 48%, #040c28);
+--aiditor-root-bg-size: auto, auto, auto, 34px 34px, auto;
 
---aiditor-corner-accent-size: 12px;
+--aiditor-corner-accent-size: 13px;
 --aiditor-corner-accent-color: var(--aiditor-accent);
---aiditor-corner-accent-opacity: .82;
+--aiditor-corner-accent-opacity: .95;
 
---aiditor-dock-tab-hover-bg: color-mix(in srgb, var(--aiditor-bg-4) 48%, var(--aiditor-bg-raised));
---aiditor-dock-tab-active-bg: var(--aiditor-brand);
+--aiditor-dock-tab-hover-bg: color-mix(in srgb, var(--aiditor-state-info) 28%, var(--aiditor-bg-raised));
+--aiditor-dock-tab-active-bg: #facf01;
 --aiditor-dock-tab-indicator-bg: var(--aiditor-state-warning);
 --aiditor-dock-tab-indicator-bg-vertical: var(--aiditor-state-warning);
---aiditor-dock-tab-indicator-size: 3px;
---aiditor-dock-tab-indicator-inset: 0px;
---aiditor-dock-tab-active-overlay-top: none;
---aiditor-dock-tab-active-overlay-bottom: none;
---aiditor-dock-tab-active-overlay-left: none;
---aiditor-dock-tab-active-overlay-right: none;
+--aiditor-dock-tab-indicator-size: 2px;
+--aiditor-dock-tab-indicator-inset: 8px;
+--aiditor-dock-tab-active-overlay-top:
+  linear-gradient(to bottom, rgba(255,255,255,.24), transparent 58%),
+  radial-gradient(90px 24px at 50% 0, rgba(255,43,147,.40), transparent 74%);
 ```
 
-This gives the theme a cream paper surface, crisp ink chrome, restrained offset
-shadow, yellow hover energy, magenta focus/selection, geometric paper texture,
-small corner accents, and direction-aware magenta slab dock tabs while keeping
-controls normal, readable, and editor-dense.
+This gives the theme a blue-black editor chassis, cyan neon rails, restrained
+panel glow, magenta focus/selection energy, yellow arcade accents, geometric
+background bands, and direction-aware blue slab dock tabs while keeping ordinary
+fields readable and editor-dense.

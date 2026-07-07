@@ -66,7 +66,7 @@ assert.ok(aiditor.theme.hasMode('pop'))
 assert.equal(aiditor.theme.hasMode('missing-theme'), false)
 assert.deepEqual(aiditor.theme.modeOptions().map((mode) => mode.value), themeModes)
 assert.equal(aiditor.theme.modeOptions().find((mode) => mode.value === 'pop').label, 'Pop')
-assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'pop').scheme, 'light')
+assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'pop').scheme, 'dark')
 for (const token of [
   '--aiditor-radius-control',
   '--aiditor-radius-surface',
@@ -164,7 +164,9 @@ assert.match(uiFormCss, /--aiditor-dock-tab-indicator-bg-vertical/)
 assert.doesNotMatch(uiFormCss, /radial-gradient\(95px 24px/)
 assert.doesNotMatch(uiFormCss, /mask-image: linear-gradient\(to bottom/)
 assert.match(popBlock, /--aiditor-border-w-strong:\s*2px/)
-assert.match(popBlock, /--aiditor-dock-tab-active-bg:\s*var\(--aiditor-brand\)/)
+assert.match(popBlock, /--aiditor-surface-canvas:\s*#00020d/)
+assert.match(popBlock, /--aiditor-stroke-strong:\s*#00eaff/)
+assert.match(popBlock, /--aiditor-dock-tab-active-bg:\s*#facf01/)
 assert.match(popBlock, /--aiditor-dock-tab-indicator-bg:\s*var\(--aiditor-state-warning\)/)
 
 function themeBlock(mode) {
