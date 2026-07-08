@@ -72,6 +72,7 @@
   let lastPointerDownAt = 0
 
   function topFrame() { return stack.length ? stack[stack.length - 1] : null }
+  function hasModalFrame() { return stack.some(function (f) { return f.opts.modal }) }
 
   function onGlobalKey(e) {
     if (e.key !== 'Escape') return
@@ -189,6 +190,7 @@
         opts: {
           anchor:           o.anchor || null,
           outsideTarget:    o.outsideTarget || null,
+          modal:            isModal,
           dismissOnOutside: o.dismissOnOutside != null ? o.dismissOnOutside : !isModal,
           dismissOnEscape:  o.dismissOnEscape  != null ? o.dismissOnEscape  : true,
           focusTrap:        o.focusTrap        != null ? o.focusTrap        : isModal,
@@ -205,11 +207,13 @@
       if (o.ariaLabel) el.setAttribute('aria-label', o.ariaLabel)
       if (o.ariaLabelledBy) el.setAttribute('aria-labelledby', o.ariaLabelledBy)
 
-      // z-index: portal root is var(--aiditor-z-popover); each overlay gets +1
-      // above the previous top of stack (nested popovers render above their
-      // parents). calc() defers resolution to the browser so live theme
-      // overrides of --aiditor-z-popover take effect with no JS-side mirror.
-      el.style.zIndex = 'calc(var(--aiditor-z-popover) + ' + (stack.length + 1) + ')'
+      // z-index: each overlay gets +1 above the previous top of stack.
+      // Anchored overlays opened from a modal must use the modal stripe too;
+      // otherwise combobox/menu popovers render behind the modal backdrop.
+      // calc() defers resolution to the browser so live theme overrides of
+      // the z-index tokens take effect with no JS-side mirror.
+      const zBase = (isModal || hasModalFrame()) ? '--aiditor-z-modal' : '--aiditor-z-popover'
+      el.style.zIndex = 'calc(var(' + zBase + ') + ' + (stack.length + 1) + ')'
 
       // Start unarmed, so the very same mousedown/click that opened this
       // overlay won't immediately dismiss it. Arm on the next tick.

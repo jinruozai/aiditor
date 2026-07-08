@@ -144,6 +144,18 @@ assert.equal(ui._overlay.depth(), 1)
 document.dispatch('pointerdown', row)
 assert.equal(ui._overlay.depth(), 0)
 
+const modalRoot = document.createElement('div')
+document.body.appendChild(modalRoot)
+const modalOverlay = ui._overlay.open(modalRoot, { modal: true })
+assert.match(modalRoot.style.zIndex, /--aiditor-z-modal/)
+const modalPopover = document.createElement('div')
+document.body.appendChild(modalPopover)
+const modalPopoverOverlay = ui._overlay.open(modalPopover, { anchor: row })
+assert.match(modalPopover.style.zIndex, /--aiditor-z-modal/)
+modalPopoverOverlay.close()
+modalOverlay.close()
+assert.equal(ui._overlay.depth(), 0)
+
 ui.actionMenu({
   anchor: row,
   point: { x: 20, y: 20 },
