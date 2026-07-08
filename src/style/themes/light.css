@@ -1,0 +1,80 @@
+:root[data-aiditor-theme="light"],
+.aiditor-root[data-aiditor-theme="light"] {
+  color-scheme: light;
+
+  --aiditor-surface-canvas: #f4f4f7;
+  --aiditor-surface-lower:  #ffffff;
+  --aiditor-surface-frame:  #f8f8fa;
+  --aiditor-surface-panel:  #ffffff;
+  --aiditor-surface-field:  #e6e6ec;
+  --aiditor-surface-hover:  #c8c8d2;
+  --aiditor-surface-active: #b0b0bc;
+  --aiditor-surface-raised: #f8f8fa;
+
+  --aiditor-text-primary:  #0d0d11;
+  --aiditor-text-body:     #1d1d24;
+  --aiditor-text-label:    #2b2b33;
+  --aiditor-text-muted:    #3d3d47;
+  --aiditor-text-disabled: #595966;
+
+  --aiditor-stroke-subtle: #e6e6ec;
+  --aiditor-stroke-strong: #c8c8d2;
+  --aiditor-stroke-field:  #c8c8d2;
+  --aiditor-stroke-hover:  #8e8e9c;
+
+  --aiditor-brand:          #5b4ee0;
+  --aiditor-brand-hover:    #8278f0;
+  --aiditor-brand-contrast: #ffffff;
+
+  --aiditor-state-success: #16a163;
+  --aiditor-state-warning: #c97a1a;
+  --aiditor-state-danger:  #c53030;
+  --aiditor-state-info:    #1e88c4;
+
+  --aiditor-c-00: #f4f4f7;
+  --aiditor-c-01: #ffffff;
+  --aiditor-c-02: #f8f8fa;
+  --aiditor-c-03: #e6e6ec;
+  --aiditor-c-04: #d8d8e0;
+  --aiditor-c-05: #c8c8d2;
+  --aiditor-c-06: #b0b0bc;
+  --aiditor-c-07: #8e8e9c;
+  --aiditor-c-08: #595966;
+  --aiditor-c-09: #3d3d47;
+  --aiditor-c-10: #2b2b33;
+  --aiditor-c-11: #0d0d11;
+
+  --aiditor-c-accent:      #5b4ee0;
+  --aiditor-c-accent-soft: #8278f0;
+
+  --aiditor-c-success: #16a163;
+  --aiditor-c-warn:    #c97a1a;
+  --aiditor-c-error:   #c53030;
+  --aiditor-c-info:    #1e88c4;
+
+  /* Light theme needs lighter shadows or they look like ink blots. */
+  --aiditor-shadow-1: 0 1px 2px rgba(20,20,40,.08);
+  --aiditor-shadow-2: 0 2px 8px rgba(20,20,40,.10);
+  --aiditor-shadow-3: 0 4px 16px rgba(20,20,40,.12);
+  --aiditor-shadow-4: 0 8px 32px rgba(20,20,40,.16);
+
+  /* Light mode locks the "white panel + slightly grey inset field" role
+   * mapping. :root uses Godot's "inset-in-dark" convention which, when
+   * inherited with light primitives, would invert into "raised-in-light".
+   * Light mode reads more naturally with white panels and inset fields. */
+  --aiditor-bg-1: var(--aiditor-surface-panel);   /* dock body = white */
+  --aiditor-bg-2: var(--aiditor-surface-field);   /* input = light gray (inset) */
+  --aiditor-bg-3: var(--aiditor-surface-hover);
+  --aiditor-bg-4: var(--aiditor-surface-active);
+  --aiditor-bg-raised: var(--aiditor-surface-raised);   /* slightly off-white to separate from bg-1 */
+
+  --aiditor-border:        var(--aiditor-stroke-subtle);
+  --aiditor-border-strong: var(--aiditor-stroke-strong);
+  --aiditor-border-input:  var(--aiditor-stroke-field);
+  --aiditor-border-hover:  var(--aiditor-stroke-hover);
+
+  --aiditor-shadow-raised: 0 1px 2px rgba(20,20,40,.08), 0 2px 6px rgba(20,20,40,.10);
+
+  --aiditor-fg-1: var(--aiditor-text-body);
+  --aiditor-accent-fg: var(--aiditor-brand-contrast);
+}

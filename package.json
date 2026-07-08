@@ -1,6 +1,6 @@
 {
   "name": "@gooooo/aiditor",
-  "version": "1.1.25",
+  "version": "1.1.26",
   "description": "A pure frontend UI framework for building editors, with built-in AI Agent capabilities.",
   "main": "dist/aiditor-core.js",
   "style": "dist/aiditor-core.css",

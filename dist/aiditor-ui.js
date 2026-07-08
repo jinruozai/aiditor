@@ -3348,15 +3348,16 @@
 // aiditor.ui.colorInput - compact swatch + rich ARGB color picker.
 //
 // opts:
-//   value:     string|int|signal   "#rrggbb", "#aarrggbb", or 24-bit int
+//   value:     string|int|array|signal   "#rrggbb", "#aarrggbb", 24-bit int, vec3, or vec4
 //   onChange?: (v) => void
-//   valueKind?: 'hex' | 'int'      (default 'hex')
+//   valueKind?: 'hex' | 'int' | 'vec3' | 'vec4'      (default 'hex')
+//   valueScale?: 1 | 255           vec component scale; default 1
 //   disabled?: bool|signal
 //
 // The picker works internally as #AARRGGBB so alpha editing is lossless. The
 // public value preserves the existing contract: valueKind:'int' remains 24-bit
-// RGB, while hex values stay #RRGGBB unless alpha is edited or the input already
-// carried alpha.
+// RGB, vec3/vec4 stay RGB/RGBA arrays, while hex values stay #RRGGBB unless
+// alpha is edited or the input already carried alpha.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -3364,15 +3365,16 @@
 
   ui.colorInput = function (opts) {
     const o = opts || {}
-    const valueKind = o.valueKind === 'int' ? 'int' : 'hex'
-    const sig = ui.asSig(o.value != null ? o.value : (valueKind === 'int' ? 0x7b6ef6 : '#7b6ef6'))
+    const valueKind = normalizeValueKind(o.valueKind)
+    const valueScale = o.valueScale === 255 ? 255 : 1
+    const sig = ui.asSig(o.value != null ? o.value : defaultValue(valueKind, valueScale))
     const disabled = ui.asSig(o.disabled != null ? o.disabled : false)
     const rawWrite = ui.writer(sig, o.onChange, 'ui.colorInput')
     let lastExternal = sig.peek()
     let pop = null
 
     function writeArgb(argb, preferAlpha) {
-      const next = formatForValue(argb, lastExternal, valueKind, preferAlpha)
+      const next = formatForValue(argb, lastExternal, valueKind, preferAlpha, valueScale)
       rawWrite(next)
     }
 
@@ -3384,7 +3386,7 @@
       disabled: disabled,
       onChange: function (raw) {
         const parsed = parseColor(raw)
-        if (parsed) writeArgb(parsed, alphaOf(parsed) < 255)
+        if (parsed) writeArgb(parsed, hasAlpha(raw) || alphaOf(parsed) < 255)
       },
     })
     text.classList.add('aiditor-ui-color-text')
@@ -3396,9 +3398,9 @@
     ui.bind(el, disabled, function (v) { el.classList.toggle('aiditor-ui-color-disabled', !!v) })
     ui.bind(el, sig, function (v) {
       lastExternal = v
-      const argb = normalizeColor(v, valueKind)
+      const argb = normalizeColor(v, valueKind, valueScale)
       swatchFill.style.background = argbToRgba(argb)
-      const shown = formatForValue(argb, v, valueKind, alphaOf(argb) < 255 || hasAlpha(v))
+      const shown = formatForDisplay(argb, v, valueKind, alphaOf(argb) < 255 || hasAlpha(v), valueScale)
       const input = text.querySelector('input')
       if (input && document.activeElement !== input) input.value = shown
       if (pop && pop.sync) pop.sync(argb)
@@ -3407,7 +3409,7 @@
     swatch.addEventListener('click', function () {
       if (disabled.peek()) return
       if (pop) { pop.close(); pop = null; return }
-      pop = openPicker(el, normalizeColor(sig.peek(), valueKind), writeArgb, function () { pop = null })
+      pop = openPicker(el, normalizeColor(sig.peek(), valueKind, valueScale), writeArgb, function () { pop = null })
     })
     ui.collect(el, function () { if (pop) { pop.close(); pop = null } })
     return el
@@ -3545,11 +3547,8 @@
             nextHsl[ch[0]] = next
             setArgb(hslToArgb(nextHsl.h, nextHsl.s, nextHsl.l, nextHsl.a), true)
           }
-        }))
+        }, state, currentMode))
       }
-      state.valueInputs = Array.prototype.slice.call(valueRow.querySelectorAll('.aiditor-ui-color-channel-input')).map(function (el, index) {
-        return { kind: currentMode, channel: channels[index][0], step: channels[index][4], el: el }
-      })
       updateValueControls()
     }
 
@@ -3566,7 +3565,7 @@
         else {
           const source = item.kind === 'rgb' ? rgb : hsl
           const value = source[item.channel]
-          item.el.value = item.step < 1 ? String(round2(value)) : String(Math.round(value))
+          if (item.sig) item.sig.set(item.step < 1 ? round2(value) : Math.round(value))
         }
       }
     }
@@ -3644,22 +3643,22 @@
     return el
   }
 
-  function channelInput(label, value, min, max, step, onChange) {
-    const wrap = ui.h('label', 'aiditor-ui-color-channel')
-    const lab = ui.h('span', 'aiditor-ui-color-channel-label', { text: label })
-    const input = ui.h('input', 'aiditor-ui-color-channel-input', {
-      type: 'number',
-      min: String(min),
-      max: String(max),
-      step: String(step),
+  function channelInput(label, value, min, max, step, onChange, state, mode) {
+    const sig = aiditor.signal(value)
+    const wrap = ui.h('div', 'aiditor-ui-color-channel')
+    const input = ui.numberInput({
+      value: sig,
+      onChange: function (next) {
+        onChange(Math.max(min, Math.min(max, Number(next))))
+      },
+      min: min,
+      max: max,
+      step: step,
+      precision: step < 1 ? 2 : 0,
+      label: label,
     })
-    input.value = step < 1 ? String(round2(value)) : String(Math.round(value))
-    input.addEventListener('input', function () {
-      const n = Number(input.value)
-      if (Number.isFinite(n)) onChange(Math.max(min, Math.min(max, n)))
-    })
-    wrap.appendChild(lab)
     wrap.appendChild(input)
+    state.valueInputs.push({ kind: mode, channel: label, step: step, sig: sig, el: input.querySelector('input') })
     return wrap
   }
 
@@ -3717,17 +3716,38 @@
     }
     return null
   }
-  function normalizeColor(v, valueKind) {
+  function normalizeValueKind(kind) {
+    return kind === 'int' || kind === 'vec3' || kind === 'vec4' ? kind : 'hex'
+  }
+  function defaultValue(valueKind, scale) {
+    if (valueKind === 'int') return 0x7b6ef6
+    if (valueKind === 'vec3') return scale === 255 ? [123, 110, 246] : [round6(123 / 255), round6(110 / 255), round6(246 / 255)]
+    if (valueKind === 'vec4') return scale === 255 ? [123, 110, 246, 255] : [round6(123 / 255), round6(110 / 255), round6(246 / 255), 1]
+    return '#7b6ef6'
+  }
+  function normalizeColor(v, valueKind, scale) {
     if (valueKind === 'int' && typeof v === 'number') return '#FF' + pad(Math.max(0, Math.min(0xffffff, Math.trunc(v || 0))).toString(16).toUpperCase(), 6)
+    if (valueKind === 'vec3' || valueKind === 'vec4') return vecToArgb(v, valueKind, scale)
     return parseColor(v) || '#FF000000'
   }
-  function formatForValue(argb, original, valueKind, preferAlpha) {
+  function formatForValue(argb, original, valueKind, preferAlpha, scale) {
     const normalized = normalizeColor(argb, 'hex')
     if (valueKind === 'int') return parseInt(normalized.slice(3), 16)
+    if (valueKind === 'vec3' || valueKind === 'vec4') return argbToVec(normalized, original, valueKind, preferAlpha, scale)
     if (!preferAlpha && !hasAlpha(original) && normalized.slice(1, 3).toUpperCase() === 'FF') return '#' + normalized.slice(3)
     return normalized
   }
+  function formatForDisplay(argb, original, valueKind, preferAlpha, scale) {
+    if (valueKind === 'vec3' || valueKind === 'vec4') {
+      const normalized = normalizeColor(argb, 'hex', scale)
+      if (!preferAlpha && valueKind !== 'vec4' && normalized.slice(1, 3).toUpperCase() === 'FF') return '#' + normalized.slice(3)
+      if (valueKind === 'vec4' || preferAlpha || hasAlpha(original)) return normalized
+      return '#' + normalized.slice(3)
+    }
+    return formatForValue(argb, original, valueKind, preferAlpha, scale)
+  }
   function hasAlpha(v) {
+    if (Array.isArray(v)) return v.length >= 4
     if (typeof v !== 'string') return false
     const s = v.trim()
     return /^#[0-9a-f]{8}$/i.test(s) || /^[0-9a-f]{8}$/i.test(s) || /^#[0-9a-f]{4}$/i.test(s)
@@ -3742,6 +3762,44 @@
       g: parseInt(s.slice(5, 7), 16),
       b: parseInt(s.slice(7, 9), 16),
     }
+  }
+  function vecToArgb(v, valueKind, scale) {
+    const arr = Array.isArray(v) ? v : []
+    return '#'
+      + hex2(vecComponent(arr[3], scale, scale))
+      + hex2(vecComponent(arr[0], 0, scale))
+      + hex2(vecComponent(arr[1], 0, scale))
+      + hex2(vecComponent(arr[2], 0, scale))
+  }
+  function argbToVec(argb, original, valueKind, preferAlpha, scale) {
+    const rgb = argbToRgb(argb)
+    const out = [
+      fromByte(rgb.r, scale),
+      fromByte(rgb.g, scale),
+      fromByte(rgb.b, scale),
+    ]
+    if (valueKind === 'vec4') {
+      const nextAlpha = fromByte(parseInt(normalizeColor(argb, 'hex').slice(1, 3), 16), scale)
+      const originalAlpha = Array.isArray(original) && original.length > 3 ? original[3] : null
+      if (!preferAlpha && originalAlpha != null) {
+        out.push(originalAlpha)
+        return out
+      }
+      const originalByte = originalAlpha == null ? null : vecComponent(originalAlpha, scale, scale)
+      const nextByte = vecComponent(nextAlpha, scale, scale)
+      out.push(originalByte != null && originalByte === nextByte ? originalAlpha : nextAlpha)
+    }
+    return out
+  }
+  function vecComponent(value, fallback, scale) {
+    const n = Number(value)
+    const v = Number.isFinite(n) ? n : fallback
+    return scale === 255
+      ? Math.max(0, Math.min(255, Math.round(v)))
+      : Math.max(0, Math.min(255, Math.round(v * 255)))
+  }
+  function fromByte(value, scale) {
+    return scale === 255 ? Math.max(0, Math.min(255, Math.round(value))) : round6(Math.max(0, Math.min(255, value)) / 255)
   }
   function rgbToArgb(r, g, b, a) {
     return '#' + hex2((Number(a) || 0) * 255) + hex2(r) + hex2(g) + hex2(b)
@@ -3799,6 +3857,7 @@
   function hex2(v) { return pad(Math.max(0, Math.min(255, Math.round(Number(v) || 0))).toString(16).toUpperCase(), 2) }
   function clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)) }
   function round2(v) { return Math.round((Number(v) || 0) * 100) / 100 }
+  function round6(v) { return Math.round((Number(v) || 0) * 1000000) / 1000000 }
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ui/form/dateInput.js ---- */
@@ -4257,9 +4316,12 @@
     'float':        { name: 'float',   base_type: 'float',  type_render: 'input_float',  default: 0.0,  mem: 'Standard floating-point number', type_agv: { decimal_places: 2, percent: false }, support_render: ['input_float','range'] },
     'string':       { name: 'string',  base_type: 'string', type_render: 'input_string', default: '',   mem: 'Standard text', support_render: ['input_string','textarea','enum','img','snd','date'] },
     'struct':       { name: 'struct',  base_type: 'struct', type_render: 'struct',       default: [],   mem: 'Composite tuple', support_render: ['struct'] },
+    'vec2':         { name: 'vec2',    base_type: 'struct', type_render: 'vector',       default: [0, 0], mem: '2D vector tuple', struct_def: { x: 'float', y: 'float' }, support_render: ['vector','struct'] },
+    'vec3':         { name: 'vec3',    base_type: 'struct', type_render: 'vector',       default: [0, 0, 0], mem: '3D vector tuple', struct_def: { x: 'float', y: 'float', z: 'float' }, type_agv: { valueKind: 'vec3', valueScale: 1 }, support_render: ['vector','struct','color'] },
+    'vec4':         { name: 'vec4',    base_type: 'struct', type_render: 'vector',       default: [0, 0, 0, 0], mem: '4D vector tuple', struct_def: { x: 'float', y: 'float', z: 'float', w: 'float' }, type_agv: { valueKind: 'vec4', valueScale: 1 }, support_render: ['vector','struct','color'] },
     'array':        { name: 'array',   base_type: 'array',  type_render: 'array',        default: [],   mem: 'Ordered list', support_render: ['array','array_editor'] },
     'dict':         { name: 'dict',    base_type: 'dict',   type_render: 'dict',         default: {},   mem: 'Dynamic key-value dictionary', type_agv: { value_type: 'string' }, support_render: ['dict'] },
-    'var':          { name: 'var',     base_type: 'var',    type_render: 'input_string', default: null, mem: 'Auto-typed variable', support_render: ['input_string','textarea','input_int','input_float','range','enum','toggle','color','date','img','snd','id','ref_id','struct','array','array_editor','dict'] },
+    'var':          { name: 'var',     base_type: 'var',    type_render: 'input_string', default: null, mem: 'Auto-typed variable', support_render: ['input_string','textarea','input_int','input_float','range','enum','toggle','color','vector','date','img','snd','id','ref_id','struct','array','array_editor','dict'] },
 
     'enum_int':     { name: 'int',           base_type: 'int',    type_render: 'enum',    default: 0,  mem: 'Integer enumeration',  type_agv: { options: { '0': 'Option 1', '1': 'Option 2' } } },
     'enum_string':  { name: 'string',        base_type: 'string', type_render: 'enum',    default: '', mem: 'String enumeration',   type_agv: { options: {} } },
@@ -4470,17 +4532,18 @@
 /* ---- ui/form/structInput.js ---- */
 // aiditor.ui.structInput — generic fixed-shape record editor.
 //
-// Renders one row per field; each row = [label · editor · actions]. The editor
+// Renders one row per field; each row = [label chrome · editor · actions]. The editor
 // for each slot is produced by a caller-provided factory — this component does
 // not know about type_config, FieldDef, or canonical value encoding. Use it
 // anywhere you need a schema-less keyed editing projection.
 //
 // opts:
 //   value:    signal<object>                               required; keyed UI projection
-//   fields:   [{ key, label?, labelMode?, fieldLayout?, defaultCollapsed?,
+//   fields:   [{ key, label?, labelMode?, labelActions?, labelActionCtx?,
+//                fieldLayout?, defaultCollapsed?,
 //                collapsed?, onToggle?, tooltip?, editor,
 //                actions?, actionCtx?, contextActions?, contextCtx? }] required
-//               label:false or labelMode:'hidden' hides the visual row label
+//               label:false or labelMode:'hidden' hides label text, not label actions
 //               labelMode:'sr-only' keeps an accessible label without a column
 //               fieldLayout:'row'|'block'|'section' controls label/editor layout
 //               editor(slotSig, write, ctx) → HTMLElement
@@ -4538,7 +4601,7 @@
       row.classList.add('aiditor-ui-struct-input-row-layout-' + layout)
       const label = layout === 'section'
         ? sectionLabel(root, row, f)
-        : ui.h('div', 'aiditor-ui-struct-input-label', { text: fieldLabel(f) })
+        : fieldLabelEl(f)
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
@@ -4567,6 +4630,22 @@
       const editor = f.editor(fieldSig, writeSlot, ctx)
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
+
+      if (f.labelActions) {
+        const labelActions = ui.h('div', 'aiditor-ui-struct-input-label-actions')
+        labelActions.appendChild(ui.actionBar({ actions: f.labelActions, ctx: f.labelActionCtx || ctx || {}, density: 'compact' }))
+        label.appendChild(labelActions)
+        row.classList.add('aiditor-ui-struct-input-row-has-label-actions')
+        if (f.labelActions.dispose) ui.collect(root, f.labelActions.dispose)
+        if (f.labelActionCtx && f.labelActionCtx.dispose) ui.collect(root, f.labelActionCtx.dispose)
+        if (ui.isSignal(f.labelActions)) {
+          ui.bind(row, f.labelActions, function (list) {
+            row.classList.toggle('aiditor-ui-struct-input-row-label-actions-empty', !(Array.isArray(list) && list.length))
+          })
+        } else {
+          row.classList.toggle('aiditor-ui-struct-input-row-label-actions-empty', !(Array.isArray(f.labelActions) && f.labelActions.length))
+        }
+      }
 
       row.appendChild(label); row.appendChild(cell)
       if (f.actions) {
@@ -4618,6 +4697,12 @@
     return f.label || f.key
   }
 
+  function fieldLabelEl(f) {
+    const label = ui.h('div', 'aiditor-ui-struct-input-label')
+    label.appendChild(ui.h('span', 'aiditor-ui-struct-input-label-text', { text: fieldLabel(f) }))
+    return label
+  }
+
   function fieldLayout(f, labelMode) {
     const layout = f && f.fieldLayout
     if (labelMode !== 'visible' && layout === 'section') return 'block'
@@ -4632,11 +4717,13 @@
       }
       else if (typeof collapsed.set === 'function') collapsed.set(next)
     }
-    const btn = ui.h('button', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-toggle', { type: 'button' })
+    const wrap = ui.h('div', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-label')
+    const btn = ui.h('button', 'aiditor-ui-struct-input-section-toggle', { type: 'button' })
     const arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
     arrow.classList.add('aiditor-ui-struct-input-section-arrow')
     btn.appendChild(arrow)
     btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+    wrap.appendChild(btn)
     btn.addEventListener('click', function () { writeCollapsed(!collapsed.peek()) })
     const stop = aiditor.effect(function () {
       const v = collapsed()
@@ -4645,7 +4732,7 @@
       arrow.style.transform = v ? 'rotate(-90deg)' : ''
     })
     ui.collect(root, stop)
-    return btn
+    return wrap
   }
 
   function openFieldContextMenu(ev, row, label, field, closeFieldMenu, setFieldMenu, clearFieldMenu) {
@@ -5877,7 +5964,7 @@
 //
 // Each renderer receives { fieldDef, sig, write, ctx } and returns an
 // HTMLElement. Built-ins: input_string | textarea | input_int | input_float
-// | range | enum | toggle | color | date | img | snd | id | ref_id | struct
+// | range | enum | toggle | color | vector | date | img | snd | id | ref_id | struct
 // | array | array_editor.
 ;(function (aiditor) {
   'use strict'
@@ -5999,7 +6086,22 @@
       value:     a.sig,
       onChange:  a.write,
       valueKind: agv.valueKind || (a.fieldDef.base_type === 'int' ? 'int' : 'hex'),
+      valueScale: agv.valueScale,
     })
+  })
+  ui.registerRenderer('vector', function (a) {
+    const agv = a.fieldDef.type_agv || {}
+    const fields = vectorFields(a.fieldDef)
+    const sig = asVectorSig(a.sig, fields)
+    return collectSignal(ui.vectorInput({
+      value: sig,
+      onChange: function (next) { a.write(next) },
+      labels: fields.map(function (f) { return f.key.toUpperCase() }),
+      layout: agv.layout || 'row',
+      step: agv.step != null ? agv.step : 0.01,
+      precision: agv.decimal_places != null ? agv.decimal_places : 2,
+      linked: agv.linked,
+    }), sig)
   })
   ui.registerRenderer('date', function (a) {
     return ui.dateInput({ value: a.sig, onChange: a.write })
@@ -6159,6 +6261,40 @@
     return schema.cloneValue(item)
   }
 
+  function vectorFields(fieldDef) {
+    const def = schema.normalizeStructDef(fieldDef && fieldDef.struct_def)
+    if (!def) return [{ key: 'x' }, { key: 'y' }, { key: 'z' }]
+    return Object.keys(def).map(function (key) {
+      return { key: key, fieldDef: ui.resolveFieldDef(typeof def[key] === 'string' ? { type: def[key] } : def[key]) }
+    })
+  }
+
+  function asVectorSig(sig, fields) {
+    const tap = aiditor.signal(vectorTuple(asPlain(sig), fields))
+    tap.dispose = aiditor.effect(function () {
+      const next = vectorTuple(sig(), fields)
+      if (!equalArray(tap.peek(), next)) tap.set(next)
+    })
+    return tap
+  }
+
+  function vectorTuple(value, fields) {
+    const tuple = Array.isArray(value) ? value : []
+    const out = new Array(fields.length)
+    for (let i = 0; i < fields.length; i++) {
+      const raw = i < tuple.length ? tuple[i] : cloneFieldDefault(fields[i].fieldDef)
+      const n = Number(raw)
+      out[i] = Number.isFinite(n) ? n : 0
+    }
+    return out
+  }
+
+  function equalArray(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false
+    return true
+  }
+
   function tupleToRecord(value, fields) {
     const tuple = Array.isArray(value) ? value : []
     const out = {}
@@ -6259,7 +6395,7 @@
 //   disabled?:signal<boolean> | boolean               toggles `inert` on the root
 //   defaults?:object                                  per-key reset-to-default values; when
 //                                                     supplied, each row gets a small reset
-//                                                     iconButton (faded when already at default)
+//                                                     iconButton in the label chrome
 //   groups?:  object|signal<object>                  optional group label/action metadata
 //   groupActions?:(groupCtx) => UiAction[]            optional per-group actions
 //   groupActionCtx?:(groupCtx) => object              optional per-group action ctx mapper
@@ -6388,10 +6524,12 @@
           const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
           const label = fieldLabel(raw, fname)
           const action = fieldActionSignals(fname, label, raw, subFd)
+          const reset = resetActionSignal(fname, defaults)
           return {
             key:     fname,
             label:   label.value,
             labelMode: label.mode,
+            labelActions: reset,
             fieldLayout: raw && raw.fieldLayout,
             defaultCollapsed: raw && raw.defaultCollapsed,
             collapsed: raw && raw.collapsed,
@@ -6402,7 +6540,7 @@
             contextActions: action.contextActions,
             contextCtx: action.ctx,
             editor:  function (slotSig, write, innerCtx) {
-              return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd, fname, defaults,
+              return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
           }
@@ -6478,6 +6616,23 @@
         ? function (currentCtx) { return fieldContextActions(currentCtx) }
         : null
       return { actions: actions, ctx: actionCtx, contextActions: contextActions }
+    }
+
+    function resetActionSignal(field, defaults) {
+      return aiditor.derived(function () {
+        const currentDefaults = defaultsFor(defaults) || {}
+        if (!Object.prototype.hasOwnProperty.call(currentDefaults, field)) return []
+        const def = currentDefaults[field]
+        const values = composite() || {}
+        const atDefault = isAtDefault(values[field], def)
+        return [{
+          id: 'reset-default',
+          icon: 'refresh',
+          title: 'Reset to default',
+          disabled: atDefault,
+          onSelect: function () { fanOut(field, def, { change: pathChange(field, def) }) },
+        }]
+      })
     }
   }
 
@@ -6597,19 +6752,12 @@
     return { value: raw && raw.label || fname, mode: 'visible' }
   }
 
-  // Slot wrapper. Optional reset button: present when `defaults[fname]` is defined; faded
-  // when the current slot value already equals that default.
-  function slotEditor(slotSig, write, innerCtx, fieldDef, fname, defaults, disabled) {
+  // Slot wrapper keeps the editor stable while disabled state changes. Field
+  // chrome such as reset-to-default belongs to structInput's label area.
+  function slotEditor(slotSig, write, innerCtx, fieldDef, disabled) {
     const editorEl = ui.editorFor(fieldDef, slotSig, write, innerCtx)
     const slot = ui.h('div', 'aiditor-ui-slot')
     slot.appendChild(editorEl)
-    if (defaults) slot.appendChild(buildReset(slotSig, write, function () {
-      const current = defaultsFor(defaults) || {}
-      return current[fname]
-    }, function () {
-      const current = defaultsFor(defaults) || {}
-      return Object.prototype.hasOwnProperty.call(current, fname)
-    }))
     ui.bind(slot, disabled, function (v) {
       slot.toggleAttribute('inert', !!v)
       slot.classList.toggle('aiditor-ui-slot-disabled', !!v)
@@ -6624,27 +6772,6 @@
     return typeof defaults === 'function' ? defaults() : defaults
   }
 
-  function buildReset(slotSig, write, defaultValue, hasDefault) {
-    const btn = ui.iconButton({
-      icon: 'refresh', kind: 'ghost', size: 'sm', title: 'Reset to default',
-      onClick: function () { if (hasDefault()) write(defaultValue()) },
-    })
-    btn.classList.add('aiditor-ui-slot-reset')
-    // Fade when already at default — visual cue that the button is a
-    // no-op right now without removing it (so layout doesn't shift).
-    // undefined / null / '' are treated as the same "empty" state so a
-    // freshly-created node (where the field was never set) reads as
-    // "at default" even when the default literal is ''.
-    ui.collect(btn, aiditor.effect(function () {
-      const v = slotSig()
-      const has = hasDefault()
-      const atDefault = has && isAtDefault(v, defaultValue())
-      btn.hidden = !has
-      btn.style.opacity = atDefault ? '0.3' : '1'
-      btn.style.cursor  = !has || atDefault ? 'default' : ''
-    }))
-    return btn
-  }
   function isAtDefault(v, def) {
     const ve = v   == null || v   === ''
     const de = def == null || def === ''

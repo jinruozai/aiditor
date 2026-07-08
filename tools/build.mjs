@@ -222,6 +222,16 @@ const JS_ORDER = [
 
 const CSS_ORDER = [
   'style/theme.css',
+  'style/themes/dark.css',
+  'style/themes/dracula.css',
+  'style/themes/harbor.css',
+  'style/themes/linen.css',
+  'style/themes/sakura.css',
+  'style/themes/abyss.css',
+  'style/themes/hadal.css',
+  'style/themes/forest.css',
+  'style/themes/neon.css',
+  'style/themes/light.css',
   'style/dock.css',
   'style/component.css',
   'style/ui-base.css',
@@ -255,7 +265,7 @@ function isCoreCss(rel) {
 }
 
 function isKernelCss(rel) {
-  return rel === 'style/theme.css' || rel === 'style/dock.css' || rel === 'style/component.css'
+  return rel === 'style/theme.css' || rel.indexOf('style/themes/') === 0 || rel === 'style/dock.css' || rel === 'style/component.css'
 }
 
 function isUiCss(rel) {

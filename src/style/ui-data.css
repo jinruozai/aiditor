@@ -44,10 +44,10 @@
   height: 240px;
   min-height: 0;
   overflow-y: auto;
-  background: var(--aiditor-view-bg);
-  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
-  border-radius: var(--aiditor-view-radius);
-  box-shadow: var(--aiditor-shadow-surface);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   outline: none;
 }
 /* Container focus ring — keyboard only. :focus alone would light up on

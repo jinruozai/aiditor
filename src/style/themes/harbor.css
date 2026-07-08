@@ -1,0 +1,112 @@
+/* Harbor theme - layered charcoal editor palette with quiet translucent tabs. */
+:root[data-aiditor-theme="harbor"],
+.aiditor-root[data-aiditor-theme="harbor"] {
+  color-scheme: dark;
+
+  --aiditor-surface-canvas: #18181a;
+  --aiditor-surface-lower:  #272729;
+  --aiditor-surface-frame:  #313035;
+  --aiditor-surface-panel:  #3f4045;
+  --aiditor-surface-field:  #313035;
+  --aiditor-surface-hover:  #37363b;
+  --aiditor-surface-active: #3f4045;
+  --aiditor-surface-raised: #313035;
+
+  --aiditor-text-primary:  #f4f5f8;
+  --aiditor-text-body:     #dedfe6;
+  --aiditor-text-label:    #c0c1cb;
+  --aiditor-text-muted:    #9ea0aa;
+  --aiditor-text-disabled: #7a7c84;
+
+  --aiditor-stroke-subtle: #37363b;
+  --aiditor-stroke-strong: #4a4a51;
+  --aiditor-stroke-field:  #37363b;
+  --aiditor-stroke-hover:  #55555b;
+
+  --aiditor-brand:          #72d6b4;
+  --aiditor-brand-hover:    #8effd5;
+  --aiditor-brand-contrast: #10211b;
+
+  --aiditor-state-success: #72d6b4;
+  --aiditor-state-warning: #d4b76a;
+  --aiditor-state-danger:  #ef746b;
+  --aiditor-state-info:    #7eb6d8;
+
+  --aiditor-c-00: #18181a;
+  --aiditor-c-01: #272729;
+  --aiditor-c-02: #313035;
+  --aiditor-c-03: #3f4045;
+  --aiditor-c-04: #37363b;
+  --aiditor-c-05: #4a4a51;
+  --aiditor-c-06: #55555b;
+  --aiditor-c-07: #65656c;
+  --aiditor-c-08: #7a7c84;
+  --aiditor-c-09: #9ea0aa;
+  --aiditor-c-10: #c0c1cb;
+  --aiditor-c-11: #f4f5f8;
+
+  --aiditor-c-accent:      var(--aiditor-brand);
+  --aiditor-c-accent-soft: var(--aiditor-brand-hover);
+  --aiditor-c-success: var(--aiditor-state-success);
+  --aiditor-c-warn:    var(--aiditor-state-warning);
+  --aiditor-c-error:   var(--aiditor-state-danger);
+  --aiditor-c-info:    var(--aiditor-state-info);
+
+  --aiditor-bg-0: var(--aiditor-surface-canvas);
+  --aiditor-bg-1: var(--aiditor-surface-panel);
+  --aiditor-bg-2: var(--aiditor-surface-field);
+  --aiditor-bg-3: var(--aiditor-surface-hover);
+  --aiditor-bg-4: var(--aiditor-surface-active);
+  --aiditor-bg-raised: var(--aiditor-surface-raised);
+
+  --aiditor-fg-0: var(--aiditor-text-primary);
+  --aiditor-fg-1: var(--aiditor-text-body);
+  --aiditor-fg-2: var(--aiditor-text-label);
+  --aiditor-fg-3: var(--aiditor-text-muted);
+
+  --aiditor-border:        var(--aiditor-stroke-subtle);
+  --aiditor-border-strong: var(--aiditor-stroke-strong);
+  --aiditor-border-input:  var(--aiditor-stroke-field);
+  --aiditor-border-hover:  var(--aiditor-stroke-hover);
+
+  --aiditor-accent:      var(--aiditor-brand);
+  --aiditor-accent-soft: var(--aiditor-brand-hover);
+  --aiditor-accent-fg:   var(--aiditor-brand-contrast);
+  --aiditor-accent-bg:   color-mix(in srgb, var(--aiditor-brand) 16%, transparent);
+  --aiditor-accent-bg-strong: color-mix(in srgb, var(--aiditor-brand) 26%, transparent);
+
+  --aiditor-hover:    color-mix(in srgb, var(--aiditor-text-primary) 5%, transparent);
+  --aiditor-active:   color-mix(in srgb, var(--aiditor-brand) 16%, transparent);
+  --aiditor-selected: color-mix(in srgb, var(--aiditor-brand) 20%, transparent);
+  --aiditor-selected-hover: color-mix(in srgb, var(--aiditor-brand) 28%, transparent);
+  --aiditor-selected-border: color-mix(in srgb, var(--aiditor-brand) 54%, var(--aiditor-border));
+  --aiditor-selected-fg: var(--aiditor-fg-0);
+  --aiditor-scrim:    color-mix(in srgb, var(--aiditor-surface-canvas) 66%, transparent);
+
+  --aiditor-toolbar-bg: transparent;
+  --aiditor-toolbar-border-w: 0px;
+  --aiditor-toolbar-border: transparent;
+  --aiditor-dock-border: transparent;
+  --aiditor-chrome-border: transparent;
+  --aiditor-view-bg: var(--aiditor-bg-2);
+  --aiditor-view-radius: var(--aiditor-r-4);
+  --aiditor-splitter-bg: transparent;
+  --aiditor-splitter-active-bg: var(--aiditor-accent);
+  --aiditor-dock-tab-fg: var(--aiditor-fg-2);
+  --aiditor-dock-tab-active-fg: var(--aiditor-fg-0);
+  --aiditor-button-bg: #272729;
+  --aiditor-button-border: #313235;
+  --aiditor-button-hover-bg: #313035;
+  --aiditor-button-hover-border: #313235;
+  --aiditor-button-active-bg: #3f4045;
+  --aiditor-button-active-border: #313235;
+
+  --aiditor-highlight-subtle: color-mix(in srgb, var(--aiditor-fg-0) 3%, transparent);
+  --aiditor-highlight-strong: color-mix(in srgb, var(--aiditor-fg-0) 8%, transparent);
+
+  --aiditor-shadow-1: 0 1px 2px rgba(0,0,0,.20);
+  --aiditor-shadow-2: 0 2px 8px rgba(0,0,0,.28);
+  --aiditor-shadow-3: 0 4px 16px rgba(0,0,0,.36);
+  --aiditor-shadow-4: 0 8px 32px rgba(0,0,0,.46);
+  --aiditor-shadow-raised: none;
+}

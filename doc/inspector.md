@@ -112,6 +112,7 @@ aiditor.inspector.registerProvider('three.cube', {
           struct_def: { x: 'float', y: 'float', z: 'float' },
         },
         color: { type: 'string', type_render: 'color', type_agv: { valueKind: 'hex' } },
+        tint: { type: 'var', type_render: 'color', type_agv: { valueKind: 'vec4', valueScale: 1 } },
       },
       values: [cube],
       write: function (field, change, ctx) {
@@ -129,6 +130,14 @@ aiditor.inspector.select({ type: 'three.cube', id: 'cube', title: 'Cube' })
 arrays. `struct_def` provides the field names and order used by the UI; it does
 not turn the value into a dictionary object. See
 [schema-value-encoding.md](./schema-value-encoding.md).
+
+`type_render: "color"` supports several storage encodings through
+`type_agv.valueKind`: `"hex"` writes `#RRGGBB` / `#AARRGGBB`, `"int"` writes a
+24-bit RGB integer, `"vec3"` writes `[r, g, b]`, and `"vec4"` writes
+`[r, g, b, a]`. Vec arrays are RGBA, not ARGB. `type_agv.valueScale` may be
+`1` for normalized floats or `255` for byte values. For `vec4`, a 6-digit RGB
+text edit preserves the existing alpha; alpha changes only when the input or
+picker supplies alpha.
 
 `inspect(targets, ctx)` returns an Inspection object:
 

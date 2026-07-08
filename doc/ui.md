@@ -490,6 +490,14 @@ Dictionary editing belongs to the `dict` renderer and `dictInput`. See
 [schema-value-encoding.md](./schema-value-encoding.md) and
 [dict-input.md](./dict-input.md).
 
+`vec2`, `vec3`, and `vec4` are built-in TypeConfig aliases for fixed float
+struct tuples. They are not dynamic `array` fields: `vec3` expands to
+`struct_def: { x, y, z }` and stores `[x, y, z]`. Their default renderer is
+`vector`, which uses `ui.vectorInput`. All vec types may opt into
+`type_render: "struct"` for expanded field rows. `vec3` and `vec4` may also opt
+into `type_render: "color"` and will use the same tuple value through the color
+renderer.
+
 Array fields keep the classic `array` renderer by default. Hosts that need row
 selection, active item, duplicate, or reorder can opt into the `array_editor`
 renderer through `type_render: "array_editor"` and renderer args such as
@@ -501,6 +509,15 @@ dynamic key/value rows: the key cell follows `structInput`'s compact row visual
 rhythm, while the value cell is produced by `editorFor(value_type)`. `dictInput`
 owns add/delete/rename key interactions and stable rows for unchanged keys; it
 does not reuse `structInput`'s fixed-field data model.
+
+Color fields use the generic `color` renderer and can choose their storage
+encoding with `type_agv.valueKind`: `"hex"` writes `#RRGGBB` / `#AARRGGBB`,
+`"int"` writes a 24-bit RGB integer, `"vec3"` writes `[r, g, b]`, and
+`"vec4"` writes `[r, g, b, a]`. Vec colors are RGBA arrays. They are not ARGB
+arrays, even though the picker uses `#AARRGGBB` internally. `type_agv.valueScale`
+may be `1` for normalized components or `255` for byte components. For `vec4`,
+editing a 6-digit RGB text value preserves the existing alpha; alpha changes
+only when the input/picker provides alpha.
 
 Schema-driven value edits should propagate as path changes. `propertyForm`
 starts the path with the top-level schema key, and nested renderers append their
@@ -616,6 +633,13 @@ Those actions render through `ui.actionBar` on the row's right edge and support
 the same `icon`, `title`, `menu`, `variant:"danger"`, `command`, and `args`
 shape as header/group actions. Row actions are UI chrome only; mutations still
 route through host commands or the form's normal `onChange` path.
+
+Field-owned controls that belong with the label, such as `propertyForm`'s
+reset-to-default button, live in the label chrome. They do not consume editor
+width. For `fieldLayout: "block"` / `"section"`, the label and its controls
+stay on the title row while the editor keeps the next row. `label: false` /
+`labelMode: "hidden"` hides only the label text; label chrome actions remain
+visible when present.
 
 Property rows can also expose context-menu actions with one form-level strategy
 function:
@@ -734,7 +758,10 @@ Theme configuration has two deliberately separate sources of truth:
 
 - `src/core/theme.js` owns theme metadata: mode id, display label, color scheme,
   and public lookup helpers.
-- `src/style/theme.css` owns the visual token implementation for each mode.
+- `src/style/theme.css` owns the base theme contract, density, and shared
+  reduced-motion rules.
+- `src/style/themes/<id>.css` owns the visual token implementation for one
+  built-in mode.
 
 Do not derive theme metadata by parsing CSS selectors, and do not duplicate
 theme mode arrays in settings panels, demo helpers, AI tools, or tests. CSS is
@@ -785,8 +812,9 @@ applies the active mode.
 Adding a built-in theme requires exactly two authored changes:
 
 1. Add metadata to `aiditor.theme` in `src/core/theme.js`.
-2. Add the matching `[data-aiditor-theme="<id>"]` token block in
-   `src/style/theme.css`.
+2. Add `src/style/themes/<id>.css` with the matching
+   `[data-aiditor-theme="<id>"]` token block, and add that file to
+   `CSS_ORDER` in `tools/build.mjs`.
 
 The settings UI, `theme-config` panel, demo AI theme tools, docs examples, and
 tests must read the Core metadata instead of maintaining their own theme lists.
@@ -955,14 +983,14 @@ Component consumption rules:
 
 Non-goals:
 
-- No theme-specific selectors such as `.theme-pop .aiditor-ui-button`.
+- No theme-specific selectors such as `.theme-neon .aiditor-ui-button`.
 - No component logic that checks a theme id.
 - No full CSS parser or automatic theme discovery from selector names.
 - No broad `clip-path` shape system for controls. It is hard to keep accessible,
   focusable, and text-safe in dense editor UIs.
-- No per-component explosion such as `--aiditor-button-pop-corner-size`.
+- No per-component explosion such as `--aiditor-button-neon-corner-size`.
 
-The Pop-style neon arcade theme should therefore be expressed by assigning these
+The Neon arcade theme should therefore be expressed by assigning these
 shared appearance roles:
 
 ```css

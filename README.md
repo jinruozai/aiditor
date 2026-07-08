@@ -332,7 +332,7 @@ Built-in theme metadata is exposed by `aiditor.theme`:
 ```js
 aiditor.theme.modeOptions()
 aiditor.theme.modeIds()
-aiditor.theme.set('pop')
+aiditor.theme.set('neon')
 ```
 
 Custom themes should start from semantic authoring tokens such as

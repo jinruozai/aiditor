@@ -27,6 +27,23 @@ Inspector. It contains no project, asset, scene, engine, or GameData semantics.
 Framework code must not treat a `struct` value as a dictionary. Dictionary
 editing belongs to `dict`, not to `struct`.
 
+`vec2`, `vec3`, and `vec4` are shorthand TypeConfig aliases for common fixed
+float structs. They still use the `struct` contract:
+
+```js
+vec3 -> {
+  base_type: 'struct',
+  type_render: 'vector',
+  struct_def: { x: 'float', y: 'float', z: 'float' },
+  default: [0, 0, 0],
+}
+```
+
+`vector` is only the default editor. `type_render: "struct"` can show the same
+tuple as expanded fixed fields. `vec3` and `vec4` can also use
+`type_render: "color"` when the tuple represents RGB/RGBA. Use `array` only
+when the element count is data.
+
 ## Struct Contract
 
 Given:

@@ -1,0 +1,228 @@
+/* Neon theme - near-black geometric poster stage with blue rails, yellow slabs,
+   and magenta/cyan arcade accents. */
+:root[data-aiditor-theme="neon"],
+.aiditor-root[data-aiditor-theme="neon"] {
+  color-scheme: dark;
+
+  --aiditor-surface-canvas: #00020a;
+  --aiditor-surface-lower:  #010412;
+  --aiditor-surface-frame:  #020817;
+  --aiditor-surface-panel:  #030916;
+  --aiditor-surface-field:  #00040d;
+  --aiditor-surface-hover:  #071f4a;
+  --aiditor-surface-active: #0d3478;
+  --aiditor-surface-raised: #06142f;
+
+  --aiditor-text-primary:  #fbfcff;
+  --aiditor-text-body:     #e9f2ff;
+  --aiditor-text-label:    #bdd8ff;
+  --aiditor-text-muted:    #90add9;
+  --aiditor-text-disabled: #5f79a1;
+
+  --aiditor-stroke-subtle: #0b2c58;
+  --aiditor-stroke-strong: #00eaff;
+  --aiditor-stroke-field:  #105a90;
+  --aiditor-stroke-hover:  #21f4ff;
+
+  --aiditor-brand:          #ff2b93;
+  --aiditor-brand-hover:    #ff63b8;
+  --aiditor-brand-contrast: #ffffff;
+
+  --aiditor-state-success: #00f5a8;
+  --aiditor-state-warning: #facf01;
+  --aiditor-state-danger:  #ff347e;
+  --aiditor-state-info:    #13bfff;
+
+  --aiditor-c-00: #00020a;
+  --aiditor-c-01: #010412;
+  --aiditor-c-02: #020817;
+  --aiditor-c-03: #030916;
+  --aiditor-c-04: #06142f;
+  --aiditor-c-05: #071f4a;
+  --aiditor-c-06: #0b2c58;
+  --aiditor-c-07: #105a90;
+  --aiditor-c-08: #5f79a1;
+  --aiditor-c-09: #90add9;
+  --aiditor-c-10: #bdd8ff;
+  --aiditor-c-11: #fbfcff;
+
+  --aiditor-c-accent:      var(--aiditor-brand);
+  --aiditor-c-accent-soft: var(--aiditor-brand-hover);
+  --aiditor-c-success: var(--aiditor-state-success);
+  --aiditor-c-warn:    var(--aiditor-state-warning);
+  --aiditor-c-error:   var(--aiditor-state-danger);
+  --aiditor-c-info:    var(--aiditor-state-info);
+
+  --aiditor-bg-0: var(--aiditor-surface-canvas);
+  --aiditor-bg-1: var(--aiditor-surface-panel);
+  --aiditor-bg-2: var(--aiditor-surface-field);
+  --aiditor-bg-3: var(--aiditor-surface-hover);
+  --aiditor-bg-4: var(--aiditor-surface-active);
+  --aiditor-bg-raised: var(--aiditor-surface-raised);
+
+  --aiditor-fg-0: var(--aiditor-text-primary);
+  --aiditor-fg-1: var(--aiditor-text-body);
+  --aiditor-fg-2: var(--aiditor-text-label);
+  --aiditor-fg-3: var(--aiditor-text-muted);
+
+  --aiditor-border:        var(--aiditor-stroke-subtle);
+  --aiditor-border-strong: var(--aiditor-stroke-strong);
+  --aiditor-border-input:  var(--aiditor-stroke-field);
+  --aiditor-border-hover:  var(--aiditor-stroke-hover);
+
+  --aiditor-accent:      var(--aiditor-brand);
+  --aiditor-accent-soft: var(--aiditor-brand-hover);
+  --aiditor-accent-fg:   var(--aiditor-brand-contrast);
+  --aiditor-accent-bg:   color-mix(in srgb, var(--aiditor-brand) 22%, transparent);
+  --aiditor-accent-bg-strong: color-mix(in srgb, var(--aiditor-brand) 40%, transparent);
+
+  --aiditor-hover:       color-mix(in srgb, var(--aiditor-state-info) 18%, var(--aiditor-bg-raised));
+  --aiditor-active:      color-mix(in srgb, var(--aiditor-state-warning) 24%, var(--aiditor-bg-1));
+  --aiditor-selected:    color-mix(in srgb, var(--aiditor-state-warning) 82%, #08357f);
+  --aiditor-selected-hover: color-mix(in srgb, var(--aiditor-state-warning) 92%, #0b48aa);
+  --aiditor-selected-border: color-mix(in srgb, var(--aiditor-state-warning) 70%, var(--aiditor-stroke-hover));
+  --aiditor-selected-fg: #151000;
+  --aiditor-scrim:       color-mix(in srgb, #00020a 80%, transparent);
+
+  --aiditor-success:    var(--aiditor-c-success);
+  --aiditor-success-bg: color-mix(in srgb, var(--aiditor-c-success) 20%, transparent);
+  --aiditor-success-fg: #00160d;
+  --aiditor-warn:       var(--aiditor-c-warn);
+  --aiditor-warn-bg:    color-mix(in srgb, var(--aiditor-c-warn) 26%, transparent);
+  --aiditor-warn-fg:    #171000;
+  --aiditor-error:      var(--aiditor-c-error);
+  --aiditor-error-bg:   color-mix(in srgb, var(--aiditor-c-error) 22%, transparent);
+  --aiditor-error-fg:   #ffffff;
+  --aiditor-info:       var(--aiditor-c-info);
+  --aiditor-info-bg:    color-mix(in srgb, var(--aiditor-c-info) 24%, transparent);
+  --aiditor-info-fg:    #001426;
+
+  --aiditor-radius-control: 9px;
+  --aiditor-radius-surface: 14px;
+  --aiditor-radius-overlay: 14px;
+  --aiditor-radius-tab: 11px;
+  --aiditor-radius-chip: var(--aiditor-r-pill);
+
+  --aiditor-border-w: 1px;
+  --aiditor-border-w-strong: 2px;
+  --aiditor-border-w-focus: 2px;
+  --aiditor-control-border-w: var(--aiditor-border-w);
+  --aiditor-surface-border-w: var(--aiditor-border-w);
+  --aiditor-overlay-border-w: var(--aiditor-border-w-strong);
+  --aiditor-dock-border-w: var(--aiditor-border-w-strong);
+  --aiditor-toolbar-border-w: var(--aiditor-border-w-strong);
+
+  --aiditor-shadow-control:
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 22%, transparent),
+    0 0 10px color-mix(in srgb, var(--aiditor-state-info) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent);
+  --aiditor-shadow-surface:
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 24%, transparent),
+    0 0 18px rgba(0,234,255,.13),
+    inset 0 0 24px rgba(19,191,255,.055);
+  --aiditor-shadow-overlay:
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 42%, transparent),
+    0 0 30px rgba(0,234,255,.22),
+    0 0 46px rgba(255,43,147,.12),
+    0 14px 42px rgba(0,0,0,.60);
+  --aiditor-shadow-active:
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
+    0 0 18px color-mix(in srgb, var(--aiditor-state-warning) 36%, transparent);
+
+  --aiditor-root-bg-image:
+    linear-gradient(112deg, transparent 0 58%, rgba(19,191,255,.18) 58.2% 59.4%, rgba(22,88,255,.28) 59.6% 61.4%, transparent 61.8% 100%),
+    linear-gradient(132deg, transparent 0 78%, rgba(250,207,1,.18) 78.2% 78.8%, transparent 79% 100%),
+    radial-gradient(circle at 78% 16%, rgba(19,191,255,.18), transparent 30%),
+    radial-gradient(circle at 16% 86%, rgba(255,43,147,.20), transparent 30%),
+    radial-gradient(circle at 72% 82%, rgba(250,207,1,.12), transparent 24%),
+    radial-gradient(circle, rgba(19,191,255,.13) 0 1px, transparent 1.4px),
+    radial-gradient(circle, rgba(255,43,147,.16) 0 1px, transparent 1.5px),
+    linear-gradient(90deg, rgba(19,191,255,.032) 1px, transparent 1px),
+    linear-gradient(rgba(19,191,255,.024) 1px, transparent 1px),
+    linear-gradient(135deg, #00020a, #000413 50%, #01030b);
+  --aiditor-root-bg-size: auto, auto, auto, auto, auto, 34px 34px, 46px 46px, 84px 84px, 84px 84px, auto;
+  --aiditor-root-bg-position: center, center, right top, left bottom, right bottom, 0 0, 17px 19px, 0 0, 0 0, 0 0;
+  --aiditor-root-bg-blend: screen, screen, screen, screen, screen, screen, screen, normal, normal, normal;
+
+  --aiditor-corner-accent-size: 14px;
+  --aiditor-corner-accent-color: var(--aiditor-brand);
+  --aiditor-corner-accent-opacity: .95;
+
+  --aiditor-toolbar-bg: linear-gradient(180deg, #07183a 0%, #020611 100%);
+  --aiditor-toolbar-border: var(--aiditor-border-strong);
+  --aiditor-dock-border: var(--aiditor-border-strong);
+  --aiditor-chrome-border: var(--aiditor-border);
+  --aiditor-view-bg: var(--aiditor-bg-0);
+  --aiditor-view-radius: var(--aiditor-radius-surface);
+  --aiditor-splitter-bg: color-mix(in srgb, var(--aiditor-stroke-strong) 36%, var(--aiditor-bg-0));
+  --aiditor-splitter-active-bg: var(--aiditor-accent);
+  --aiditor-dock-tab-bg: linear-gradient(180deg, #07183a 0%, #020611 100%);
+  --aiditor-dock-tab-hover-bg: linear-gradient(180deg, #13bfff 0%, #1658ff 100%);
+  --aiditor-dock-tab-active-bg: #facf01;
+  --aiditor-dock-tab-border-w: 1px;
+  --aiditor-dock-tab-border: color-mix(in srgb, var(--aiditor-stroke-hover) 56%, transparent);
+  --aiditor-dock-tab-hover-border: var(--aiditor-stroke-hover);
+  --aiditor-dock-tab-active-border: #21f4ff;
+  --aiditor-dock-tab-fg: #d9ebff;
+  --aiditor-dock-tab-hover-fg: #001426;
+  --aiditor-dock-tab-active-fg: #171000;
+  --aiditor-dock-tab-gap: 4px;
+  --aiditor-dock-tab-indicator-bg: var(--aiditor-state-warning);
+  --aiditor-dock-tab-indicator-bg-vertical: var(--aiditor-state-warning);
+  --aiditor-dock-tab-indicator-size: 2px;
+  --aiditor-dock-tab-indicator-inset: 8px;
+  --aiditor-dock-tab-indicator-radius: var(--aiditor-r-pill);
+  --aiditor-dock-tab-indicator-opacity: 1;
+  --aiditor-dock-tab-active-overlay-top:
+    linear-gradient(to bottom, rgba(255,255,255,.24), transparent 58%),
+    radial-gradient(90px 24px at 50% 0, rgba(255,43,147,.34), transparent 74%);
+  --aiditor-dock-tab-active-overlay-bottom:
+    linear-gradient(to top, rgba(255,255,255,.20), transparent 58%),
+    radial-gradient(90px 24px at 50% 100%, rgba(255,43,147,.32), transparent 74%);
+  --aiditor-dock-tab-active-overlay-left:
+    linear-gradient(to right, rgba(255,255,255,.20), transparent 58%),
+    radial-gradient(24px 90px at 0 50%, rgba(255,43,147,.32), transparent 74%);
+  --aiditor-dock-tab-active-overlay-right:
+    linear-gradient(to left, rgba(255,255,255,.20), transparent 58%),
+    radial-gradient(24px 90px at 100% 50%, rgba(255,43,147,.32), transparent 74%);
+  --aiditor-dock-tab-active-shadow-top:
+    0 0 12px rgba(250,207,1,.24),
+    inset 0 0 0 1px rgba(255,255,255,.22);
+  --aiditor-dock-tab-active-shadow-bottom:
+    0 0 12px rgba(250,207,1,.22),
+    inset 0 0 0 1px rgba(255,255,255,.20);
+  --aiditor-dock-tab-active-shadow-left:
+    0 0 12px rgba(250,207,1,.22),
+    inset 0 0 0 1px rgba(255,255,255,.20);
+  --aiditor-dock-tab-active-shadow-right:
+    0 0 12px rgba(250,207,1,.22),
+    inset 0 0 0 1px rgba(255,255,255,.20);
+  --aiditor-button-bg: linear-gradient(180deg, #125bff 0%, #0837a8 100%);
+  --aiditor-button-fg: #ffffff;
+  --aiditor-button-border: #13bfff;
+  --aiditor-button-hover-bg: linear-gradient(180deg, #21f4ff 0%, #1687ff 100%);
+  --aiditor-button-hover-fg: #001426;
+  --aiditor-button-hover-border: var(--aiditor-border-hover);
+  --aiditor-button-active-bg: #facf01;
+  --aiditor-button-active-fg: #171000;
+  --aiditor-button-active-border: #21f4ff;
+  --aiditor-button-primary-bg: linear-gradient(180deg, #ff4fb2 0%, #ff2b93 58%, #b713ff 100%);
+  --aiditor-button-primary-fg: #ffffff;
+  --aiditor-button-primary-border: #ff8ccc;
+  --aiditor-button-primary-hover-bg: linear-gradient(180deg, #ff77c4 0%, #ff2b93 52%, #21f4ff 130%);
+  --aiditor-button-primary-hover-fg: #ffffff;
+  --aiditor-button-primary-hover-border: #facf01;
+  --aiditor-button-primary-active-bg: #facf01;
+  --aiditor-button-primary-active-fg: #171000;
+
+  --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 10%, transparent);
+  --aiditor-highlight-strong: color-mix(in srgb, #ffffff 18%, transparent);
+  --aiditor-shadow-1: 0 1px 2px rgba(0,0,0,.38);
+  --aiditor-shadow-2: 0 2px 10px rgba(0,0,0,.48);
+  --aiditor-shadow-3: 0 6px 24px rgba(0,0,0,.58);
+  --aiditor-shadow-4: 0 14px 48px rgba(0,0,0,.68);
+  --aiditor-shadow-raised:
+    0 0 0 1px color-mix(in srgb, var(--aiditor-stroke-hover) 22%, transparent),
+    0 0 16px rgba(19,191,255,.18),
+    0 0 22px rgba(255,43,147,.08);
+}

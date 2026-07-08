@@ -208,7 +208,9 @@ semantic CSS tokens instead of domain colors.
 schemes are declared once in Core and exposed through `modes()`, `modeIds()`,
 `modeOptions()`, and `hasMode(id)`. Settings UI, demo tooling, AI tool schemas,
 and tests consume those helpers instead of duplicating their own theme arrays.
-The CSS theme blocks remain the visual token implementation.
+`src/style/theme.css` owns the shared theme contract, while
+`src/style/themes/<id>.css` files own each built-in mode's visual token
+implementation.
 
 Theme tokens cover color and appearance. Shape, stroke width, elevation, root
 texture, and small accent geometry are role tokens consumed by UI components;

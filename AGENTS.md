@@ -254,7 +254,7 @@ aiditor/
 - `src/style/theme.css` 采用 v2 分层:Authoring tokens(给主题作者改:`--aiditor-surface-*` / `--aiditor-text-*` / `--aiditor-stroke-*` / `--aiditor-brand*` / `--aiditor-state-*`) → primitive/ramp 兼容层(`--aiditor-c-00..11`) → role tokens(组件消费:`--aiditor-bg-N` / `--aiditor-fg-N` / `--aiditor-border*` / `--aiditor-accent*`) → 少量 component tokens(`--aiditor-toolbar-h` 等)
 - 新代码不要直接在组件 CSS 里消费 `--aiditor-c-*`;组件只读 role tokens。`--aiditor-c-*` 保留给兼容和高级主题,不是用户自定义主题的主入口
 - 派生半透明色优先从语义/role token 派生,例如 `--aiditor-scrim`、`--aiditor-accent-bg`;不要在 overlay / hover 里直接拿某个数字灰阶推断语义
-- 主题能力不只包含颜色。shape / stroke width / elevation / root texture / corner accent 都属于通用 appearance role token。组件 CSS 只能消费这些通用 token,不能写 `.theme-pop .xxx` 这类主题专用分支,也不能在 JS 里判断 theme id 来改变组件结构
+- 主题能力不只包含颜色。shape / stroke width / elevation / root texture / corner accent 都属于通用 appearance role token。组件 CSS 只能消费这些通用 token,不能写 `.theme-neon .xxx` 这类主题专用分支,也不能在 JS 里判断 theme id 来改变组件结构
 - 内置主题通过 `aiditor.theme.set(mode[, root])` 或 `data-aiditor-theme` 切换。`:root` 不写属性 = dark;`.aiditor-root[data-aiditor-theme=...]` 支持单实例 scoped theme
 - 主题元数据只允许在 Core 的 `aiditor.theme` 配一次:mode id、label、color scheme 通过 `modes()` / `modeIds()` / `modeOptions()` / `hasMode(id)` 暴露。`src/style/theme-settings.js`、demo/AI theme schema、测试、文档示例都必须消费这份元数据,不要各写一份 `THEME_MODES`
 - `src/style/theme.css` 只负责每个 `[data-aiditor-theme="<id>"]` 的视觉 token 实现,不要从 CSS selector 反解析主题列表

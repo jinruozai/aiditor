@@ -1,0 +1,81 @@
+/* ── Dracula theme — a richer, violet-accented dark with raised fields.
+ * Deeper grayscale ramp, cool-violet accent, stronger shadows, and the
+ * "raised input" role mapping (bg-2 LIGHTER than bg-1) that contrasts
+ * the default Godot "inset input" convention. Selected via
+ * [data-aiditor-theme="dracula"]. */
+:root[data-aiditor-theme="dracula"],
+.aiditor-root[data-aiditor-theme="dracula"] {
+  color-scheme: dark;
+
+  --aiditor-surface-canvas: #0c0c0e;
+  --aiditor-surface-lower:  #111113;
+  --aiditor-surface-frame:  #16161a;
+  --aiditor-surface-panel:  #111113;
+  --aiditor-surface-field:  #1c1c20;
+  --aiditor-surface-hover:  #2a2a30;
+  --aiditor-surface-active: #38383f;
+  --aiditor-surface-raised: #1c1c20;
+
+  --aiditor-text-primary:  #f4f2fb;
+  --aiditor-text-body:     #deddeb;
+  --aiditor-text-label:    #bbb9ca;
+  --aiditor-text-muted:    #9897aa;
+  --aiditor-text-disabled: #747480;
+
+  --aiditor-stroke-subtle: #1c1c20;
+  --aiditor-stroke-strong: #2a2a30;
+  --aiditor-stroke-field:  #2a2a30;
+  --aiditor-stroke-hover:  #4a4a52;
+
+  --aiditor-brand:          #7b6ef6;
+  --aiditor-brand-hover:    #a89ff8;
+  --aiditor-brand-contrast: #ffffff;
+
+  --aiditor-state-success: #3ecf8e;
+  --aiditor-state-warning: #f0a050;
+  --aiditor-state-danger:  #e05555;
+  --aiditor-state-info:    #38bdf8;
+
+  --aiditor-c-00: #0c0c0e;
+  --aiditor-c-01: #111113;
+  --aiditor-c-02: #16161a;
+  --aiditor-c-03: #1c1c20;
+  --aiditor-c-04: #24242a;
+  --aiditor-c-05: #2a2a30;
+  --aiditor-c-06: #38383f;
+  --aiditor-c-07: #4a4a52;
+  --aiditor-c-08: #747480;
+  --aiditor-c-09: #9897aa;
+  --aiditor-c-10: #bbb9ca;
+  --aiditor-c-11: #f4f2fb;
+
+  --aiditor-c-accent:      #7b6ef6;
+  --aiditor-c-accent-soft: #a89ff8;
+
+  --aiditor-c-success: #3ecf8e;
+  --aiditor-c-warn:    #f0a050;
+  --aiditor-c-error:   #e05555;
+  --aiditor-c-info:    #38bdf8;
+
+  /* Raised-input role mapping: field sits ABOVE panel, opposite of the
+   * Godot default. This is the single substantive layout difference
+   * between the two dark themes — everything else is palette. */
+  --aiditor-bg-1: var(--aiditor-surface-panel);   /* dock body */
+  --aiditor-bg-2: var(--aiditor-surface-field);   /* input (lighter than panel) */
+  --aiditor-bg-3: var(--aiditor-surface-hover);
+  --aiditor-bg-4: var(--aiditor-surface-active);
+  --aiditor-bg-raised: var(--aiditor-surface-raised);   /* raised cards sit above bg-1 */
+
+  --aiditor-border:        var(--aiditor-stroke-subtle);
+  --aiditor-border-strong: var(--aiditor-stroke-strong);
+  --aiditor-border-input:  var(--aiditor-stroke-field);
+  --aiditor-border-hover:  var(--aiditor-stroke-hover);
+
+  --aiditor-fg-1: var(--aiditor-text-body);
+
+  --aiditor-shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --aiditor-shadow-2: 0 2px 8px rgba(0,0,0,.5);
+  --aiditor-shadow-3: 0 4px 16px rgba(0,0,0,.6);
+  --aiditor-shadow-4: 0 8px 32px rgba(0,0,0,.7);
+  --aiditor-shadow-raised: 0 1px 2px rgba(0,0,0,.30), 0 2px 6px rgba(0,0,0,.35);
+}

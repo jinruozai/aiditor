@@ -1,16 +1,17 @@
 // aiditor.ui.structInput — generic fixed-shape record editor.
 //
-// Renders one row per field; each row = [label · editor · actions]. The editor
+// Renders one row per field; each row = [label chrome · editor · actions]. The editor
 // for each slot is produced by a caller-provided factory — this component does
 // not know about type_config, FieldDef, or canonical value encoding. Use it
 // anywhere you need a schema-less keyed editing projection.
 //
 // opts:
 //   value:    signal<object>                               required; keyed UI projection
-//   fields:   [{ key, label?, labelMode?, fieldLayout?, defaultCollapsed?,
+//   fields:   [{ key, label?, labelMode?, labelActions?, labelActionCtx?,
+//                fieldLayout?, defaultCollapsed?,
 //                collapsed?, onToggle?, tooltip?, editor,
 //                actions?, actionCtx?, contextActions?, contextCtx? }] required
-//               label:false or labelMode:'hidden' hides the visual row label
+//               label:false or labelMode:'hidden' hides label text, not label actions
 //               labelMode:'sr-only' keeps an accessible label without a column
 //               fieldLayout:'row'|'block'|'section' controls label/editor layout
 //               editor(slotSig, write, ctx) → HTMLElement
@@ -68,7 +69,7 @@
       row.classList.add('aiditor-ui-struct-input-row-layout-' + layout)
       const label = layout === 'section'
         ? sectionLabel(root, row, f)
-        : ui.h('div', 'aiditor-ui-struct-input-label', { text: fieldLabel(f) })
+        : fieldLabelEl(f)
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
@@ -97,6 +98,22 @@
       const editor = f.editor(fieldSig, writeSlot, ctx)
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
+
+      if (f.labelActions) {
+        const labelActions = ui.h('div', 'aiditor-ui-struct-input-label-actions')
+        labelActions.appendChild(ui.actionBar({ actions: f.labelActions, ctx: f.labelActionCtx || ctx || {}, density: 'compact' }))
+        label.appendChild(labelActions)
+        row.classList.add('aiditor-ui-struct-input-row-has-label-actions')
+        if (f.labelActions.dispose) ui.collect(root, f.labelActions.dispose)
+        if (f.labelActionCtx && f.labelActionCtx.dispose) ui.collect(root, f.labelActionCtx.dispose)
+        if (ui.isSignal(f.labelActions)) {
+          ui.bind(row, f.labelActions, function (list) {
+            row.classList.toggle('aiditor-ui-struct-input-row-label-actions-empty', !(Array.isArray(list) && list.length))
+          })
+        } else {
+          row.classList.toggle('aiditor-ui-struct-input-row-label-actions-empty', !(Array.isArray(f.labelActions) && f.labelActions.length))
+        }
+      }
 
       row.appendChild(label); row.appendChild(cell)
       if (f.actions) {
@@ -148,6 +165,12 @@
     return f.label || f.key
   }
 
+  function fieldLabelEl(f) {
+    const label = ui.h('div', 'aiditor-ui-struct-input-label')
+    label.appendChild(ui.h('span', 'aiditor-ui-struct-input-label-text', { text: fieldLabel(f) }))
+    return label
+  }
+
   function fieldLayout(f, labelMode) {
     const layout = f && f.fieldLayout
     if (labelMode !== 'visible' && layout === 'section') return 'block'
@@ -162,11 +185,13 @@
       }
       else if (typeof collapsed.set === 'function') collapsed.set(next)
     }
-    const btn = ui.h('button', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-toggle', { type: 'button' })
+    const wrap = ui.h('div', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-label')
+    const btn = ui.h('button', 'aiditor-ui-struct-input-section-toggle', { type: 'button' })
     const arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
     arrow.classList.add('aiditor-ui-struct-input-section-arrow')
     btn.appendChild(arrow)
     btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+    wrap.appendChild(btn)
     btn.addEventListener('click', function () { writeCollapsed(!collapsed.peek()) })
     const stop = aiditor.effect(function () {
       const v = collapsed()
@@ -175,7 +200,7 @@
       arrow.style.transform = v ? 'rotate(-90deg)' : ''
     })
     ui.collect(root, stop)
-    return btn
+    return wrap
   }
 
   function openFieldContextMenu(ev, row, label, field, closeFieldMenu, setFieldMenu, clearFieldMenu) {

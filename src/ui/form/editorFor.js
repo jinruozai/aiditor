@@ -14,7 +14,7 @@
 //
 // Each renderer receives { fieldDef, sig, write, ctx } and returns an
 // HTMLElement. Built-ins: input_string | textarea | input_int | input_float
-// | range | enum | toggle | color | date | img | snd | id | ref_id | struct
+// | range | enum | toggle | color | vector | date | img | snd | id | ref_id | struct
 // | array | array_editor.
 ;(function (aiditor) {
   'use strict'
@@ -136,7 +136,22 @@
       value:     a.sig,
       onChange:  a.write,
       valueKind: agv.valueKind || (a.fieldDef.base_type === 'int' ? 'int' : 'hex'),
+      valueScale: agv.valueScale,
     })
+  })
+  ui.registerRenderer('vector', function (a) {
+    const agv = a.fieldDef.type_agv || {}
+    const fields = vectorFields(a.fieldDef)
+    const sig = asVectorSig(a.sig, fields)
+    return collectSignal(ui.vectorInput({
+      value: sig,
+      onChange: function (next) { a.write(next) },
+      labels: fields.map(function (f) { return f.key.toUpperCase() }),
+      layout: agv.layout || 'row',
+      step: agv.step != null ? agv.step : 0.01,
+      precision: agv.decimal_places != null ? agv.decimal_places : 2,
+      linked: agv.linked,
+    }), sig)
   })
   ui.registerRenderer('date', function (a) {
     return ui.dateInput({ value: a.sig, onChange: a.write })
@@ -294,6 +309,40 @@
 
   function cloneItem(item) {
     return schema.cloneValue(item)
+  }
+
+  function vectorFields(fieldDef) {
+    const def = schema.normalizeStructDef(fieldDef && fieldDef.struct_def)
+    if (!def) return [{ key: 'x' }, { key: 'y' }, { key: 'z' }]
+    return Object.keys(def).map(function (key) {
+      return { key: key, fieldDef: ui.resolveFieldDef(typeof def[key] === 'string' ? { type: def[key] } : def[key]) }
+    })
+  }
+
+  function asVectorSig(sig, fields) {
+    const tap = aiditor.signal(vectorTuple(asPlain(sig), fields))
+    tap.dispose = aiditor.effect(function () {
+      const next = vectorTuple(sig(), fields)
+      if (!equalArray(tap.peek(), next)) tap.set(next)
+    })
+    return tap
+  }
+
+  function vectorTuple(value, fields) {
+    const tuple = Array.isArray(value) ? value : []
+    const out = new Array(fields.length)
+    for (let i = 0; i < fields.length; i++) {
+      const raw = i < tuple.length ? tuple[i] : cloneFieldDefault(fields[i].fieldDef)
+      const n = Number(raw)
+      out[i] = Number.isFinite(n) ? n : 0
+    }
+    return out
+  }
+
+  function equalArray(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false
+    return true
   }
 
   function tupleToRecord(value, fields) {

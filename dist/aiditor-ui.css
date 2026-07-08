@@ -1163,21 +1163,21 @@
 }
 
 .aiditor-ui-color-picker {
-  width: 220px;
+  width: 330px;
   padding: 0;
   display: flex;
   flex-direction: column;
   color: var(--aiditor-fg-1);
 }
 .aiditor-ui-color-picker-main {
-  padding: 8px 8px 6px;
+  padding: 10px 10px 8px;
 }
 .aiditor-ui-color-sv {
   position: relative;
   width: 100%;
-  height: 130px;
-  margin-bottom: 6px;
-  border-radius: 6px;
+  height: 195px;
+  margin-bottom: 8px;
+  border-radius: var(--aiditor-radius-surface);
   cursor: crosshair;
   overflow: hidden;
   user-select: none;
@@ -1244,11 +1244,11 @@
   box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.25);
 }
 .aiditor-ui-color-values {
-  padding: 0 8px 6px;
+  padding: 0 10px 8px;
 }
 .aiditor-ui-color-values .aiditor-ui-seg {
   width: 100%;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .aiditor-ui-color-values .aiditor-ui-seg-btn {
   flex: 1 1 0;
@@ -1261,7 +1261,7 @@
 .aiditor-ui-color-value-row {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
 }
 .aiditor-ui-color-current,
@@ -1301,40 +1301,22 @@
   height: 22px;
 }
 .aiditor-ui-color-channel {
-  display: flex;
-  align-items: center;
-  gap: 3px;
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 56px;
 }
-.aiditor-ui-color-channel-label {
-  flex: 0 0 auto;
-  width: 10px;
-  color: var(--aiditor-fg-3);
-  font: 9px var(--aiditor-font-ui);
+.aiditor-ui-color-channel > .aiditor-ui-num {
+  width: 100%;
+}
+.aiditor-ui-color-channel .aiditor-ui-num-label {
+  min-width: 16px;
+  padding: 0 4px;
   text-transform: uppercase;
 }
-.aiditor-ui-color-channel-input {
-  flex: 1 1 auto;
-  width: 0;
-  min-width: 0;
-  height: 22px;
-  padding: 0 4px;
-  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
-  border-radius: var(--aiditor-radius-control);
-  background: var(--aiditor-bg-2);
-  color: var(--aiditor-fg-0);
-  font: 10px var(--aiditor-font-ui);
-  text-align: center;
-  outline: 0;
-  box-sizing: border-box;
-}
-.aiditor-ui-color-channel-input:focus {
-  border-color: var(--aiditor-accent);
-  box-shadow: 0 0 0 1px var(--aiditor-focus-ring);
+.aiditor-ui-color-channel .aiditor-ui-num-step {
+  display: none;
 }
 .aiditor-ui-color-favorites {
-  padding: 6px 8px 8px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--aiditor-border);
 }
 .aiditor-ui-color-favorites-title {
@@ -1830,9 +1812,29 @@
 .aiditor-ui-array-input-index {
   font: var(--aiditor-fs-sm) var(--aiditor-font-mono);
   color: var(--aiditor-fg-3);
+}
+.aiditor-ui-struct-input-label-text,
+.aiditor-ui-dict-input-key,
+.aiditor-ui-array-input-index {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.aiditor-ui-struct-input-label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.aiditor-ui-struct-input-label-text { flex: 1 1 auto; min-width: 0; }
+.aiditor-ui-struct-input-label-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.aiditor-ui-struct-input-row-label-actions-empty > .aiditor-ui-struct-input-label > .aiditor-ui-struct-input-label-actions {
+  display: none;
 }
 .aiditor-ui-struct-input-cell,
 .aiditor-ui-dict-input-cell,
@@ -1913,17 +1915,33 @@
 .aiditor-ui-struct-input-row-label-sr-only {
   grid-template-columns: minmax(0, 1fr);
 }
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty),
+.aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty) {
+  grid-template-columns: minmax(22px, 28px) minmax(0, 1fr);
+}
 .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
 .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
+.aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(22px, 28px) minmax(0, 1fr) auto;
 }
 .aiditor-ui-struct-input-row-label-hidden > .aiditor-ui-struct-input-cell,
 .aiditor-ui-struct-input-row-label-sr-only > .aiditor-ui-struct-input-cell {
   grid-column: 1 / -1;
 }
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty) > .aiditor-ui-struct-input-cell,
+.aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty) > .aiditor-ui-struct-input-cell {
+  grid-column: 2;
+}
 .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell,
 .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
   grid-column: 1;
+}
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell,
+.aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
+  grid-column: 2;
 }
 .aiditor-ui-struct-input-row-layout-block,
 .aiditor-ui-struct-input-row-layout-section {
@@ -1955,6 +1973,9 @@
   padding: 1px 0 0 var(--aiditor-space-1);
   background: transparent;
 }
+.aiditor-ui-struct-input-section-label {
+  width: 100%;
+}
 .aiditor-ui-struct-input-section-toggle {
   display: inline-flex;
   align-items: center;
@@ -1969,6 +1990,9 @@
   color: var(--aiditor-fg-2);
   text-align: left;
   cursor: pointer;
+}
+.aiditor-ui-struct-input-section-label > .aiditor-ui-struct-input-section-toggle {
+  flex: 1 1 auto;
 }
 .aiditor-ui-struct-input-section-toggle:hover {
   color: var(--aiditor-fg-0);
@@ -1987,8 +2011,16 @@
 .aiditor-ui-struct-input-row-collapsed > .aiditor-ui-struct-input-cell {
   display: none;
 }
-.aiditor-ui-struct-input-label-hidden { display: none; }
-.aiditor-ui-struct-input-label-sr-only {
+.aiditor-ui-struct-input-label-hidden > .aiditor-ui-struct-input-label-text { display: none; }
+.aiditor-ui-struct-input-row-label-hidden:not(.aiditor-ui-struct-input-row-has-label-actions),
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-label-actions-empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+.aiditor-ui-struct-input-row-label-hidden:not(.aiditor-ui-struct-input-row-has-label-actions) > .aiditor-ui-struct-input-label,
+.aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-label-actions-empty > .aiditor-ui-struct-input-label {
+  display: none;
+}
+.aiditor-ui-struct-input-label-sr-only > .aiditor-ui-struct-input-label-text {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -2196,17 +2228,33 @@
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only {
   grid-template-columns: minmax(0, 1fr);
 }
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty),
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty) {
+  grid-template-columns: minmax(22px, 28px) minmax(0, 1fr);
+}
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
+  grid-template-columns: minmax(22px, 28px) minmax(0, 1fr) auto;
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden > .aiditor-ui-struct-input-cell,
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only > .aiditor-ui-struct-input-cell {
   grid-column: 1 / -1;
 }
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty) > .aiditor-ui-struct-input-cell,
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty) > .aiditor-ui-struct-input-cell {
+  grid-column: 2;
+}
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell,
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
   grid-column: 1;
+}
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-hidden.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell,
+.aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-label-sr-only.aiditor-ui-struct-input-row-has-label-actions:not(.aiditor-ui-struct-input-row-label-actions-empty).aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) > .aiditor-ui-struct-input-cell {
+  grid-column: 2;
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block,
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section {
@@ -2296,16 +2344,10 @@
   font: var(--aiditor-fs-sm) var(--aiditor-font-ui);
 }
 
-/* ── slot wrapper for propertyForm editing ──────────────────────────
-   Grid template gives the editor the full 1fr column and the optional reset
-   button auto width on the right — no layout shift between fields with/without
-   a reset. */
+/* ── slot wrapper for propertyForm editing ────────────────────────── */
 .aiditor-ui-slot {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
+  display: block;
   min-width: 0;
 }
 .aiditor-ui-slot > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
@@ -2314,7 +2356,6 @@
   opacity: .48;
   cursor: not-allowed;
 }
-.aiditor-ui-slot-reset { grid-column: 2; flex: 0 0 auto; transition: opacity var(--aiditor-dur-fast) var(--aiditor-ease); }
 
 /* ─── Inspector panel ───────────────────────────────────────────── */
 .aiditor-inspector {
@@ -2324,7 +2365,7 @@
   min-width: 0;
   min-height: 0;
   color: var(--aiditor-fg-1);
-  background: var(--aiditor-bg-1);
+  background: transparent;
 }
 .aiditor-inspector-head {
   flex: 0 0 auto;
@@ -2371,7 +2412,10 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 6px var(--aiditor-space-2) var(--aiditor-space-2);
+  padding: 0;
+}
+.aiditor-inspector-body > .aiditor-ui-property-form {
+  min-height: 100%;
 }
 .aiditor-inspector-empty {
   color: var(--aiditor-fg-3);
@@ -3183,10 +3227,10 @@ div.aiditor-ui-view {
   height: 240px;
   min-height: 0;
   overflow-y: auto;
-  background: var(--aiditor-view-bg);
-  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
-  border-radius: var(--aiditor-view-radius);
-  box-shadow: var(--aiditor-shadow-surface);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   outline: none;
 }
 /* Container focus ring — keyboard only. :focus alone would light up on

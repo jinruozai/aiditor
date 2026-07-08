@@ -64,7 +64,7 @@ function isCoreCss(rel) {
 }
 
 function isKernelCss(rel) {
-  return rel === 'style/theme.css' || rel === 'style/dock.css' || rel === 'style/component.css'
+  return rel === 'style/theme.css' || rel.indexOf('style/themes/') === 0 || rel === 'style/dock.css' || rel === 'style/component.css'
 }
 
 function isUiCss(rel) {

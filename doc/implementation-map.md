@@ -49,6 +49,7 @@ preserved or deliberately replaced.
 | `src/ui/form/arrayInput.js` | [ui.md](./ui.md) | Compatibility facade over `arrayEditor` for simple property array editing. |
 | `src/ui/overlay/quickPick.js` | [quick-pick.md](./quick-pick.md), [ui.md](./ui.md) | Canonical anchored quick filter picker for opaque item collections. |
 | `src/ui/**` | [ui.md](./ui.md) | Generic UI component library and built-in generic panel components. |
+| `src/style/themes/*.css` | [ui.md](./ui.md) | One file per built-in theme; each file owns exactly one `[data-aiditor-theme="<id>"]` token block. |
 | `src/style/**` | [ui.md](./ui.md) | Theme, dock, UI, AI, and settings styles. |
 
 ## AI Runtime

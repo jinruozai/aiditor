@@ -135,7 +135,7 @@ global.window = {
       set: function (key, value) { this.values[key] = value },
     },
     theme: {
-      modeOptions: function () { return [{ value: 'dark', label: 'Dark' }, { value: 'pop', label: 'Pop' }] },
+      modeOptions: function () { return [{ value: 'dark', label: 'Dark' }, { value: 'neon', label: 'Neon' }] },
       set: function (mode) { this.mode = mode },
       setDensity: function (density) { this.density = density },
       exportCss: function () { return ':root{}' },

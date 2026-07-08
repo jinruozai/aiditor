@@ -59,14 +59,18 @@ assert.equal(aiditor.theme.read('--aiditor-brand'), '#569eff')
 const css = aiditor.theme.exportCss(null, ['--aiditor-brand'])
 assert.equal(css, ':root {\n  --aiditor-brand: #569eff;\n}')
 
-const themeCss = readFileSync('src/style/theme.css', 'utf8')
 const uiFormCss = readFileSync('src/style/ui-form.css', 'utf8')
 const themeModes = aiditor.theme.modeIds()
-assert.ok(aiditor.theme.hasMode('pop'))
+const themeSourceFiles = ['src/style/theme.css'].concat(themeModes.map((mode) => 'src/style/themes/' + mode + '.css'))
+const themeCss = themeSourceFiles.map((file) => readFileSync(file, 'utf8')).join('\n')
+assert.ok(aiditor.theme.hasMode('neon'))
 assert.equal(aiditor.theme.hasMode('missing-theme'), false)
 assert.deepEqual(aiditor.theme.modeOptions().map((mode) => mode.value), themeModes)
-assert.equal(aiditor.theme.modeOptions().find((mode) => mode.value === 'pop').label, 'Pop')
-assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'pop').scheme, 'dark')
+assert.equal(aiditor.theme.modeOptions().find((mode) => mode.value === 'neon').label, 'Neon')
+assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'neon').scheme, 'dark')
+for (const mode of themeModes) {
+  assert.ok(themeSourceFiles.includes('src/style/themes/' + mode + '.css'), mode + ' theme file should be listed')
+}
 for (const token of [
   '--aiditor-radius-control',
   '--aiditor-radius-surface',
@@ -113,7 +117,7 @@ for (const token of [
 ]) {
   assert.match(themeCss, new RegExp(token.replace(/-/g, '\\-')))
 }
-for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura', 'pop']) {
+for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura', 'neon']) {
   assert.match(themeCss, new RegExp('data-aiditor-theme="' + mode + '"'))
   for (const token of [
     '--aiditor-surface-canvas',
@@ -133,7 +137,7 @@ for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura', 'pop']) {
   }
 }
 
-const popBlock = themeCss.slice(themeCss.indexOf('data-aiditor-theme="pop"'))
+const neonBlock = themeCss.slice(themeCss.indexOf('data-aiditor-theme="neon"'))
 for (const token of [
   '--aiditor-radius-control',
   '--aiditor-radius-surface',
@@ -160,7 +164,7 @@ for (const token of [
   '--aiditor-button-primary-bg',
   '--aiditor-button-primary-hover-fg',
 ]) {
-  assert.match(popBlock, new RegExp(token.replace(/-/g, '\\-')))
+  assert.match(neonBlock, new RegExp(token.replace(/-/g, '\\-')))
 }
 
 assert.match(uiFormCss, /--aiditor-dock-tab-active-overlay-top/)
@@ -168,15 +172,15 @@ assert.match(uiFormCss, /--aiditor-dock-tab-active-shadow-right/)
 assert.match(uiFormCss, /--aiditor-dock-tab-indicator-bg-vertical/)
 assert.doesNotMatch(uiFormCss, /radial-gradient\(95px 24px/)
 assert.doesNotMatch(uiFormCss, /mask-image: linear-gradient\(to bottom/)
-assert.match(popBlock, /--aiditor-border-w-strong:\s*2px/)
-assert.match(popBlock, /--aiditor-surface-canvas:\s*#00020a/)
-assert.match(popBlock, /--aiditor-surface-panel:\s*#030916/)
-assert.match(popBlock, /--aiditor-stroke-strong:\s*#00eaff/)
-assert.match(popBlock, /--aiditor-dock-tab-active-bg:\s*#facf01/)
-assert.match(popBlock, /--aiditor-dock-tab-indicator-bg:\s*var\(--aiditor-state-warning\)/)
-assert.match(popBlock, /--aiditor-button-bg:\s*linear-gradient\(180deg, #125bff 0%, #0837a8 100%\)/)
-assert.match(popBlock, /--aiditor-button-active-bg:\s*#facf01/)
-assert.match(popBlock, /--aiditor-button-active-fg:\s*#171000/)
+assert.match(neonBlock, /--aiditor-border-w-strong:\s*2px/)
+assert.match(neonBlock, /--aiditor-surface-canvas:\s*#00020a/)
+assert.match(neonBlock, /--aiditor-surface-panel:\s*#030916/)
+assert.match(neonBlock, /--aiditor-stroke-strong:\s*#00eaff/)
+assert.match(neonBlock, /--aiditor-dock-tab-active-bg:\s*#facf01/)
+assert.match(neonBlock, /--aiditor-dock-tab-indicator-bg:\s*var\(--aiditor-state-warning\)/)
+assert.match(neonBlock, /--aiditor-button-bg:\s*linear-gradient\(180deg, #125bff 0%, #0837a8 100%\)/)
+assert.match(neonBlock, /--aiditor-button-active-bg:\s*#facf01/)
+assert.match(neonBlock, /--aiditor-button-active-fg:\s*#171000/)
 
 function themeBlock(mode) {
   const marker = '.aiditor-root[data-aiditor-theme="' + mode + '"] {'

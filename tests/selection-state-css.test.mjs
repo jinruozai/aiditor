@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const theme = readFileSync('src/style/theme.css', 'utf8')
+const theme = readFileSync('src/style/theme.css', 'utf8') + '\n' + readFileSync('src/style/themes/dark.css', 'utf8')
 const data = readFileSync('src/style/ui-data.css', 'utf8')
 const form = readFileSync('src/style/ui-form.css', 'utf8')
 const editor = readFileSync('src/style/ui-editor.css', 'utf8')
@@ -37,5 +37,6 @@ for (const selector of [
 
 assert.ok(editor.includes('.aiditor-ui-anchor-cell.is-active:hover'), 'anchor picker active hover must stay active')
 assert.ok(ai.includes('.aiditor-ai-agent-tree .aiditor-ui-tree-row-active:hover'), 'AI agent tree active hover must stay active')
+assert.match(data, /\.aiditor-ui-tree\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?box-shadow:\s*none;/, 'tree must be a flush data view without card chrome')
 
 console.log('selection state css tests ok')

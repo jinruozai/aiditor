@@ -1,15 +1,16 @@
 // aiditor.ui.colorInput - compact swatch + rich ARGB color picker.
 //
 // opts:
-//   value:     string|int|signal   "#rrggbb", "#aarrggbb", or 24-bit int
+//   value:     string|int|array|signal   "#rrggbb", "#aarrggbb", 24-bit int, vec3, or vec4
 //   onChange?: (v) => void
-//   valueKind?: 'hex' | 'int'      (default 'hex')
+//   valueKind?: 'hex' | 'int' | 'vec3' | 'vec4'      (default 'hex')
+//   valueScale?: 1 | 255           vec component scale; default 1
 //   disabled?: bool|signal
 //
 // The picker works internally as #AARRGGBB so alpha editing is lossless. The
 // public value preserves the existing contract: valueKind:'int' remains 24-bit
-// RGB, while hex values stay #RRGGBB unless alpha is edited or the input already
-// carried alpha.
+// RGB, vec3/vec4 stay RGB/RGBA arrays, while hex values stay #RRGGBB unless
+// alpha is edited or the input already carried alpha.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -17,15 +18,16 @@
 
   ui.colorInput = function (opts) {
     const o = opts || {}
-    const valueKind = o.valueKind === 'int' ? 'int' : 'hex'
-    const sig = ui.asSig(o.value != null ? o.value : (valueKind === 'int' ? 0x7b6ef6 : '#7b6ef6'))
+    const valueKind = normalizeValueKind(o.valueKind)
+    const valueScale = o.valueScale === 255 ? 255 : 1
+    const sig = ui.asSig(o.value != null ? o.value : defaultValue(valueKind, valueScale))
     const disabled = ui.asSig(o.disabled != null ? o.disabled : false)
     const rawWrite = ui.writer(sig, o.onChange, 'ui.colorInput')
     let lastExternal = sig.peek()
     let pop = null
 
     function writeArgb(argb, preferAlpha) {
-      const next = formatForValue(argb, lastExternal, valueKind, preferAlpha)
+      const next = formatForValue(argb, lastExternal, valueKind, preferAlpha, valueScale)
       rawWrite(next)
     }
 
@@ -37,7 +39,7 @@
       disabled: disabled,
       onChange: function (raw) {
         const parsed = parseColor(raw)
-        if (parsed) writeArgb(parsed, alphaOf(parsed) < 255)
+        if (parsed) writeArgb(parsed, hasAlpha(raw) || alphaOf(parsed) < 255)
       },
     })
     text.classList.add('aiditor-ui-color-text')
@@ -49,9 +51,9 @@
     ui.bind(el, disabled, function (v) { el.classList.toggle('aiditor-ui-color-disabled', !!v) })
     ui.bind(el, sig, function (v) {
       lastExternal = v
-      const argb = normalizeColor(v, valueKind)
+      const argb = normalizeColor(v, valueKind, valueScale)
       swatchFill.style.background = argbToRgba(argb)
-      const shown = formatForValue(argb, v, valueKind, alphaOf(argb) < 255 || hasAlpha(v))
+      const shown = formatForDisplay(argb, v, valueKind, alphaOf(argb) < 255 || hasAlpha(v), valueScale)
       const input = text.querySelector('input')
       if (input && document.activeElement !== input) input.value = shown
       if (pop && pop.sync) pop.sync(argb)
@@ -60,7 +62,7 @@
     swatch.addEventListener('click', function () {
       if (disabled.peek()) return
       if (pop) { pop.close(); pop = null; return }
-      pop = openPicker(el, normalizeColor(sig.peek(), valueKind), writeArgb, function () { pop = null })
+      pop = openPicker(el, normalizeColor(sig.peek(), valueKind, valueScale), writeArgb, function () { pop = null })
     })
     ui.collect(el, function () { if (pop) { pop.close(); pop = null } })
     return el
@@ -198,11 +200,8 @@
             nextHsl[ch[0]] = next
             setArgb(hslToArgb(nextHsl.h, nextHsl.s, nextHsl.l, nextHsl.a), true)
           }
-        }))
+        }, state, currentMode))
       }
-      state.valueInputs = Array.prototype.slice.call(valueRow.querySelectorAll('.aiditor-ui-color-channel-input')).map(function (el, index) {
-        return { kind: currentMode, channel: channels[index][0], step: channels[index][4], el: el }
-      })
       updateValueControls()
     }
 
@@ -219,7 +218,7 @@
         else {
           const source = item.kind === 'rgb' ? rgb : hsl
           const value = source[item.channel]
-          item.el.value = item.step < 1 ? String(round2(value)) : String(Math.round(value))
+          if (item.sig) item.sig.set(item.step < 1 ? round2(value) : Math.round(value))
         }
       }
     }
@@ -297,22 +296,22 @@
     return el
   }
 
-  function channelInput(label, value, min, max, step, onChange) {
-    const wrap = ui.h('label', 'aiditor-ui-color-channel')
-    const lab = ui.h('span', 'aiditor-ui-color-channel-label', { text: label })
-    const input = ui.h('input', 'aiditor-ui-color-channel-input', {
-      type: 'number',
-      min: String(min),
-      max: String(max),
-      step: String(step),
+  function channelInput(label, value, min, max, step, onChange, state, mode) {
+    const sig = aiditor.signal(value)
+    const wrap = ui.h('div', 'aiditor-ui-color-channel')
+    const input = ui.numberInput({
+      value: sig,
+      onChange: function (next) {
+        onChange(Math.max(min, Math.min(max, Number(next))))
+      },
+      min: min,
+      max: max,
+      step: step,
+      precision: step < 1 ? 2 : 0,
+      label: label,
     })
-    input.value = step < 1 ? String(round2(value)) : String(Math.round(value))
-    input.addEventListener('input', function () {
-      const n = Number(input.value)
-      if (Number.isFinite(n)) onChange(Math.max(min, Math.min(max, n)))
-    })
-    wrap.appendChild(lab)
     wrap.appendChild(input)
+    state.valueInputs.push({ kind: mode, channel: label, step: step, sig: sig, el: input.querySelector('input') })
     return wrap
   }
 
@@ -370,17 +369,38 @@
     }
     return null
   }
-  function normalizeColor(v, valueKind) {
+  function normalizeValueKind(kind) {
+    return kind === 'int' || kind === 'vec3' || kind === 'vec4' ? kind : 'hex'
+  }
+  function defaultValue(valueKind, scale) {
+    if (valueKind === 'int') return 0x7b6ef6
+    if (valueKind === 'vec3') return scale === 255 ? [123, 110, 246] : [round6(123 / 255), round6(110 / 255), round6(246 / 255)]
+    if (valueKind === 'vec4') return scale === 255 ? [123, 110, 246, 255] : [round6(123 / 255), round6(110 / 255), round6(246 / 255), 1]
+    return '#7b6ef6'
+  }
+  function normalizeColor(v, valueKind, scale) {
     if (valueKind === 'int' && typeof v === 'number') return '#FF' + pad(Math.max(0, Math.min(0xffffff, Math.trunc(v || 0))).toString(16).toUpperCase(), 6)
+    if (valueKind === 'vec3' || valueKind === 'vec4') return vecToArgb(v, valueKind, scale)
     return parseColor(v) || '#FF000000'
   }
-  function formatForValue(argb, original, valueKind, preferAlpha) {
+  function formatForValue(argb, original, valueKind, preferAlpha, scale) {
     const normalized = normalizeColor(argb, 'hex')
     if (valueKind === 'int') return parseInt(normalized.slice(3), 16)
+    if (valueKind === 'vec3' || valueKind === 'vec4') return argbToVec(normalized, original, valueKind, preferAlpha, scale)
     if (!preferAlpha && !hasAlpha(original) && normalized.slice(1, 3).toUpperCase() === 'FF') return '#' + normalized.slice(3)
     return normalized
   }
+  function formatForDisplay(argb, original, valueKind, preferAlpha, scale) {
+    if (valueKind === 'vec3' || valueKind === 'vec4') {
+      const normalized = normalizeColor(argb, 'hex', scale)
+      if (!preferAlpha && valueKind !== 'vec4' && normalized.slice(1, 3).toUpperCase() === 'FF') return '#' + normalized.slice(3)
+      if (valueKind === 'vec4' || preferAlpha || hasAlpha(original)) return normalized
+      return '#' + normalized.slice(3)
+    }
+    return formatForValue(argb, original, valueKind, preferAlpha, scale)
+  }
   function hasAlpha(v) {
+    if (Array.isArray(v)) return v.length >= 4
     if (typeof v !== 'string') return false
     const s = v.trim()
     return /^#[0-9a-f]{8}$/i.test(s) || /^[0-9a-f]{8}$/i.test(s) || /^#[0-9a-f]{4}$/i.test(s)
@@ -395,6 +415,44 @@
       g: parseInt(s.slice(5, 7), 16),
       b: parseInt(s.slice(7, 9), 16),
     }
+  }
+  function vecToArgb(v, valueKind, scale) {
+    const arr = Array.isArray(v) ? v : []
+    return '#'
+      + hex2(vecComponent(arr[3], scale, scale))
+      + hex2(vecComponent(arr[0], 0, scale))
+      + hex2(vecComponent(arr[1], 0, scale))
+      + hex2(vecComponent(arr[2], 0, scale))
+  }
+  function argbToVec(argb, original, valueKind, preferAlpha, scale) {
+    const rgb = argbToRgb(argb)
+    const out = [
+      fromByte(rgb.r, scale),
+      fromByte(rgb.g, scale),
+      fromByte(rgb.b, scale),
+    ]
+    if (valueKind === 'vec4') {
+      const nextAlpha = fromByte(parseInt(normalizeColor(argb, 'hex').slice(1, 3), 16), scale)
+      const originalAlpha = Array.isArray(original) && original.length > 3 ? original[3] : null
+      if (!preferAlpha && originalAlpha != null) {
+        out.push(originalAlpha)
+        return out
+      }
+      const originalByte = originalAlpha == null ? null : vecComponent(originalAlpha, scale, scale)
+      const nextByte = vecComponent(nextAlpha, scale, scale)
+      out.push(originalByte != null && originalByte === nextByte ? originalAlpha : nextAlpha)
+    }
+    return out
+  }
+  function vecComponent(value, fallback, scale) {
+    const n = Number(value)
+    const v = Number.isFinite(n) ? n : fallback
+    return scale === 255
+      ? Math.max(0, Math.min(255, Math.round(v)))
+      : Math.max(0, Math.min(255, Math.round(v * 255)))
+  }
+  function fromByte(value, scale) {
+    return scale === 255 ? Math.max(0, Math.min(255, Math.round(value))) : round6(Math.max(0, Math.min(255, value)) / 255)
   }
   function rgbToArgb(r, g, b, a) {
     return '#' + hex2((Number(a) || 0) * 255) + hex2(r) + hex2(g) + hex2(b)
@@ -452,4 +510,5 @@
   function hex2(v) { return pad(Math.max(0, Math.min(255, Math.round(Number(v) || 0))).toString(16).toUpperCase(), 2) }
   function clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)) }
   function round2(v) { return Math.round((Number(v) || 0) * 100) / 100 }
+  function round6(v) { return Math.round((Number(v) || 0) * 1000000) / 1000000 }
 })(window.aiditor = window.aiditor || {})

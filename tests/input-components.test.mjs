@@ -211,7 +211,17 @@ ui.tag = function (opts) {
 }
 ui.dropzone = function (el, opts) { el.__dropzone = opts; return function () {} }
 ui.dragsource = function (el, opts) { el.__dragsource = opts; return function () {} }
-ui.segmented = function () { return ui.h('div', 'aiditor-ui-segmented') }
+ui.segmented = function (opts) {
+  const el = ui.h('div', 'aiditor-ui-seg')
+  const value = opts && opts.value
+  const options = opts && opts.options || []
+  options.forEach(function (option) {
+    const btn = ui.h('button', 'aiditor-ui-seg-btn', { type: 'button', text: option.label || option.value })
+    btn.addEventListener('click', function () { if (value && value.set) value.set(option.value) })
+    el.appendChild(btn)
+  })
+  return el
+}
 ui.attachDrag = function () { return function () {} }
 ui.popover = function (opts) {
   document.body.appendChild(opts.content)
@@ -476,6 +486,38 @@ function contextmenu(el, target, extra) {
 }
 
 {
+  const changed = []
+  const targets = aiditor.signal([{ name: 'custom', compact: 'changed' }])
+  const form = ui.propertyForm({
+    targets,
+    defaults: { name: 'default', compact: 'base' },
+    schema: {
+      name: { type: 'string', label: 'Name' },
+      compact: { type: 'string', label: false },
+    },
+    onChange: function (field, value, editedTargets, meta) {
+      changed.push({ field, value, mode: meta.change.mode })
+      targets.set(editedTargets.map(function (item) {
+        const next = Object.assign({}, item)
+        next[field] = value
+        return next
+      }))
+    },
+  })
+  const rows = form.querySelectorAll('.aiditor-ui-struct-input-row')
+  assert.equal(rows[0].classList.contains('aiditor-ui-struct-input-row-has-label-actions'), true)
+  assert.equal(rows[1].classList.contains('aiditor-ui-struct-input-row-label-hidden'), true)
+  assert.equal(rows[1].classList.contains('aiditor-ui-struct-input-row-has-label-actions'), true)
+  assert.equal(rows[0].children[0].classList.contains('aiditor-ui-struct-input-label'), true)
+  assert.equal(rows[0].children[0].querySelectorAll('.aiditor-ui-icon-btn').length, 1)
+  assert.equal(rows[0].children[1].querySelectorAll('.aiditor-ui-icon-btn').length, 0)
+  assert.equal(rows[1].children[0].querySelectorAll('.aiditor-ui-icon-btn').length, 1)
+  rows[0].children[0].querySelector('.aiditor-ui-icon-btn').click()
+  assert.deepEqual(changed[0], { field: 'name', value: 'default', mode: 'path' })
+  assert.equal(targets.peek()[0].name, 'default')
+}
+
+{
   commandRuns.length = 0
   openedMenus.length = 0
   const seen = []
@@ -672,7 +714,7 @@ function contextmenu(el, target, extra) {
   })
   const row = form.querySelector('.aiditor-ui-struct-input-row')
   assert.equal(row.classList.contains('aiditor-ui-struct-input-row-layout-block'), true)
-  assert.equal(row.children[0].textContent, 'Transform')
+  assert.equal(row.children[0].querySelector('.aiditor-ui-struct-input-label-text').textContent, 'Transform')
   assert.equal(row.children[1].classList.contains('aiditor-ui-struct-input-cell'), true)
   assert.ok(row.children[1].querySelector('.aiditor-ui-struct-input'))
   assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
@@ -721,7 +763,42 @@ function contextmenu(el, target, extra) {
 }
 
 {
+  assert.equal(ui.resolveType('vec2').base_type, 'struct')
+  assert.equal(ui.resolveType('vec3').type_render, 'vector')
+  assert.deepEqual(ui.resolveType('vec4').default, [0, 0, 0, 0])
+  assert.deepEqual(Object.keys(ui.resolveType('vec3').struct_def), ['x', 'y', 'z'])
+  assert.deepEqual(ui.resolveType('vec2').support_render, ['vector', 'struct'])
+  assert.deepEqual(ui.resolveType('vec3').support_render, ['vector', 'struct', 'color'])
+  assert.deepEqual(ui.resolveType('vec4').support_render, ['vector', 'struct', 'color'])
+  assert.equal(ui.resolveFieldDef({ type: 'vec3', type_render: 'color' }).type_agv.valueKind, 'vec3')
+  assert.equal(ui.resolveFieldDef({ type: 'vec4', type_render: 'color' }).type_agv.valueKind, 'vec4')
+}
+
+{
   assert.deepEqual(ui.resolveType('dict').default, {})
+}
+
+{
+  const value = aiditor.signal([1, 2, 3])
+  const writes = []
+  const el = ui.editorFor({ type: 'vec3' }, value, function (next) { writes.push(next); value.set(next) })
+  assert.equal(el.classList.contains('aiditor-ui-vec'), true)
+  const inputs = el.querySelectorAll('input')
+  assert.equal(inputs.length, 3)
+  assert.equal(inputs[0].value, '1.00')
+  assert.equal(inputs[1].value, '2.00')
+  assert.equal(inputs[2].value, '3.00')
+  el.querySelectorAll('.aiditor-ui-num')[1].dispatch('dblclick', { target: inputs[1] })
+  inputs[1].value = '8'
+  key(inputs[1], 'Enter')
+  assert.deepEqual(writes.at(-1), [1, 8, 3])
+  assert.deepEqual(value.peek(), [1, 8, 3])
+}
+
+{
+  const value = aiditor.signal([1, 2, 3])
+  const el = ui.editorFor({ type: 'vec3', type_render: 'struct' }, value)
+  assert.equal(el.classList.contains('aiditor-ui-struct-input'), true)
 }
 
 {
@@ -1083,6 +1160,69 @@ function contextmenu(el, target, extra) {
   })
   assert.ok(addFavorite)
   assert.doesNotThrow(function () { addFavorite.click() })
+  const modeButtons = document.body.querySelectorAll('.aiditor-ui-seg-btn')
+  modeButtons[1].click()
+  assert.equal(document.body.querySelectorAll('.aiditor-ui-color-channel-input').length, 0)
+  const channels = document.body.querySelectorAll('.aiditor-ui-color-channel')
+  assert.equal(channels.length, 4)
+  assert.equal(channels.filter(function (channel) { return !!channel.querySelector('.aiditor-ui-num') }).length, 4)
+}
+
+{
+  const value = aiditor.signal([1, 0.5, 0])
+  const el = ui.colorInput({ value, valueKind: 'vec3' })
+  const input = el.querySelector('.aiditor-ui-color-text').querySelector('input')
+  assert.equal(input.value, '#FF8000')
+  input.value = '#336699'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(value.peek(), [0.2, 0.4, 0.6])
+}
+
+{
+  const value = aiditor.signal([1, 0, 0, 0.5])
+  const el = ui.colorInput({ value, valueKind: 'vec4' })
+  const input = el.querySelector('.aiditor-ui-color-text').querySelector('input')
+  assert.equal(input.value, '#80FF0000')
+  input.value = '#336699'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(value.peek(), [0.2, 0.4, 0.6, 0.5])
+  input.value = '#40336699'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(value.peek(), [0.2, 0.4, 0.6, 0.25098])
+}
+
+{
+  const value = aiditor.signal([255, 128, 0])
+  const el = ui.colorInput({ value, valueKind: 'vec3', valueScale: 255 })
+  const input = el.querySelector('.aiditor-ui-color-text').querySelector('input')
+  assert.equal(input.value, '#FF8000')
+  input.value = '#336699'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(value.peek(), [51, 102, 153])
+}
+
+{
+  const value = aiditor.signal([0, 128, 255, 64])
+  const el = ui.editorFor({
+    type: 'var',
+    type_render: 'color',
+    type_agv: { valueKind: 'vec4', valueScale: 255 },
+  }, value)
+  const input = el.querySelector('.aiditor-ui-color-text').querySelector('input')
+  assert.equal(input.value, '#400080FF')
+  input.value = '#80336699'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(value.peek(), [51, 102, 153, 128])
+}
+
+{
+  const value = aiditor.signal([1, 0, 0])
+  const el = ui.editorFor({ type: 'vec3', type_render: 'color' }, value)
+  const input = el.querySelector('.aiditor-ui-color-text').querySelector('input')
+  assert.equal(input.value, '#FF0000')
+  input.value = '#336699'
+  input.dispatch('input', { target: input })
+  assert.deepEqual(value.peek(), [0.2, 0.4, 0.6])
 }
 
 {
@@ -1106,6 +1246,21 @@ function contextmenu(el, target, extra) {
     css,
     /\.aiditor-ui-struct-input-label\[data-has-tip\]\s*{[^}]*cursor:/s,
     'tooltip markers should not change the mouse cursor'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-color-picker\s*{[^}]*width:\s*330px;/s,
+    'color picker should provide enough width for four standard channel editors'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-color-sv\s*{[^}]*height:\s*195px;/s,
+    'color picker saturation/value plane should scale with the wider picker'
+  )
+  assert.doesNotMatch(
+    css,
+    /\.aiditor-ui-color-channel-input\s*{/,
+    'color channels should use standard numberInput, not a custom raw input'
   )
 }
 
