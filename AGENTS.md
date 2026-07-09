@@ -295,11 +295,13 @@ aiditor/
 这些是和用户反复讨论后定下的,**不要再改**。如果觉得某条不对,先问用户,不要自作主张。
 
 ### 4.1 Split 角拖语义
-分裂逻辑是**统一**的 —— 看来源 dock 的 active panel:
-- **有 active**:新 dock 初始 panel 用同样的 component 类型 + 注册表的 `defaults()` 拿默认参数(**不是**克隆 active panel 的状态),panel id 框架生成
+分裂逻辑是**统一**的 —— 新 dock 是来源 dock 当前工作面的新视图:
+- **有 active**:新 dock 初始 panel 克隆来源 dock 的 active `PanelData` 可序列化状态,但生成新的 panel id。也就是复制 `component`、`title/icon/dirty/badge`、`props`、`sourcePath/owner/extensionId`、`toolbarItems` 等数据,不复制 DOM/runtime。
 - **无 active**(panels 为空):新 dock 也是空 `{ panels: [], activeId: null }`
 
-也就是说,如果 active panel 是一个打开了 `foo.ts` 的 monaco 编辑器,新 dock 出来的是一个**空白的** monaco 编辑器,不是另一个打开 `foo.ts` 的副本。这对齐 Blender 的语义(分割 area 后两半都是同类型编辑器但状态独立)。空 dock 分裂出空 dock 是这条规则的自然结果,不是特殊情况。
+来源 dock 的外壳配置也会复制到新 dock: `toolbar`、`accept`、`removeWhenEmpty:false`。不复制 `name`、`collapsed`、`focused`,避免稳定锚点冲突和显示状态泄漏。
+
+也就是说,如果 active panel 是打开了 `foo.ts` 的编辑器,新 dock 出来的是另一个打开同一 `foo.ts` 的编辑器视图;如果 active panel 是打开了 `cube` 场景的 scene panel,新 dock 默认也是打开 `cube` 场景。它和 tab 拖拽不同:tab 拖拽是移动同一个 panel/runtime,角拖 split 是用同一份可序列化 PanelData 创建新的 panel/runtime。
 
 ### 4.2 Merge 语义
 合并时**直接吞并**,被吞 dock 的所有 panels 默认**直接丢弃**。winner dock 保持自己的 panels 和 active 不变,只是面积扩大。这是 Blender-correct 的 —— merge 不是数据合并,是几何吞并。
@@ -708,7 +710,7 @@ ctx.panel = {
 | `updateDock` | `(tree, dockId, patch)` | `tree` | 浅合并 DockData(排除 panels / activeId) |
 | `setCollapsed` | `(tree, dockId, bool)` | `tree` | |
 | `setFocused` | `(tree, dockId, bool)` | `tree` | 置 true 时自动清其他 dock 的 `focused` |
-| `splitDock` | `(tree, dockId, direction, side, ratio?, opts?)` | `{ tree, newDockId, newPanelId? }` | `side: 'before' \| 'after'`;`ratio ∈ (0,1)`,默认 0.5;新 dock 按 § 4.1 初始化(active component 的 defaults 或空) |
+| `splitDock` | `(tree, dockId, direction, side, ratio?, opts?)` | `{ tree, newDockId, newPanelId? }` | `side: 'before' \| 'after'`;`ratio ∈ (0,1)`,默认 0.5;runtime 默认按 § 4.1 传入 cloned active PanelData 和 dock shell;纯函数只消费 `opts.dock` / `opts.seedPanels` |
 | `mergeDocks` | `(tree, winnerId, loserId)` | `{ tree, discardedPanels }` | 仅允许直接兄弟(§ 4.2);dirty 检查由调用方(`interactions.js`)做 |
 | `resizeAt` | `(tree, splitPath, newSizes)` | `tree` | 直接改某个 split 的 sizes |
 | `swapDocks` | `(tree, dockA, dockB)` | `tree` | 整个 DockData 对换位置(面板全跟着走) |

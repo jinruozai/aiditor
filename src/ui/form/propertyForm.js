@@ -18,6 +18,8 @@
 //   fieldActions?:(fieldCtx) => UiAction[]            optional per-field row actions
 //   fieldContextActions?:(fieldCtx) => UiAction[]|Promise<UiAction[]>
 //                                                     optional per-field context-menu actions
+//   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
+//                                                     filepath/img/snd editors
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -56,6 +58,7 @@
    * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
    * @param {Function} opts.fieldActions - Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions.
    * @param {Function} opts.fieldContextActions - Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>.
+   * @param {Function} opts.filePathActions - Optional UiAction factory appended to file path input menus.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -78,6 +81,7 @@
     const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
     const fieldActions = typeof o.fieldActions === 'function' ? o.fieldActions : null
     const fieldContextActions = typeof o.fieldContextActions === 'function' ? o.fieldContextActions : null
+    const filePathActions = typeof o.filePathActions === 'function' ? o.filePathActions : null
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const ctx       = o.ctx
@@ -156,7 +160,7 @@
             contextActions: action.contextActions,
             contextCtx: action.ctx,
             editor:  function (slotSig, write, innerCtx) {
-              return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd,
+              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
           }
@@ -231,7 +235,12 @@
       const contextActions = fieldContextActions
         ? function (currentCtx) { return fieldContextActions(currentCtx) }
         : null
-      return { actions: actions, ctx: actionCtx, contextActions: contextActions }
+      const pathActions = filePathActions
+        ? function (inputCtx) {
+          return filePathActions(Object.assign({}, actionCtx.peek ? actionCtx.peek() : actionCtx(), inputCtx || {}))
+        }
+        : null
+      return { actions: actions, ctx: actionCtx, contextActions: contextActions, filePathActions: pathActions }
     }
 
     function resetActionSignal(field, defaults) {
@@ -342,6 +351,16 @@
     const base = typeof ctx === 'function' ? ctx(field) : ctx
     const out = Object.assign({}, base || {})
     out.fieldPath = out.fieldPath || field
+    return out
+  }
+
+  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions) {
+    const out = fieldCtx(ctx, field)
+    out.field = field
+    out.label = label && label.value || field
+    out.rawField = raw
+    out.resolvedField = resolved
+    if (filePathActions) out.filePathActions = filePathActions
     return out
   }
 

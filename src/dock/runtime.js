@@ -75,7 +75,11 @@
 
     layout.addPanelToSplit = function (dockId, direction, side, ratio, partial) {
       if (layout.disposed) return { newDockId: null, newPanelId: null }
-      const r = aiditor.splitDock(treeSig.peek(), dockId, direction, side, ratio, { seedPanels: [partial] })
+      const current = treeSig.peek()
+      const shell = aiditor._dock.computeSplitDockShell
+        ? aiditor._dock.computeSplitDockShell(current, dockId)
+        : {}
+      const r = aiditor.splitDock(current, dockId, direction, side, ratio, { dock: shell, seedPanels: [partial] })
       layout.setTree(r.tree)
       layout.markActivation(r.newPanelId)
       maybeEvictLRU(layout)

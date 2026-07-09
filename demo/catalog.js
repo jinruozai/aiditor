@@ -546,18 +546,19 @@
     },
 
     {
-      id: 'assetPicker', name: 'Asset Picker', category: 'editor',
-      description: 'Path + preview thumbnail. Drag in files / URLs; drag out to export.',
+      id: 'filePathInput', name: 'File Path Input', category: 'editor',
+      description: 'Path string input with image preview, audio play, file filtering, and drag/drop.',
       signals: function () { return {
         value: aiditor.signal('https://picsum.photos/seed/aiditor/120'),
         kind:  aiditor.signal('image'),
       }},
-      mount: function (s) { return ui.assetPicker({ value: s.value, kind: s.kind.peek() }) },
+      mount: function (s) { return ui.filePathInput({ value: s.value, kind: s.kind.peek() }) },
       editFor: function (s) { return {
         value: s.value,
         kind:  { signal: s.kind, options: [
           { value: 'image', label: 'image' },
           { value: 'audio', label: 'audio' },
+          { value: 'text',  label: 'text'  },
           { value: 'file',  label: 'file'  },
         ]},
       }},

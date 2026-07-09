@@ -696,6 +696,11 @@
           "description": "Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>."
         },
         {
+          "type": "Function",
+          "name": "opts.filePathActions",
+          "description": "Optional UiAction factory appended to file path input menus."
+        },
+        {
           "type": "boolean",
           "name": "opts.requireAllTargets",
           "description": "When true, disable fields missing from any target."

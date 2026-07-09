@@ -4312,8 +4312,8 @@
 
   // movePanelToSplit — remove an existing panel, split a target dock, and
   // place that same PanelData into the newly-created dock. Used by tab drag
-  // five-zone docking. Unlike splitDock's "new editor of same type" seed,
-  // this preserves the moved panel id/data so runtime can re-home its DOM.
+  // five-zone docking. This preserves the moved panel id/data so runtime can
+  // re-home its DOM; dock split cloning creates a fresh panel id instead.
   function movePanelToSplit(tree, panelId, dstDockId, direction, side, ratio) {
     const found = findPanel(tree, panelId)
     if (!found) return { tree: tree, newDockId: null }
@@ -4346,11 +4346,11 @@
   }
 
   // ─── split / merge ────────────────────────────────────────
-  // splitDock — insert a NEW empty dock alongside the target along `direction`.
-  // The new dock is empty (panels: []). The runtime layer is responsible for
-  // post-seeding it with a default panel (per § 4.1, using component defaults of
-  // the source dock's active panel) — splitDock takes optional opts.seedPanels
-  // to let the runtime pass that in.
+  // splitDock — insert a NEW dock alongside the target along `direction`.
+  // The pure tree layer stays data-only: callers decide the dock shell and
+  // optional seedPanels. The dock runtime's default seed clones the source
+  // dock's active PanelData with fresh ids, so split views open the same
+  // resource without sharing DOM/runtime.
   //
   // Returns { tree, newDockId, newPanelId? }. newPanelId is set only when
   // seedPanels was provided.
@@ -4934,7 +4934,11 @@
 
     layout.addPanelToSplit = function (dockId, direction, side, ratio, partial) {
       if (layout.disposed) return { newDockId: null, newPanelId: null }
-      const r = aiditor.splitDock(treeSig.peek(), dockId, direction, side, ratio, { seedPanels: [partial] })
+      const current = treeSig.peek()
+      const shell = aiditor._dock.computeSplitDockShell
+        ? aiditor._dock.computeSplitDockShell(current, dockId)
+        : {}
+      const r = aiditor.splitDock(current, dockId, direction, side, ratio, { dock: shell, seedPanels: [partial] })
       layout.setTree(r.tree)
       layout.markActivation(r.newPanelId)
       maybeEvictLRU(layout)
@@ -6243,7 +6247,7 @@
 // Dock interactions — splitter drag + corner drag (split / merge).
 //
 //   1. Splitter drag      → resizeAt
-//   2. Corner drag inward → splitDock (new empty dock)
+//   2. Corner drag inward → splitDock (new dock seeded from active panel)
 //   3. Corner drag outward to a sibling → mergeDocks
 //
 // Drag gestures mutate `flex` styles directly during the gesture and only
@@ -6450,11 +6454,13 @@
         if (mode === 'split-h') {
           const side = corner.charAt(1) === 'l' ? 'before' : 'after'
           const seed = aiditor._dock.computeSplitSeed(t, dockId)
-          treeSig.set(aiditor.splitDock(t, dockId, 'horizontal', side, ratio, { seedPanels: seed }).tree)
+          const shell = aiditor._dock.computeSplitDockShell(t, dockId)
+          treeSig.set(aiditor.splitDock(t, dockId, 'horizontal', side, ratio, { dock: shell, seedPanels: seed }).tree)
         } else if (mode === 'split-v') {
           const side = corner.charAt(0) === 't' ? 'before' : 'after'
           const seed = aiditor._dock.computeSplitSeed(t, dockId)
-          treeSig.set(aiditor.splitDock(t, dockId, 'vertical', side, ratio, { seedPanels: seed }).tree)
+          const shell = aiditor._dock.computeSplitDockShell(t, dockId)
+          treeSig.set(aiditor.splitDock(t, dockId, 'vertical', side, ratio, { dock: shell, seedPanels: seed }).tree)
         } else if (mode === 'merge') {
           // § 4.2 dirty check via layout hook
           const r = aiditor.mergeDocks(t, dockId, mergeTargetId)
@@ -7280,9 +7286,10 @@
 
       splitDock: function (dockId, dir, side, ratio, opts) {
         if (layout.disposed) return { newDockId: null, newPanelId: null }
-        // § 4.1 — seed new dock from active panel component defaults.
-        const seed = computeSplitSeed(tree.peek(), dockId)
-        const r = aiditor.splitDock(tree.peek(), dockId, dir, side, ratio, { seedPanels: seed })
+        const current = tree.peek()
+        const seed = opts && opts.seedPanels ? opts.seedPanels : computeSplitSeed(current, dockId)
+        const shell = opts && opts.dock ? opts.dock : computeSplitDockShell(current, dockId)
+        const r = aiditor.splitDock(current, dockId, dir, side, ratio, { dock: shell, seedPanels: seed })
         layout.setTree(r.tree)
         return { newDockId: r.newDockId, newPanelId: r.newPanelId }
       },
@@ -7342,18 +7349,38 @@
     return hit
   }
 
-  // Compute seedPanels for a split — § 4.1: same component as source's active
-  // panel + that component's defaults. Empty source dock → empty new dock.
+  // Compute seedPanels for a split — § 4.1: clone the source dock's active
+  // PanelData as serializable state, with fresh ids assigned by tree.panel().
+  // Empty source dock → empty new dock.
   function computeSplitSeed(tree, srcDockId) {
     const f = aiditor.findDock(tree, srcDockId)
     if (!f || !f.node.activeId) return null
     const active = f.node.panels.find(function (p) { return p.id === f.node.activeId })
     if (!active) return null
-    const defaults = aiditor.componentDefaults(active.component)
-    return [Object.assign({}, defaults, { component: active.component })]
+    return [clonePanelInput(active)]
+  }
+
+  function clonePanelInput(panel) {
+    const out = Object.assign({}, panel)
+    delete out.id
+    if (panel.props) out.props = structuredClone(panel.props)
+    if (panel.toolbarItems) out.toolbarItems = structuredClone(panel.toolbarItems)
+    return out
+  }
+
+  function computeSplitDockShell(tree, srcDockId) {
+    const f = aiditor.findDock(tree, srcDockId)
+    if (!f) return {}
+    const dock = f.node
+    const shell = {}
+    if (dock.toolbar) shell.toolbar = structuredClone(dock.toolbar)
+    if (dock.accept != null) shell.accept = structuredClone(dock.accept)
+    if (dock.removeWhenEmpty === false) shell.removeWhenEmpty = false
+    return shell
   }
 
   aiditor.createDockLayout = createDockLayout
   aiditor._dock = aiditor._dock || {}
   aiditor._dock.computeSplitSeed = computeSplitSeed
+  aiditor._dock.computeSplitDockShell = computeSplitDockShell
 })(window.aiditor = window.aiditor || {})

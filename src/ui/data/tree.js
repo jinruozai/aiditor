@@ -412,7 +412,7 @@
       // Opt-in HTML5 drag source. Coexists with tree.dnd (pointer-based
       // row reordering): the two listen to disjoint event families and
       // the browser routes them independently. Use case: cross-component
-      // transfers (entity drag-out → asset picker / ref_id / external).
+      // transfers (entity drag-out → file path input / ref_id / external).
       if (typeof o.rowDragSource === 'function') {
         const payload = o.rowDragSource(row.node, row)
         if (payload) ui.dragsource(rowEl, { getData: function () { return payload } })

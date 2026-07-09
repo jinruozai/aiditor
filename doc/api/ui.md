@@ -66,6 +66,7 @@ aiditor.ui.propertyForm(opts)
 | `opts.groupActionCtx` | `Function` | Optional mapper for the context passed to group actions. |
 | `opts.fieldActions` | `Function` | Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions. |
 | `opts.fieldContextActions` | `Function` | Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>. |
+| `opts.filePathActions` | `Function` | Optional UiAction factory appended to file path input menus. |
 | `opts.requireAllTargets` | `boolean` | When true, disable fields missing from any target. |
 | `opts.canEdit` | `Function` | Optional field gate: (field, targets, rawField) => boolean. |
 

@@ -267,7 +267,7 @@ for (const file of [
   'src/ui/inspector.js',
   'src/ui/form/propertyList.js',
   'src/ui/editor/codeInput.js',
-  'src/ui/editor/assetPicker.js',
+  'src/ui/editor/filePathInput.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -1128,15 +1128,19 @@ function contextmenu(el, target, extra) {
 
 {
   const value = aiditor.signal('')
-  const el = ui.assetPicker({ value })
-  el.querySelector('.aiditor-ui-asset-preview').click()
+  const el = ui.filePathInput({ value, kind: 'image' })
+  assert.equal(el.__dropzone.canDrop({ types: ['Files'], fileMimes: ['image/png'] }), true)
+  assert.equal(el.__dropzone.canDrop({ types: ['Files'], fileMimes: ['application/pdf'] }), false)
+  assert.equal(el.__dropzone.canDrop({ types: ['Files'], files: [{ name: 'one.png', type: 'image/png' }] }), true)
+  assert.equal(el.__dropzone.canDrop({ types: ['Files'], files: [{ name: 'doc.pdf', type: 'application/pdf' }] }), false)
+  el.querySelector('.aiditor-ui-file-path-preview').click()
   let fileInput = created.filter(function (item) { return item.localName === 'input' && item.type === 'file' }).pop()
   fileInput.files = [{ name: 'one.png', type: 'image/png' }]
   fileInput.dispatch('change', { target: fileInput })
   assert.equal(value.peek(), 'blob:one.png:1')
   assert.deepEqual(revoked, [])
 
-  el.querySelector('.aiditor-ui-asset-preview').click()
+  el.querySelector('.aiditor-ui-file-path-preview').click()
   fileInput = created.filter(function (item) { return item.localName === 'input' && item.type === 'file' }).pop()
   fileInput.files = [{ name: 'two.png', type: 'image/png' }]
   fileInput.dispatch('change', { target: fileInput })
@@ -1145,6 +1149,55 @@ function contextmenu(el, target, extra) {
 
   ui.dispose(el)
   assert.deepEqual(revoked, ['blob:one.png:1', 'blob:two.png:2'])
+}
+
+{
+  openedMenus.length = 0
+  const actions = []
+  const value = aiditor.signal('project://sound/theme.ogg')
+  const el = ui.filePathInput({
+    value,
+    kind: 'audio',
+    onAction: function (ctx) { actions.push(ctx.action + ':' + ctx.value) },
+    actions: function (ctx) {
+      return [{
+        id: 'showInFiles',
+        label: 'Show in Files',
+        icon: 'folder',
+        onSelect: function () { actions.push('show:' + ctx.value + ':' + ctx.directory) },
+      }]
+    },
+  })
+  el.querySelector('.aiditor-ui-file-path-actions').click()
+  assert.equal(openedMenus.length, 1)
+  assert.equal(openedMenus[0].items[0].label, 'Load')
+  assert.equal(openedMenus[0].items[1].label, 'Clear')
+  assert.equal(openedMenus[0].items[3].label, 'Show in Files')
+
+  openedMenus[0].items[3].onSelect()
+  assert.deepEqual(actions, ['show:project://sound/theme.ogg:project://sound'])
+
+  openedMenus[0].items[1].onSelect()
+  assert.equal(value.peek(), '')
+  assert.equal(actions[1], 'clear:')
+}
+
+{
+  let browseCtx = null
+  const value = aiditor.signal('project://textures/wall.png')
+  const el = ui.filePathInput({
+    value,
+    kind: 'image',
+    onBrowse: function (_current, ctx) {
+      browseCtx = ctx
+      return 'project://textures/floor.png'
+    },
+  })
+  el.querySelector('.aiditor-ui-file-path-actions').click()
+  openedMenus[openedMenus.length - 1].items[0].onSelect()
+  assert.equal(value.peek(), 'project://textures/floor.png')
+  assert.equal(browseCtx.action, 'load')
+  assert.equal(browseCtx.directory, 'project://textures')
 }
 
 {

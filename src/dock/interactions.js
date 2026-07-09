@@ -1,7 +1,7 @@
 // Dock interactions — splitter drag + corner drag (split / merge).
 //
 //   1. Splitter drag      → resizeAt
-//   2. Corner drag inward → splitDock (new empty dock)
+//   2. Corner drag inward → splitDock (new dock seeded from active panel)
 //   3. Corner drag outward to a sibling → mergeDocks
 //
 // Drag gestures mutate `flex` styles directly during the gesture and only
@@ -208,11 +208,13 @@
         if (mode === 'split-h') {
           const side = corner.charAt(1) === 'l' ? 'before' : 'after'
           const seed = aiditor._dock.computeSplitSeed(t, dockId)
-          treeSig.set(aiditor.splitDock(t, dockId, 'horizontal', side, ratio, { seedPanels: seed }).tree)
+          const shell = aiditor._dock.computeSplitDockShell(t, dockId)
+          treeSig.set(aiditor.splitDock(t, dockId, 'horizontal', side, ratio, { dock: shell, seedPanels: seed }).tree)
         } else if (mode === 'split-v') {
           const side = corner.charAt(0) === 't' ? 'before' : 'after'
           const seed = aiditor._dock.computeSplitSeed(t, dockId)
-          treeSig.set(aiditor.splitDock(t, dockId, 'vertical', side, ratio, { seedPanels: seed }).tree)
+          const shell = aiditor._dock.computeSplitDockShell(t, dockId)
+          treeSig.set(aiditor.splitDock(t, dockId, 'vertical', side, ratio, { dock: shell, seedPanels: seed }).tree)
         } else if (mode === 'merge') {
           // § 4.2 dirty check via layout hook
           const r = aiditor.mergeDocks(t, dockId, mergeTargetId)

@@ -109,6 +109,17 @@ Implemented runtime abilities:
 Inactive panels should be detached from DOM, not hidden with CSS, so heavy
 panels do not keep layout and paint cost.
 
+Splitting a dock creates a new dock view from the source dock's current active
+panel. The runtime clones the active panel's serializable `PanelData` and lets
+the tree layer assign a fresh panel id. `props`, title, icon, source metadata,
+dirty/badge state, and dynamic toolbar item records are preserved; DOM nodes and
+component runtime objects are not shared. The source dock's shell options
+`toolbar`, `accept`, and `removeWhenEmpty:false` are copied to the new dock.
+`name`, `collapsed`, and `focused` are not copied.
+
+This makes corner splitting a "same resource, new view" operation. Tab dragging
+remains the operation that moves an existing panel/runtime between docks.
+
 Dock reconcile patches the dock/split frame skeleton in place. Local changes
 such as tab activation or panel promotion must not replace the whole layout
 container or temporarily disconnect unrelated docks. Active panel content is
@@ -518,6 +529,35 @@ arrays, even though the picker uses `#AARRGGBB` internally. `type_agv.valueScale
 may be `1` for normalized components or `255` for byte components. For `vec4`,
 editing a 6-digit RGB text value preserves the existing alpha; alpha changes
 only when the input/picker provides alpha.
+
+File path fields use `type_render: "filepath"` and write a plain string path or
+URL. The renderer uses `aiditor.ui.filePathInput`, which provides a path text
+field, browse/drop entry points, `accept` filtering for native file selection
+and drag affordance, and a leading kind-specific control. `kind: "image"` shows
+an image preview, `kind: "audio"` shows a play/pause control, and `kind:
+"text"` / `"file"` show neutral file icons. `img` and `snd` are shorthand
+renderers for `filepath` with `kind: "image"` and `kind: "audio"`.
+
+`filePathInput` is not a file importer and not an asset database. Hosts that
+need workspace/project paths provide `resolveSrc(path)` for preview/playback,
+`onBrowse(current)` for their picker, and `onFile(file, current)` for import.
+If `onFile` is omitted, dropped or browsed browser `File` objects are converted
+to temporary object URLs for demo-style use; persistent applications should
+return their own stable path string from `onFile`.
+
+The trailing menu on `filePathInput` only includes actions the component can
+perform itself: Load and Clear. Load calls the same browse path as the preview
+click and passes `onBrowse(current, ctx)`, where `ctx.directory` is the current
+path's parent directory hint for desktop/FSA hosts. Clear writes an empty
+string.
+
+Host-specific actions such as Save As or Show in Files are injected explicitly
+as UiAction records. At the form level, use `propertyForm({ filePathActions })`
+or an Inspector provider's `inspection.filePathActions(fieldCtx)` to append
+project actions to every `filepath` / `img` / `snd` field without adding
+per-field schema noise. The framework renders the menu and runs UiActions; the
+host owns file manager reveal, desktop save dialogs, downloads, and permission
+policy.
 
 Schema-driven value edits should propagate as path changes. `propertyForm`
 starts the path with the top-level schema key, and nested renderers append their

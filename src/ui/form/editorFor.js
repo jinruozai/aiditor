@@ -10,12 +10,12 @@
 // (ui.registerRenderer / ui.getRenderer). Built-in renderers registered here
 // are thin adapters between a ResolvedFieldDef + sig and a ui.* primitive;
 // they do NOT touch ctx. Domain-specific behavior (cross-table navigation on
-// ref_id, custom asset pickers, …) belongs in caller-registered overrides.
+// ref_id, project file import, …) belongs in caller-registered overrides.
 //
 // Each renderer receives { fieldDef, sig, write, ctx } and returns an
 // HTMLElement. Built-ins: input_string | textarea | input_int | input_float
-// | range | enum | toggle | color | vector | date | img | snd | id | ref_id | struct
-// | array | array_editor.
+// | range | enum | toggle | color | vector | date | filepath | img | snd | id
+// | ref_id | struct | array | array_editor.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -156,25 +156,32 @@
   ui.registerRenderer('date', function (a) {
     return ui.dateInput({ value: a.sig, onChange: a.write })
   })
-  ui.registerRenderer('img', function (a) {
+
+  function filePathEditor(a, defaults) {
     const agv = a.fieldDef.type_agv || {}
-    return ui.assetPicker({
+    const fileKind = agv.kind || defaults.kind
+    const accept = agv.accept || defaults.accept
+    return ui.filePathInput({
       value:       a.sig,
       onChange:    a.write,
-      kind:        'image',
-      accept:      agv.accept || '.png,.jpg,.jpeg,.gif,.webp',
+      kind:        fileKind,
+      accept:      accept,
       placeholder: agv.placeholder || agv.suffix || '',
+      actions: function (inputCtx) {
+        const fn = a.ctx && a.ctx.filePathActions
+        if (typeof fn === 'function') return fn(filePathActionCtx(a, inputCtx, fileKind, accept))
+        return Array.isArray(agv.actions) ? agv.actions : []
+      },
     })
+  }
+  ui.registerRenderer('filepath', function (a) {
+    return filePathEditor(a, { kind: 'file', accept: '' })
+  })
+  ui.registerRenderer('img', function (a) {
+    return filePathEditor(a, { kind: 'image', accept: '.png,.jpg,.jpeg,.gif,.webp' })
   })
   ui.registerRenderer('snd', function (a) {
-    const agv = a.fieldDef.type_agv || {}
-    return ui.assetPicker({
-      value:       a.sig,
-      onChange:    a.write,
-      kind:        'audio',
-      accept:      agv.accept || '.mp3,.wav,.ogg',
-      placeholder: agv.placeholder || agv.suffix || '',
-    })
+    return filePathEditor(a, { kind: 'audio', accept: '.mp3,.wav,.ogg' })
   })
   ui.registerRenderer('id', function (a) {
     return ui.input({ value: a.sig, readOnly: true })
@@ -384,6 +391,22 @@
       ? aiditor.inspector.pathChange(fieldPath, value)
       : { field: fieldPath, mode: 'path', value: value }
     return Object.assign({}, meta || {}, { change: change })
+  }
+
+  function filePathActionCtx(a, inputCtx, kind, accept) {
+    const path = readFieldPath(a.ctx)
+    return Object.assign({}, inputCtx || {}, {
+      field: a.ctx && a.ctx.field || path || '',
+      fieldPath: path || '',
+      label: a.ctx && a.ctx.label || path || '',
+      rawField: a.ctx && a.ctx.rawField || a.fieldDef,
+      resolvedField: a.ctx && a.ctx.resolvedField || a.fieldDef,
+      value: inputCtx && inputCtx.value,
+      directory: inputCtx && inputCtx.directory,
+      kind: kind,
+      accept: accept,
+      ctx: a.ctx || {},
+    })
   }
 
   function withFieldPath(ctx, segment) {

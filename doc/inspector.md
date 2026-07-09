@@ -154,6 +154,7 @@ compatibility decision, including mixed-type cases.
 | `groups` | Optional property group metadata passed to `ui.propertyForm`. |
 | `groupActions(groupCtx)` | Optional per-group `UiAction[]` factory passed to `ui.propertyForm`. Returning `null` / `undefined` uses `groups[groupId].actions`; returning `[]` explicitly renders no actions. |
 | `fieldContextActions(fieldCtx)` | Optional field-row context-menu strategy passed to `ui.propertyForm`. Returns `UiAction[]` or `Promise<UiAction[]>`. |
+| `filePathActions(fieldCtx)` | Optional action strategy appended to `filepath` / `img` / `snd` input menus. |
 | `read(target)` | Optional alternative to `values`; called for each target. |
 | `hasField(target, field, value, index)` | Optional field existence override. Default is own-property check on value. |
 | `canWrite(target, field, value, index)` | Optional per-target write gate. |
@@ -277,6 +278,29 @@ the field context menu; right-clicking inside an editor control keeps that
 control's native or component-level menu. If the provider does not supply
 `fieldContextActions`, or if the resolved action list is empty, the browser
 context menu is not blocked.
+
+File path input menus use a separate strategy:
+`inspection.filePathActions(fieldCtx)`. It appends host actions to the trailing
+three-dot menu of `filepath`, `img`, and `snd` fields. The built-in menu only
+contains Load and Clear; project actions such as Save As or Show in Files must
+be returned explicitly by the provider.
+
+```js
+{
+  filePathActions: function (fieldCtx) {
+    if (!fieldCtx.value) return []
+    return [{
+      label: 'Show in Files',
+      icon: 'folder',
+      command: 'files.reveal',
+      args: { path: fieldCtx.value },
+    }]
+  },
+}
+```
+
+This keeps schema declarations focused on type/rendering while the provider
+owns environment-specific file behavior.
 
 ## Change Shape
 

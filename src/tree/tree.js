@@ -449,8 +449,8 @@
 
   // movePanelToSplit — remove an existing panel, split a target dock, and
   // place that same PanelData into the newly-created dock. Used by tab drag
-  // five-zone docking. Unlike splitDock's "new editor of same type" seed,
-  // this preserves the moved panel id/data so runtime can re-home its DOM.
+  // five-zone docking. This preserves the moved panel id/data so runtime can
+  // re-home its DOM; dock split cloning creates a fresh panel id instead.
   function movePanelToSplit(tree, panelId, dstDockId, direction, side, ratio) {
     const found = findPanel(tree, panelId)
     if (!found) return { tree: tree, newDockId: null }
@@ -483,11 +483,11 @@
   }
 
   // ─── split / merge ────────────────────────────────────────
-  // splitDock — insert a NEW empty dock alongside the target along `direction`.
-  // The new dock is empty (panels: []). The runtime layer is responsible for
-  // post-seeding it with a default panel (per § 4.1, using component defaults of
-  // the source dock's active panel) — splitDock takes optional opts.seedPanels
-  // to let the runtime pass that in.
+  // splitDock — insert a NEW dock alongside the target along `direction`.
+  // The pure tree layer stays data-only: callers decide the dock shell and
+  // optional seedPanels. The dock runtime's default seed clones the source
+  // dock's active PanelData with fresh ids, so split views open the same
+  // resource without sharing DOM/runtime.
   //
   // Returns { tree, newDockId, newPanelId? }. newPanelId is set only when
   // seedPanels was provided.

@@ -2722,19 +2722,19 @@
   word-break: break-all;
 }
 
-/* ── ui.assetPicker — path text + preview thumbnail + browse button ───── */
-.aiditor-ui-asset-picker {
+/* ── ui.filePathInput — path text + preview/play affordance ─────────── */
+.aiditor-ui-file-path-input {
   display: inline-flex;
   align-items: center;
   gap: var(--aiditor-space-1);
   padding: 2px;
   min-width: 0;
 }
-.aiditor-ui-asset-picker.is-missing {
+.aiditor-ui-file-path-input.is-missing {
   border-color: var(--aiditor-error) !important;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--aiditor-error) 55%, transparent) inset;
 }
-.aiditor-ui-asset-preview {
+.aiditor-ui-file-path-preview {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2747,13 +2747,32 @@
   cursor: grab;
   overflow: hidden;
 }
-.aiditor-ui-asset-preview:hover { color: var(--aiditor-accent); }
-.aiditor-ui-asset-preview:active { cursor: grabbing; }
-.aiditor-ui-asset-preview img { width: 100%; height: 100%; object-fit: cover; }
-.aiditor-ui-asset-path {
+.aiditor-ui-file-path-preview:hover { color: var(--aiditor-accent); }
+.aiditor-ui-file-path-preview:active { cursor: grabbing; }
+.aiditor-ui-file-path-preview img { width: 100%; height: 100%; object-fit: cover; }
+.aiditor-ui-file-path-play {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.aiditor-ui-file-path-play:hover { color: var(--aiditor-accent); }
+.aiditor-ui-file-path-field {
   border: 0 !important;
   background: transparent !important;
   padding: 0 !important;
+}
+.aiditor-ui-file-path-actions {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
 }
 
 /* ── ui.dateInput — native date field, framed like ui.input ──────────── */

@@ -80,9 +80,10 @@
 
       splitDock: function (dockId, dir, side, ratio, opts) {
         if (layout.disposed) return { newDockId: null, newPanelId: null }
-        // § 4.1 — seed new dock from active panel component defaults.
-        const seed = computeSplitSeed(tree.peek(), dockId)
-        const r = aiditor.splitDock(tree.peek(), dockId, dir, side, ratio, { seedPanels: seed })
+        const current = tree.peek()
+        const seed = opts && opts.seedPanels ? opts.seedPanels : computeSplitSeed(current, dockId)
+        const shell = opts && opts.dock ? opts.dock : computeSplitDockShell(current, dockId)
+        const r = aiditor.splitDock(current, dockId, dir, side, ratio, { dock: shell, seedPanels: seed })
         layout.setTree(r.tree)
         return { newDockId: r.newDockId, newPanelId: r.newPanelId }
       },
@@ -142,18 +143,38 @@
     return hit
   }
 
-  // Compute seedPanels for a split — § 4.1: same component as source's active
-  // panel + that component's defaults. Empty source dock → empty new dock.
+  // Compute seedPanels for a split — § 4.1: clone the source dock's active
+  // PanelData as serializable state, with fresh ids assigned by tree.panel().
+  // Empty source dock → empty new dock.
   function computeSplitSeed(tree, srcDockId) {
     const f = aiditor.findDock(tree, srcDockId)
     if (!f || !f.node.activeId) return null
     const active = f.node.panels.find(function (p) { return p.id === f.node.activeId })
     if (!active) return null
-    const defaults = aiditor.componentDefaults(active.component)
-    return [Object.assign({}, defaults, { component: active.component })]
+    return [clonePanelInput(active)]
+  }
+
+  function clonePanelInput(panel) {
+    const out = Object.assign({}, panel)
+    delete out.id
+    if (panel.props) out.props = structuredClone(panel.props)
+    if (panel.toolbarItems) out.toolbarItems = structuredClone(panel.toolbarItems)
+    return out
+  }
+
+  function computeSplitDockShell(tree, srcDockId) {
+    const f = aiditor.findDock(tree, srcDockId)
+    if (!f) return {}
+    const dock = f.node
+    const shell = {}
+    if (dock.toolbar) shell.toolbar = structuredClone(dock.toolbar)
+    if (dock.accept != null) shell.accept = structuredClone(dock.accept)
+    if (dock.removeWhenEmpty === false) shell.removeWhenEmpty = false
+    return shell
   }
 
   aiditor.createDockLayout = createDockLayout
   aiditor._dock = aiditor._dock || {}
   aiditor._dock.computeSplitSeed = computeSplitSeed
+  aiditor._dock.computeSplitDockShell = computeSplitDockShell
 })(window.aiditor = window.aiditor || {})

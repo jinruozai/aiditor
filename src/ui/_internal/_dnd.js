@@ -13,6 +13,8 @@
 //   Files                            virtual type — DataTransfer.files
 //   text/uri-list                    single URL (image/audio/doc paths)
 //   text/plain                       fallback for plain strings
+//   application/aiditor.file-path+json        { kind:'image'|'audio'|'text'|'file', value, meta? }
+//   application/aiditor.file-path.<kind>+json  same payload, hover-readable kind hint
 //   application/aiditor.asset+json        { kind:'image'|'audio'|'file', value, meta? }
 //   application/aiditor.asset.<kind>+json  same payload, hover-readable kind hint
 //   application/aiditor.asset.entry+json   [{ kind, path?, url?, name? }]
@@ -71,6 +73,8 @@
     const text = safeRead(dt, 'text/plain')
     if (text && !data.uri) data.text = text
     if (full) {
+      const filePath = safeRead(dt, 'application/aiditor.file-path+json')
+      if (filePath) { try { data.filePath = JSON.parse(filePath) } catch (_) {} }
       const asset = safeRead(dt, 'application/aiditor.asset+json')
       if (asset) { try { data.asset = JSON.parse(asset) } catch (_) {} }
       const assetEntries = safeRead(dt, 'application/aiditor.asset.entry+json')
@@ -237,25 +241,29 @@
     // Prefer the most specific signal that's actually readable at this
     // phase: files (drop) → fileMimes (hover via dt.items) → uri/text → asset.
     if (kind === 'image') {
+      if (data.types && data.types.indexOf('application/aiditor.file-path.image+json') >= 0) return true
       if (data.types && data.types.indexOf('application/aiditor.asset.image+json') >= 0) return true
       if (anyFileMatches(data.files, /^image\//))      return true
       if (anyMimeMatches(data.fileMimes, /^image\//))  return true
       if (urlMatches(data.uri, IMG_RE))  return true
       if (urlMatches(data.text, IMG_RE)) return true
+      if (data.filePath) return data.filePath.kind === 'image' || urlMatches(data.filePath.value, IMG_RE)
       if (data.asset) return data.asset.kind === 'image' || urlMatches(data.asset.value, IMG_RE)
       return false
     }
     if (kind === 'audio') {
+      if (data.types && data.types.indexOf('application/aiditor.file-path.audio+json') >= 0) return true
       if (data.types && data.types.indexOf('application/aiditor.asset.audio+json') >= 0) return true
       if (anyFileMatches(data.files, /^audio\//))      return true
       if (anyMimeMatches(data.fileMimes, /^audio\//))  return true
       if (urlMatches(data.uri, AUD_RE))  return true
       if (urlMatches(data.text, AUD_RE)) return true
+      if (data.filePath) return data.filePath.kind === 'audio' || urlMatches(data.filePath.value, AUD_RE)
       if (data.asset) return data.asset.kind === 'audio' || urlMatches(data.asset.value, AUD_RE)
       return false
     }
     // 'file' / default — accept anything that carries a File or URL.
-    return !!(data.files || data.fileMimes || data.uri || (data.asset && data.asset.value))
+    return !!(data.files || data.fileMimes || data.uri || (data.filePath && data.filePath.value) || (data.asset && data.asset.value))
   }
 
   // Pull the best URL out of a dropped payload. Priority: asset.value >
@@ -263,6 +271,7 @@
   // object URLs (persist, upload, discard on unload).
   function extractUrl(data) {
     if (!data) return ''
+    if (data.filePath && data.filePath.value) return String(data.filePath.value)
     if (data.asset && data.asset.value) return String(data.asset.value)
     if (data.uri) return data.uri
     if (data.files && data.files.length) return URL.createObjectURL(data.files[0])

@@ -1063,6 +1063,8 @@
 //   Files                            virtual type — DataTransfer.files
 //   text/uri-list                    single URL (image/audio/doc paths)
 //   text/plain                       fallback for plain strings
+//   application/aiditor.file-path+json        { kind:'image'|'audio'|'text'|'file', value, meta? }
+//   application/aiditor.file-path.<kind>+json  same payload, hover-readable kind hint
 //   application/aiditor.asset+json        { kind:'image'|'audio'|'file', value, meta? }
 //   application/aiditor.asset.<kind>+json  same payload, hover-readable kind hint
 //   application/aiditor.asset.entry+json   [{ kind, path?, url?, name? }]
@@ -1121,6 +1123,8 @@
     const text = safeRead(dt, 'text/plain')
     if (text && !data.uri) data.text = text
     if (full) {
+      const filePath = safeRead(dt, 'application/aiditor.file-path+json')
+      if (filePath) { try { data.filePath = JSON.parse(filePath) } catch (_) {} }
       const asset = safeRead(dt, 'application/aiditor.asset+json')
       if (asset) { try { data.asset = JSON.parse(asset) } catch (_) {} }
       const assetEntries = safeRead(dt, 'application/aiditor.asset.entry+json')
@@ -1287,25 +1291,29 @@
     // Prefer the most specific signal that's actually readable at this
     // phase: files (drop) → fileMimes (hover via dt.items) → uri/text → asset.
     if (kind === 'image') {
+      if (data.types && data.types.indexOf('application/aiditor.file-path.image+json') >= 0) return true
       if (data.types && data.types.indexOf('application/aiditor.asset.image+json') >= 0) return true
       if (anyFileMatches(data.files, /^image\//))      return true
       if (anyMimeMatches(data.fileMimes, /^image\//))  return true
       if (urlMatches(data.uri, IMG_RE))  return true
       if (urlMatches(data.text, IMG_RE)) return true
+      if (data.filePath) return data.filePath.kind === 'image' || urlMatches(data.filePath.value, IMG_RE)
       if (data.asset) return data.asset.kind === 'image' || urlMatches(data.asset.value, IMG_RE)
       return false
     }
     if (kind === 'audio') {
+      if (data.types && data.types.indexOf('application/aiditor.file-path.audio+json') >= 0) return true
       if (data.types && data.types.indexOf('application/aiditor.asset.audio+json') >= 0) return true
       if (anyFileMatches(data.files, /^audio\//))      return true
       if (anyMimeMatches(data.fileMimes, /^audio\//))  return true
       if (urlMatches(data.uri, AUD_RE))  return true
       if (urlMatches(data.text, AUD_RE)) return true
+      if (data.filePath) return data.filePath.kind === 'audio' || urlMatches(data.filePath.value, AUD_RE)
       if (data.asset) return data.asset.kind === 'audio' || urlMatches(data.asset.value, AUD_RE)
       return false
     }
     // 'file' / default — accept anything that carries a File or URL.
-    return !!(data.files || data.fileMimes || data.uri || (data.asset && data.asset.value))
+    return !!(data.files || data.fileMimes || data.uri || (data.filePath && data.filePath.value) || (data.asset && data.asset.value))
   }
 
   // Pull the best URL out of a dropped payload. Priority: asset.value >
@@ -1313,6 +1321,7 @@
   // object URLs (persist, upload, discard on unload).
   function extractUrl(data) {
     if (!data) return ''
+    if (data.filePath && data.filePath.value) return String(data.filePath.value)
     if (data.asset && data.asset.value) return String(data.asset.value)
     if (data.uri) return data.uri
     if (data.files && data.files.length) return URL.createObjectURL(data.files[0])
@@ -1381,6 +1390,7 @@
     // ─── Media / Misc ───────────────────────────────────────────
     'image':    '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
     'music':    '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+    'pause':    '<rect width="4" height="16" x="6" y="4" rx="1"/><rect width="4" height="16" x="14" y="4" rx="1"/>',
     'calendar': '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
     'clock':    '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
 
@@ -5964,12 +5974,12 @@
 // (ui.registerRenderer / ui.getRenderer). Built-in renderers registered here
 // are thin adapters between a ResolvedFieldDef + sig and a ui.* primitive;
 // they do NOT touch ctx. Domain-specific behavior (cross-table navigation on
-// ref_id, custom asset pickers, …) belongs in caller-registered overrides.
+// ref_id, project file import, …) belongs in caller-registered overrides.
 //
 // Each renderer receives { fieldDef, sig, write, ctx } and returns an
 // HTMLElement. Built-ins: input_string | textarea | input_int | input_float
-// | range | enum | toggle | color | vector | date | img | snd | id | ref_id | struct
-// | array | array_editor.
+// | range | enum | toggle | color | vector | date | filepath | img | snd | id
+// | ref_id | struct | array | array_editor.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -6110,25 +6120,32 @@
   ui.registerRenderer('date', function (a) {
     return ui.dateInput({ value: a.sig, onChange: a.write })
   })
-  ui.registerRenderer('img', function (a) {
+
+  function filePathEditor(a, defaults) {
     const agv = a.fieldDef.type_agv || {}
-    return ui.assetPicker({
+    const fileKind = agv.kind || defaults.kind
+    const accept = agv.accept || defaults.accept
+    return ui.filePathInput({
       value:       a.sig,
       onChange:    a.write,
-      kind:        'image',
-      accept:      agv.accept || '.png,.jpg,.jpeg,.gif,.webp',
+      kind:        fileKind,
+      accept:      accept,
       placeholder: agv.placeholder || agv.suffix || '',
+      actions: function (inputCtx) {
+        const fn = a.ctx && a.ctx.filePathActions
+        if (typeof fn === 'function') return fn(filePathActionCtx(a, inputCtx, fileKind, accept))
+        return Array.isArray(agv.actions) ? agv.actions : []
+      },
     })
+  }
+  ui.registerRenderer('filepath', function (a) {
+    return filePathEditor(a, { kind: 'file', accept: '' })
+  })
+  ui.registerRenderer('img', function (a) {
+    return filePathEditor(a, { kind: 'image', accept: '.png,.jpg,.jpeg,.gif,.webp' })
   })
   ui.registerRenderer('snd', function (a) {
-    const agv = a.fieldDef.type_agv || {}
-    return ui.assetPicker({
-      value:       a.sig,
-      onChange:    a.write,
-      kind:        'audio',
-      accept:      agv.accept || '.mp3,.wav,.ogg',
-      placeholder: agv.placeholder || agv.suffix || '',
-    })
+    return filePathEditor(a, { kind: 'audio', accept: '.mp3,.wav,.ogg' })
   })
   ui.registerRenderer('id', function (a) {
     return ui.input({ value: a.sig, readOnly: true })
@@ -6340,6 +6357,22 @@
     return Object.assign({}, meta || {}, { change: change })
   }
 
+  function filePathActionCtx(a, inputCtx, kind, accept) {
+    const path = readFieldPath(a.ctx)
+    return Object.assign({}, inputCtx || {}, {
+      field: a.ctx && a.ctx.field || path || '',
+      fieldPath: path || '',
+      label: a.ctx && a.ctx.label || path || '',
+      rawField: a.ctx && a.ctx.rawField || a.fieldDef,
+      resolvedField: a.ctx && a.ctx.resolvedField || a.fieldDef,
+      value: inputCtx && inputCtx.value,
+      directory: inputCtx && inputCtx.directory,
+      kind: kind,
+      accept: accept,
+      ctx: a.ctx || {},
+    })
+  }
+
   function withFieldPath(ctx, segment) {
     const base = ctx || {}
     const next = Object.assign({}, base)
@@ -6406,6 +6439,8 @@
 //   fieldActions?:(fieldCtx) => UiAction[]            optional per-field row actions
 //   fieldContextActions?:(fieldCtx) => UiAction[]|Promise<UiAction[]>
 //                                                     optional per-field context-menu actions
+//   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
+//                                                     filepath/img/snd editors
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -6444,6 +6479,7 @@
    * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
    * @param {Function} opts.fieldActions - Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions.
    * @param {Function} opts.fieldContextActions - Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>.
+   * @param {Function} opts.filePathActions - Optional UiAction factory appended to file path input menus.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -6466,6 +6502,7 @@
     const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
     const fieldActions = typeof o.fieldActions === 'function' ? o.fieldActions : null
     const fieldContextActions = typeof o.fieldContextActions === 'function' ? o.fieldContextActions : null
+    const filePathActions = typeof o.filePathActions === 'function' ? o.filePathActions : null
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const ctx       = o.ctx
@@ -6544,7 +6581,7 @@
             contextActions: action.contextActions,
             contextCtx: action.ctx,
             editor:  function (slotSig, write, innerCtx) {
-              return slotEditor(slotSig, write, fieldCtx(innerCtx, fname), subFd,
+              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
           }
@@ -6619,7 +6656,12 @@
       const contextActions = fieldContextActions
         ? function (currentCtx) { return fieldContextActions(currentCtx) }
         : null
-      return { actions: actions, ctx: actionCtx, contextActions: contextActions }
+      const pathActions = filePathActions
+        ? function (inputCtx) {
+          return filePathActions(Object.assign({}, actionCtx.peek ? actionCtx.peek() : actionCtx(), inputCtx || {}))
+        }
+        : null
+      return { actions: actions, ctx: actionCtx, contextActions: contextActions, filePathActions: pathActions }
     }
 
     function resetActionSignal(field, defaults) {
@@ -6730,6 +6772,16 @@
     const base = typeof ctx === 'function' ? ctx(field) : ctx
     const out = Object.assign({}, base || {})
     out.fieldPath = out.fieldPath || field
+    return out
+  }
+
+  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions) {
+    const out = fieldCtx(ctx, field)
+    out.field = field
+    out.label = label && label.value || field
+    out.rawField = raw
+    out.resolvedField = resolved
+    if (filePathActions) out.filePathActions = filePathActions
     return out
   }
 
@@ -8466,50 +8518,55 @@
   }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ui/editor/assetPicker.js ---- */
-// aiditor.ui.assetPicker - path text field + preview thumbnail, for images /
-// audio / any application asset field. The whole frame is both a drop zone
-// (accepts OS files + URLs + other aiditor asset drags) and, via the
-// thumbnail, a drag source for carrying this asset elsewhere.
+/* ---- ui/editor/filePathInput.js ---- */
+// aiditor.ui.filePathInput - path string editor with file-kind affordance.
+//
+// This component edits a string path/URL. It does not own project asset
+// semantics, import policy, workspace object URL leasing, or history.
 //
 // opts:
-//   value:        string | signal<string>       the asset path
+//   value:        string | signal<string>       the file path or URL
 //   onChange?:    (v) => void
-//   kind?:        'image' | 'audio' | 'file'    shape of the preview +
-//                                               the drop filter
+//   kind?:        'image' | 'audio' | 'text' | 'file'
+//                                                preview/control shape +
+//                                                drop filter
 //   placeholder?: string | signal               path hint
-//   accept?:      string                        ".png,.jpg" for the native
-//                                                picker (informational)
-//   onBrowse?:    (current) => Promise<string|null> | string | null
+//   accept?:      string                        native picker accept filter
+//   onBrowse?:    (current,ctx) => Promise<string|null> | string | null
 //                                                custom "pick" action;
 //                                                default opens a hidden
 //                                                file input and stores an
 //                                                object URL.
 //   onFile?:      (file,current) => Promise<string|null> | string | null
-//                                                custom file import path;
+//                                                custom import path;
 //                                                used by drop + default browse.
-//   resolveSrc?:  (value) => string             preview URL resolver for
+//   resolveSrc?:  (value) => string             preview/playback URL resolver for
 //                                                workspace-relative paths.
-//   exists?:      (value) => boolean            marks missing assets
+//   exists?:      (value) => boolean            marks missing paths
+//   preview?:     (ctx) => Node|null            custom leading preview/control
+//   actions?:     UiAction[] | (ctx) => UiAction[]
+//                                                extra trailing menu actions
+//   onAction?:    (ctx) => void                 optional observer for built-in
+//                                                load/clear actions
 //
-// Layout: [thumb] [path input]. Clicking the thumb opens the picker
-// (same action the now-removed folder button used to do). Dragging the
-// thumb exports the current value as text/uri-list + aiditor.asset+json so
-// other asset pickers / user widgets can receive it.
+// Layout: [preview/control] [path input] [actions]. Clicking a non-audio
+// preview opens the picker. Dragging the preview exports the current value as
+// text/uri-list plus typed aiditor file-path MIME data.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
 
-  ui.assetPicker = function (opts) {
+  ui.filePathInput = function (opts) {
     const o = opts || {}
     const sig         = ui.asSig(o.value       != null ? o.value       : '')
     const placeholder = ui.asSig(o.placeholder != null ? o.placeholder : '')
-    const kind        = o.kind || 'image'
+    const kind        = o.kind || 'file'
     const accept      = o.accept || ''
-    const doWrite     = ui.writer(sig, o.onChange, 'ui.assetPicker')
+    const doWrite     = ui.writer(sig, o.onChange, 'ui.filePathInput')
 
-    const wrap = ui.h('div', 'aiditor-ui-asset-picker aiditor-ui-field')
+    const wrap = ui.h('div', 'aiditor-ui-file-path-input aiditor-ui-field')
     let ownedUrl = null
+    let audioEl = null
     function revokeOwnedUrl() {
       if (ownedUrl) URL.revokeObjectURL(ownedUrl)
       ownedUrl = null
@@ -8520,45 +8577,98 @@
       doWrite(url)
     }
     ui.collect(wrap, revokeOwnedUrl)
+    ui.collect(wrap, function () { if (audioEl) audioEl.pause() })
 
-    // Preview thumbnail. Also the visible affordance for "click to browse".
-    const thumb = ui.h('div', 'aiditor-ui-asset-preview')
-    function paintPreview(v) {
-      thumb.innerHTML = ''
+    const preview = ui.h('div', 'aiditor-ui-file-path-preview')
+    function mediaSrc(v) {
+      return typeof o.resolveSrc === 'function' ? o.resolveSrc(v) : v
+    }
+    function paintPreview(value) {
+      preview.innerHTML = ''
+      const v = value == null ? '' : String(value)
+      if (audioEl) audioEl.pause()
+      audioEl = null
+      if (typeof o.preview === 'function') {
+        const custom = o.preview({
+          value: v,
+          kind: kind,
+          browse: doBrowse,
+          resolveSrc: mediaSrc,
+        })
+        if (custom) preview.appendChild(custom)
+        else preview.appendChild(placeholderIcon())
+        return
+      }
       if (kind === 'image' && v) {
-        const src = typeof o.resolveSrc === 'function' ? o.resolveSrc(v) : v
+        const src = mediaSrc(v)
         if (!src) {
-          thumb.appendChild(placeholderIcon())
+          preview.appendChild(placeholderIcon())
           return
         }
         const img = document.createElement('img')
         img.src = src
-        img.onerror = function () { img.remove(); thumb.appendChild(placeholderIcon()) }
-        thumb.appendChild(img)
+        img.onerror = function () { img.remove(); preview.appendChild(placeholderIcon()) }
+        preview.appendChild(img)
       } else if (kind === 'audio') {
-        thumb.appendChild(ui.icon({ name: 'music', size: 'sm' }))
+        preview.appendChild(audioButton(v))
       } else {
-        thumb.appendChild(placeholderIcon())
+        preview.appendChild(placeholderIcon())
       }
     }
     function placeholderIcon() {
-      return ui.icon({ name: kind === 'image' ? 'image' : 'file', size: 'sm' })
+      return ui.icon({ name: kind === 'image' ? 'image' : kind === 'audio' ? 'music' : 'file', size: 'sm' })
     }
-    thumb.addEventListener('click', doBrowse)
-    wrap.appendChild(thumb)
+    function audioButton(value) {
+      const button = ui.h('button', 'aiditor-ui-file-path-play', { type: 'button', title: value ? 'Play audio' : 'Choose audio file' })
+      let playing = false
+      function paint() {
+        button.replaceChildren(ui.icon({ name: playing ? 'pause' : 'music', size: 'sm' }))
+      }
+      button.addEventListener('click', function (event) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!value) {
+          doBrowse()
+          return
+        }
+        if (!audioEl) {
+          audioEl = new Audio(mediaSrc(value))
+          audioEl.addEventListener('ended', function () { playing = false; paint() })
+          audioEl.addEventListener('pause', function () { playing = false; paint() })
+          audioEl.addEventListener('play', function () { playing = true; paint() })
+        }
+        if (audioEl.paused) audioEl.play().catch(function () {})
+        else audioEl.pause()
+      })
+      paint()
+      return button
+    }
+    preview.addEventListener('click', function () { if (kind !== 'audio') doBrowse() })
+    wrap.appendChild(preview)
 
     // Path input. We reuse ui.input, which already arrives wrapped in its
     // own .aiditor-ui-field — strip that layer's border so our outer frame
     // stays the only visible box.
     const pathSig = aiditor.signal(String(sig.peek() || ''))
     const input = ui.input({ value: pathSig, placeholder: placeholder })
-    input.classList.add('aiditor-ui-asset-path')
+    input.classList.add('aiditor-ui-file-path-field')
     input.style.flex = '1 1 auto'
     input.style.minWidth = '0'
     const innerInput = input.querySelector('input')
     if (innerInput) innerInput.style.border = '0'
     wrap.appendChild(input)
     ui.collect(wrap, function () { ui.dispose(input) })
+
+    const menuBtn = ui.iconButton({
+      icon: 'more-vertical',
+      title: 'File path actions',
+      ariaLabel: 'File path actions',
+      size: 'sm',
+      kind: 'ghost',
+      onClick: openActionMenu,
+    })
+    menuBtn.classList.add('aiditor-ui-file-path-actions')
+    wrap.appendChild(menuBtn)
 
     // signal ⇄ input bi-sync
     ui.bind(wrap, sig, function (v) {
@@ -8573,13 +8683,17 @@
       if (s !== String(sig.peek() || '')) doWrite(s)
     }))
 
-    // Drop target — the whole frame accepts dragged assets that match
-    // our `kind`. Files, URL drops, and other aiditor asset sources all flow
+    // Drop target — the whole frame accepts dragged file paths that match
+    // our `kind`. Files, URL drops, and other aiditor path sources all flow
     // through ui.dnd.extractUrl so the consumer just sees a final string.
     ui.dropzone(wrap, {
-      accept:  ['Files', 'text/uri-list', 'text/plain', 'application/aiditor.asset+json', 'application/aiditor.asset.' + kind + '+json'],
-      canDrop: function (d) { return ui.dnd.matchesKind(d, kind) },
+      accept:  ['Files', 'text/uri-list', 'text/plain', 'application/aiditor.file-path+json', 'application/aiditor.file-path.' + kind + '+json', 'application/aiditor.asset+json', 'application/aiditor.asset.' + kind + '+json'],
+      canDrop: function (d) { return matchesInputKind(d, kind) && matchesAccept(d, accept) },
       onDrop:  function (d) {
+        if (d.filePath && d.filePath.value) {
+          doWrite(ui.dnd.extractUrl(d))
+          return
+        }
         if (d.asset && d.asset.value) {
           doWrite(ui.dnd.extractUrl(d))
           return
@@ -8598,10 +8712,9 @@
       },
     })
 
-    // Drag source — the thumbnail exports the current value. Other
-    // asset pickers of compatible kind can receive it; OS targets get the
-    // plain URL.
-    ui.dragsource(thumb, {
+    // Drag source — the preview exports the current value. Other compatible
+    // file path inputs can receive it; OS targets get the plain URL.
+    ui.dragsource(preview, {
       effect:  'copyMove',
       getData: function () {
         const v = sig.peek() || ''
@@ -8609,8 +8722,8 @@
         return {
           'text/uri-list':              v,
           'text/plain':                 v,
-          'application/aiditor.asset+json':  JSON.stringify({ kind: kind, value: v }),
-          ['application/aiditor.asset.' + kind + '+json']: JSON.stringify({ kind: kind, value: v }),
+          'application/aiditor.file-path+json':  JSON.stringify({ kind: kind, value: v }),
+          ['application/aiditor.file-path.' + kind + '+json']: JSON.stringify({ kind: kind, value: v }),
         }
       },
     })
@@ -8623,7 +8736,7 @@
 
     function doBrowse() {
       if (typeof o.onBrowse === 'function') {
-        const res = o.onBrowse(sig.peek())
+        const res = o.onBrowse(sig.peek(), actionCtx('load'))
         if (res && typeof res.then === 'function') {
           res.then(function (v) { if (v != null) doWrite(v) })
         } else if (res != null) {
@@ -8658,9 +8771,164 @@
       f.click()
     }
 
+    function openActionMenu(event) {
+      if (event && event.preventDefault) event.preventDefault()
+      if (event && event.stopPropagation) event.stopPropagation()
+      ui.actionMenu({
+        anchor: menuBtn,
+      actions: actionItems(),
+      ctx: actionCtx('menu'),
+        sourceScope: 'ui.filePathInput',
+        side: 'bottom',
+        align: 'end',
+      })
+    }
+
+    function actionItems() {
+      const hasValue = !!String(sig.peek() || '')
+      const ctx = actionCtx('menu')
+      const extra = resolveActions(o.actions, ctx)
+      const items = [
+        { id: 'load', label: 'Load', icon: 'folder', onSelect: function () { runAction('load') } },
+        { id: 'clear', label: 'Clear', icon: 'x', disabled: !hasValue, onSelect: function () { runAction('clear') } },
+      ]
+      if (extra.length) items.push({ type: 'divider' })
+      return items.concat(extra)
+    }
+
+    function runAction(action) {
+      if (action === 'load') doBrowse()
+      else if (action === 'clear') doWrite('')
+      const ctx = actionCtx(action)
+      if (typeof o.onAction === 'function') {
+        const result = aiditor.safeCall({ scope: 'ui.filePathInput', action: action }, function () {
+          return o.onAction(ctx)
+        })
+        if (result && typeof result.then === 'function') {
+          Promise.resolve(result).catch(function (err) { aiditor.reportError({ scope: 'ui.filePathInput', action: action }, err) })
+        }
+      }
+    }
+
+    function actionCtx(action) {
+      return {
+        action: action,
+        value: sig.peek() == null ? '' : String(sig.peek()),
+        directory: parentPath(sig.peek()),
+        kind: kind,
+        accept: accept,
+        input: wrap,
+      }
+    }
+
     paintPreview(sig.peek())
     return wrap
   }
+
+  function matchesInputKind(data, kind) {
+    if (!kind || kind === 'file' || kind === 'text') return true
+    if (ui.dnd && ui.dnd.matchesKind && ui.dnd.matchesKind(data, kind)) return true
+    if (kind === 'image') return matchesKnownKind(data, /^image\//, IMG_EXT)
+    if (kind === 'audio') return matchesKnownKind(data, /^audio\//, AUD_EXT)
+    return false
+  }
+
+  function matchesKnownKind(data, mimeRe, extRe) {
+    if (!data) return false
+    if (data.files) for (let i = 0; i < data.files.length; i++) {
+      const file = data.files[i]
+      if (mimeRe.test(file.type || '') || extRe.test(file.name || '')) return true
+    }
+    if (data.fileMimes) for (let i = 0; i < data.fileMimes.length; i++) {
+      if (mimeRe.test(data.fileMimes[i] || '')) return true
+    }
+    return extRe.test(String(data.uri || '').split(/[?#]/)[0])
+      || extRe.test(String(data.text || '').split(/[?#]/)[0])
+      || extRe.test(String(data.filePath && data.filePath.value || '').split(/[?#]/)[0])
+      || extRe.test(String(data.asset && data.asset.value || '').split(/[?#]/)[0])
+  }
+
+  function resolveActions(actions, ctx) {
+    if (!actions) return []
+    const list = typeof actions === 'function'
+      ? aiditor.safeCall({ scope: 'ui.filePathInput', action: 'actions' }, function () { return actions(ctx) })
+      : actions
+    return Array.isArray(list) ? list : []
+  }
+
+  function parentPath(value) {
+    const text = String(value == null ? '' : value)
+    const clean = text.split(/[?#]/)[0]
+    const scheme = clean.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//)
+    if (scheme) {
+      const rootEnd = scheme[0].length
+      const slashAfterRoot = clean.indexOf('/', rootEnd)
+      if (slashAfterRoot < 0) return clean.slice(0, rootEnd)
+      return clean.slice(0, slashAfterRoot)
+    }
+    const slash = clean.lastIndexOf('/')
+    if (slash < 0) return ''
+    if (slash === 0) return '/'
+    return clean.slice(0, slash)
+  }
+
+  function matchesAccept(data, accept) {
+    const spec = String(accept || '').trim()
+    if (!spec) return true
+    const parts = spec.split(',').map(function (s) { return s.trim().toLowerCase() }).filter(Boolean)
+    if (!parts.length) return true
+    const values = []
+    if (data && data.files) data.files.forEach(function (file) {
+      values.push({ name: String(file.name || '').toLowerCase(), mime: String(file.type || '').toLowerCase() })
+    })
+    if (data && data.fileMimes) data.fileMimes.forEach(function (mime) {
+      values.push({ name: '', mime: String(mime || '').toLowerCase() })
+    })
+    const path = data && (data.uri || data.text || data.filePath && data.filePath.value || data.asset && data.asset.value)
+    if (path) values.push({ name: String(path).split(/[?#]/)[0].toLowerCase(), mime: '' })
+    if (!values.length) return true
+    for (let i = 0; i < values.length; i++) {
+      for (let j = 0; j < parts.length; j++) {
+        if (acceptValue(values[i], parts[j])) return true
+      }
+    }
+    return false
+  }
+
+  function acceptValue(value, part) {
+    if (!part) return false
+    if (part[0] === '.') return value.name.endsWith(part) || mimeMatchesExt(value.mime, part)
+    if (part.slice(-2) === '/*') return !!value.mime && value.mime.indexOf(part.slice(0, -1)) === 0
+    return value.mime === part || value.name.endsWith('.' + part)
+  }
+
+  function mimeMatchesExt(mime, ext) {
+    if (!mime) return false
+    const list = MIME_EXTENSIONS[mime]
+    return !!list && list.indexOf(ext) >= 0
+  }
+
+  const MIME_EXTENSIONS = {
+    'image/png':       ['.png'],
+    'image/jpeg':      ['.jpg', '.jpeg'],
+    'image/gif':       ['.gif'],
+    'image/webp':      ['.webp'],
+    'image/svg+xml':   ['.svg'],
+    'image/avif':      ['.avif'],
+    'image/bmp':       ['.bmp'],
+    'audio/mpeg':      ['.mp3'],
+    'audio/mp3':       ['.mp3'],
+    'audio/wav':       ['.wav'],
+    'audio/x-wav':     ['.wav'],
+    'audio/ogg':       ['.ogg'],
+    'audio/flac':      ['.flac'],
+    'audio/aac':       ['.aac'],
+    'audio/mp4':       ['.m4a'],
+    'text/plain':      ['.txt'],
+    'application/json':['.json'],
+  }
+  const IMG_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i
+  const AUD_EXT = /\.(mp3|wav|ogg|flac|m4a|aac)$/i
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ui/container/section.js ---- */
@@ -10262,7 +10530,7 @@
       // Opt-in HTML5 drag source. Coexists with tree.dnd (pointer-based
       // row reordering): the two listen to disjoint event families and
       // the browser routes them independently. Use case: cross-component
-      // transfers (entity drag-out → asset picker / ref_id / external).
+      // transfers (entity drag-out → file path input / ref_id / external).
       if (typeof o.rowDragSource === 'function') {
         const payload = o.rowDragSource(row.node, row)
         if (payload) ui.dragsource(rowEl, { getData: function () { return payload } })
@@ -13749,6 +14017,22 @@
               refresh: refresh,
             }))
           },
+          filePathActions: function (fieldCtx) {
+            const fn = currentInspection && currentInspection.filePathActions
+            if (typeof fn !== 'function') return null
+            const values = fieldCtx.targets || []
+            return fn(Object.assign({}, fieldCtx, {
+              source: 'inspector',
+              inspection: currentInspection,
+              targets: currentTargets,
+              primary: currentTargets[0],
+              values: values,
+              primaryValue: values[0],
+              panel: ctx.panel,
+              bus: ctx.bus,
+              refresh: refresh,
+            }))
+          },
           requireAllTargets: true,
           canEdit: function (field, values, rawField) {
             return aiditor.inspector.canEditField(currentInspection, field, values, rawField)
@@ -14740,20 +15024,20 @@
     },
   })
 
-  // ── editor / asset ────────────────────────────────────────────────
-  reg('assetPicker', {
-    label: 'Asset', icon: 'image', category: 'editor',
+  // ── editor / file path ────────────────────────────────────────────
+  reg('filePathInput', {
+    label: 'File Path', icon: 'file', category: 'editor',
     bindable: ['value'],
-    defaultProps: Object.assign({}, BOX_D, { value: '', kind: 'image', placeholder: '' }),
+    defaultProps: Object.assign({}, BOX_D, { value: '', kind: 'file', placeholder: '' }),
     schema: Object.assign({}, BOX, {
-      value:       { type: 'string', desc: 'Asset path or URL.' },
-      kind:        { type: 'enum_string', type_agv: { options: ['image','audio','file'] },
-                     desc: 'Asset kind: image · audio · file. Drives the preview affordance.' },
-      placeholder: { type: 'string', desc: 'Hint shown when no asset is picked.' },
+      value:       { type: 'string', desc: 'File path or URL.' },
+      kind:        { type: 'enum_string', type_agv: { options: ['image','audio','text','file'] },
+                     desc: 'File path kind: image · audio · text · file. Drives the leading preview/control.' },
+      placeholder: { type: 'string', desc: 'Hint shown when no path is set.' },
       accept:      { type: 'string', desc: 'MIME pattern passed to the file picker (e.g. "image/png").' },
     }),
     factory: function (p) {
-      const el = ui.assetPicker(ro(lift(p, ['value','kind','placeholder','accept'])))
+      const el = ui.filePathInput(ro(lift(p, ['value','kind','placeholder','accept'])))
       box(el, p)
       return el
     },

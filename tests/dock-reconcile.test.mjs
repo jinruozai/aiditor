@@ -226,6 +226,19 @@ function registerProbe(name) {
 }
 
 ;['left-a', 'left-b', 'right-chat', 'nested-a', 'nested-b', 'solo-move'].forEach(registerProbe)
+aiditor.registerComponent('probe.split-view', {
+  defaults: function () {
+    return { title: 'Default Split', props: { uri: 'default://empty' } }
+  },
+  factory: function () {
+    const s = stat('split-view')
+    s.mounts++
+    const el = document.createElement('probe-split-view')
+    el.__probeName = 'split-view'
+    return el
+  },
+  dispose: function () { stat('split-view').disposes++ },
+})
 
 const leftA = aiditor.panel({ component: 'probe.left-a', title: 'Left A', transient: true })
 const leftB = aiditor.panel({ component: 'probe.left-b', title: 'Left B' })
@@ -306,5 +319,51 @@ assert.equal(nestedBEl.isConnected, true)
 assert.equal(stat('nested-b').disconnects, 0)
 assert.equal(stat('nested-b').disposes, 0)
 assert.equal(stat('nested-b').resizeDisconnects, 0)
+
+const splitPanelA = aiditor.panel({ component: 'probe.left-a', title: 'Inactive' })
+const splitPanelB = aiditor.panel({
+  component: 'probe.split-view',
+  title: 'Cube Scene',
+  icon: 'box',
+  dirty: true,
+  badge: '2',
+  sourcePath: 'scene/cube.js',
+  props: { uri: 'project://cube.scene', nested: { x: 1 } },
+  toolbarItems: [{ component: 'probe.left-b', props: { tool: 'move' }, align: 'end' }],
+})
+const splitSourceDock = aiditor.dock({
+  name: 'split-source',
+  toolbar: { direction: 'bottom', items: [{ component: 'probe.left-a', props: { tabs: true } }] },
+  accept: ['probe.split-view', 'probe.left-a'],
+  removeWhenEmpty: false,
+  panels: [splitPanelA, splitPanelB],
+  activeId: splitPanelB.id,
+})
+const splitLayoutContainer = document.createElement('div')
+setConnected(splitLayoutContainer, true)
+const splitLayout = aiditor.createDockLayout(splitLayoutContainer, { tree: splitSourceDock })
+const splitResult = splitLayout.splitDock(splitSourceDock.id, 'horizontal', 'after', 0.4)
+const splitDock = aiditor.findDock(splitLayout.tree(), splitResult.newDockId).node
+const seeded = splitDock.panels[0]
+assert.equal(splitDock.toolbar.direction, 'bottom')
+assert.equal(splitDock.accept[0], 'probe.split-view')
+assert.equal(splitDock.removeWhenEmpty, false)
+assert.equal(splitDock.name, undefined)
+assert.equal(splitDock.collapsed, undefined)
+assert.equal(splitDock.focused, undefined)
+assert.notEqual(seeded.id, splitPanelB.id)
+assert.equal(seeded.component, 'probe.split-view')
+assert.equal(seeded.title, 'Cube Scene')
+assert.equal(seeded.icon, 'box')
+assert.equal(seeded.dirty, true)
+assert.equal(seeded.badge, '2')
+assert.equal(seeded.sourcePath, 'scene/cube.js')
+assert.deepEqual(seeded.props, { uri: 'project://cube.scene', nested: { x: 1 } })
+assert.notEqual(seeded.props, splitPanelB.props)
+assert.equal(seeded.toolbarItems[0].component, 'probe.left-b')
+assert.equal(seeded.toolbarItems[0].props.tool, 'move')
+assert.equal(splitDock.activeId, seeded.id)
+assert.equal(aiditor.findDock(splitLayout.tree(), splitSourceDock.id).node.panels[1].props.uri, 'project://cube.scene')
+assert.equal(seeded.props.uri, 'project://cube.scene')
 
 console.log('dock reconcile tests ok')

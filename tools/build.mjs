@@ -165,7 +165,7 @@ const JS_ORDER = [
   'ui/editor/codeInput.js',
   'ui/editor/pathInput.js',
   'ui/editor/fileInput.js',
-  'ui/editor/assetPicker.js',
+  'ui/editor/filePathInput.js',
 
   // Layer 9 - UI library: containers
   'ui/container/section.js',

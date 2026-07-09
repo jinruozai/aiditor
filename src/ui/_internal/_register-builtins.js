@@ -401,20 +401,20 @@
     },
   })
 
-  // ── editor / asset ────────────────────────────────────────────────
-  reg('assetPicker', {
-    label: 'Asset', icon: 'image', category: 'editor',
+  // ── editor / file path ────────────────────────────────────────────
+  reg('filePathInput', {
+    label: 'File Path', icon: 'file', category: 'editor',
     bindable: ['value'],
-    defaultProps: Object.assign({}, BOX_D, { value: '', kind: 'image', placeholder: '' }),
+    defaultProps: Object.assign({}, BOX_D, { value: '', kind: 'file', placeholder: '' }),
     schema: Object.assign({}, BOX, {
-      value:       { type: 'string', desc: 'Asset path or URL.' },
-      kind:        { type: 'enum_string', type_agv: { options: ['image','audio','file'] },
-                     desc: 'Asset kind: image · audio · file. Drives the preview affordance.' },
-      placeholder: { type: 'string', desc: 'Hint shown when no asset is picked.' },
+      value:       { type: 'string', desc: 'File path or URL.' },
+      kind:        { type: 'enum_string', type_agv: { options: ['image','audio','text','file'] },
+                     desc: 'File path kind: image · audio · text · file. Drives the leading preview/control.' },
+      placeholder: { type: 'string', desc: 'Hint shown when no path is set.' },
       accept:      { type: 'string', desc: 'MIME pattern passed to the file picker (e.g. "image/png").' },
     }),
     factory: function (p) {
-      const el = ui.assetPicker(ro(lift(p, ['value','kind','placeholder','accept'])))
+      const el = ui.filePathInput(ro(lift(p, ['value','kind','placeholder','accept'])))
       box(el, p)
       return el
     },
