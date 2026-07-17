@@ -50,8 +50,11 @@ const JS_ORDER = [
   // Layer 2.5 - AI session/agent runtime (no UI dependency)
   'ai/name-generator.js',
   'ai/serialize.js',
+  'ai/trace.js',
+  'ai/context-pack.js',
   'ai/permission.js',
   'ai/store.js',
+  'ai/memory.js',
   'ai/compaction.js',
   'ai/connection.js',
   'ai/adapter.js',
@@ -200,6 +203,8 @@ const JS_ORDER = [
   'ui/overlay/dialogs.js',
 
   // Layer 12 - built-in panel components
+  'ai/message-markdown.js',
+  'ai/message-renderers.js',
   'ai/panels/agents.js',
   'ai/panels/rich-prompt-input.js',
   'ai/panels/chat.js',

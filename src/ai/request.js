@@ -76,6 +76,7 @@
         description: tool.description || '',
         schema: tool.schema || null,
         permissions: tool.permissions || null,
+        capabilities: ai.tools.capabilities ? ai.tools.capabilities(refs[i]) : null,
       })
     }
     return out
@@ -592,11 +593,17 @@
   function taskStateContextMessage(agent, input, requestCtx, toolRefs) {
     const prefixes = toolPrefixSummary(toolRefs || [])
     const queue = agent.queue || []
+    const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
     return contextCardMessage('task', 'task', 70, [
       'Current task state.',
       'permissionMode: ' + (agent.permissionMode || 'default'),
       'turn: ' + (requestCtx && requestCtx.turn || 0),
       'inputMessageId: ' + (input && input.id || ''),
+      quest ? 'questId: ' + quest.id : '',
+      quest && quest.goal ? 'questGoal: ' + quest.goal : '',
+      quest && quest.plan && quest.plan.length ? 'questPlan: ' + compactJson(quest.plan.map(function (step) {
+        return { id: step.id, title: step.title, status: step.status, kind: step.kind }
+      }), 2000) : '',
       'queuedMessages: ' + queue.length,
       'visibleToolCount: ' + (toolRefs || []).length,
       'visibleToolPrefixes: ' + prefixes.join(', '),
@@ -686,15 +693,38 @@
     const skillSpecs = resolveSkillSpecs(skillRefs)
     baseCtx.skillRefs = skillRefs
     baseCtx.skillSpecs = skillSpecs
+    const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
+    const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
+    if (ai.trace && ai.trace.append) {
+      ai.trace.append({
+        type: 'request_built',
+        runId: runId,
+        traceId: runId,
+        agentId: agent.id,
+        messageId: input && input.id || null,
+        questId: input && input.questId || null,
+        phase: 'request',
+        status: 'done',
+        summary: 'provider request built',
+        meta: {
+          messageCount: messages.length,
+          toolCount: tools.length,
+          contextItems: contextPack ? contextPack.items.length : 0,
+          contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
+        },
+      })
+    }
     return {
       runId: runId,
       agent: agent,
       actor: who,
       connectionName: agent.connection || ai.defaultConnection || 'mock',
       connection: agent.connection || ai.defaultConnection || 'mock',
+      connectionCapabilities: ai.connectionCapabilities ? ai.connectionCapabilities(agent.connection || ai.defaultConnection || 'mock') : {},
       model: agent.model || '',
       input: input || null,
-      messages: requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools),
+      messages: messages,
+      contextPack: contextPack,
       contextRefs: contextRefs.slice(),
       attachmentRefs: attachmentRefs,
       attachments: resolvedAttachments,

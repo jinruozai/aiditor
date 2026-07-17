@@ -12,6 +12,7 @@ function loadCore(storage) {
   vm.runInThisContext(readFileSync('src/ai/serialize.js', 'utf8'), { filename: 'ai/serialize.js' })
   vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
   vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
+  vm.runInThisContext(readFileSync('src/ai/memory.js', 'utf8'), { filename: 'ai/memory.js' })
   vm.runInThisContext(readFileSync('src/ai/compaction.js', 'utf8'), { filename: 'ai/compaction.js' })
 }
 
@@ -49,6 +50,21 @@ function assertCompactionRecordAndRequestView() {
 
   const messages = []
   for (let i = 0; i < 8; i++) messages.push({ role: i % 2 ? 'assistant' : 'user', content: 'old transcript line ' + i })
+  messages[1].content = 'Decision: Keep dock panel runtime detached when inactive.'
+  messages[2].content = 'Fact: Workspace writes must use baseHash.'
+  messages[3].content = 'Todo: Add visual compaction inspector later.'
+  messages[4] = {
+    role: 'assistant',
+    content: '',
+    toolCalls: [{ id: 'verify-call', toolId: 'verify.run', status: 'failed', error: 'lint failed' }],
+  }
+  messages[5] = {
+    role: 'tool',
+    from: 'tool:verify.run',
+    content: 'lint failed at src/app.js',
+    meta: { sourceMessageId: 'verify-source', toolCallId: 'verify-call', toolId: 'verify.run' },
+    status: 'error',
+  }
   messages.push({ role: 'user', content: 'recent raw one' })
   messages.push({ role: 'assistant', content: 'recent raw two' })
   const agent = ai.createAgent({
@@ -65,6 +81,15 @@ function assertCompactionRecordAndRequestView() {
   const record = ai.compaction.run(agent.id, plan)
   assert.equal(record.messageIds.length, 8)
   assert.match(record.summary, /Compacted 8 older messages/)
+  assert.equal(record.decisions[0].text, 'Keep dock panel runtime detached when inactive.')
+  assert.equal(record.facts[0].text, 'Workspace writes must use baseHash.')
+  assert.equal(record.openItems[0].text, 'Add visual compaction inspector later.')
+  assert.equal(record.verification.length >= 1, true)
+  assert.equal(record.risks.length >= 1, true)
+  const updatedMemory = ai.findAgent(agent.id).memory
+  assert.equal(updatedMemory.decisions.includes('Keep dock panel runtime detached when inactive.'), true)
+  assert.equal(updatedMemory.facts.includes('Workspace writes must use baseHash.'), true)
+  assert.equal(updatedMemory.openItems.includes('Add visual compaction inspector later.'), true)
   assert.equal(ai.compaction.records(agent.id).length, 1)
 
   const request = ai.makeRequest(ai.findAgent(agent.id), null, 'run-test', 'user', 0)

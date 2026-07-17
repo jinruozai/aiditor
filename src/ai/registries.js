@@ -44,6 +44,30 @@
     return tools[name]
   }
 
+  function toolCapabilities(name) {
+    const tool = getTool(name) || {}
+    const explicit = tool.capabilities || {}
+    const permissions = tool.permissions || []
+    const hasApply = !!tool.apply
+    const mutates = explicit.mutates != null ? !!explicit.mutates : hasApply
+    return {
+      preview: !!tool.preview,
+      run: !!tool.run,
+      apply: hasApply,
+      mutates: mutates,
+      read: explicit.read != null ? !!explicit.read : !mutates,
+      write: explicit.write != null ? !!explicit.write : mutates,
+      delete: !!explicit.delete,
+      execute: !!explicit.execute,
+      network: !!explicit.network,
+      install: !!explicit.install,
+      idempotent: !!explicit.idempotent,
+      requiresApproval: explicit.requiresApproval != null ? !!explicit.requiresApproval : hasApply,
+      risk: explicit.risk || tool.risk || (explicit.delete ? 'delete' : (mutates ? 'write' : 'read')),
+      permissions: permissions.slice ? permissions.slice() : [],
+    }
+  }
+
   function isToolVisibleToModel(name, ctx, explicit) {
     const tool = getTool(name)
     if (!tool) return false
@@ -293,6 +317,7 @@
       return prefix ? names.filter(function (name) { return matchesPrefix(name, prefix) }) : names
     },
     meta: function (name) { return Object.assign({}, toolMeta[name] || {}) },
+    capabilities: toolCapabilities,
   }
   ai.toolMeta = function (name) { return Object.assign({}, toolMeta[name] || {}) }
   ai.collectContext = collectContext

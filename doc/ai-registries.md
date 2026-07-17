@@ -128,6 +128,36 @@ by framework code but should not appear in normal model requests. Direct
 registry access is unchanged; the visibility rule only decides what the request
 builder sends to the provider.
 
+Tool specs also have a normalized capability view:
+
+```js
+aiditor.ai.tools.capabilities(name)
+```
+
+The returned shape is diagnostic/runtime metadata:
+
+```text
+preview
+run
+apply
+mutates
+read
+write
+delete
+execute
+network
+install
+idempotent
+requiresApproval
+risk
+permissions
+```
+
+Capabilities do not create a second permission system and do not execute
+anything. They let request assembly, trace/debug UI, approval surfaces, and host
+policy code speak about the same tool without reverse-engineering whether it has
+`preview`, `run`, or `apply` functions.
+
 ## Context, Reference, Target
 
 Definitions:

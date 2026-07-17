@@ -34,7 +34,7 @@ automatically the actor. Helpers must preserve this distinction:
 canRead(actor, target, scope)
 canSend(actor, target)
 canManage(actor, target)
-canUseTool(actor, agentId, toolId, phase)
+canUseTool(actor, agentId, toolId, phase, details)
 ```
 
 Using the target agent as the actor silently widens permissions for delegated
@@ -122,3 +122,16 @@ context/reference read when it exposes non-public host state
 ```
 
 A module may add helper APIs, but it must not invent a second permission system.
+
+Tool permission calls should pass the current run metadata when available:
+
+```text
+runId
+traceId
+messageId
+risk
+capabilities
+```
+
+This keeps `permissionAudit` aligned with run trace, tool cards, and approval UI
+without changing the permission resolver contract.

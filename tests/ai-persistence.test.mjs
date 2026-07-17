@@ -32,8 +32,17 @@ function storedBytes(store, key) {
   return text.length * 2
 }
 
-function loadRuntime(store, location) {
-  global.window = { aiditor: {}, localStorage: store }
+function loadRuntime(store, location, events) {
+  global.document = { visibilityState: 'visible' }
+  global.window = {
+    aiditor: {},
+    localStorage: store,
+    addEventListener: function (type, fn) {
+      if (!events) return
+      if (!events[type]) events[type] = []
+      events[type].push(fn)
+    },
+  }
   if (location) global.window.location = location
   vm.runInThisContext(readFileSync('src/core/signal.js', 'utf8'), { filename: 'signal.js' })
   vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
@@ -108,7 +117,32 @@ assert.equal(window.localStorage.getItem('test.ai'), null)
 
 window.localStorage.setItem('too.big.ai', 'x'.repeat(5000001))
 ai.configurePersistence({ key: 'too.big.ai' })
-assert.equal(window.localStorage.getItem('too.big.ai'), null)
+assert.equal(ai.agents().length, 0)
+
+const oversizedValid = storage()
+oversizedValid.setItem('oversized.ai', JSON.stringify({
+  version: 2,
+  agents: [{
+    id: 'oversized-agent',
+    name: 'Oversized Agent',
+    messages: [
+      { id: 'old', role: 'user', content: 'old:' + 'x'.repeat(40000) },
+      { id: 'new', role: 'assistant', content: 'new:' + 'y'.repeat(40000) },
+    ],
+  }],
+  attachments: [],
+  activeAgentId: 'oversized-agent',
+}))
+ai = loadRuntime(oversizedValid)
+ai.configurePersistence({ key: 'oversized.ai', maxBytes: 16000, maxMessagesPerAgent: 1 })
+assert.equal(ai.agents().length, 1)
+assert.equal(ai.agents()[0].name, 'Oversized Agent')
+assert.equal(ai.agents()[0].messages.length, 1)
+assert.equal(ai.agents()[0].messages[0].id, 'new')
+assert.equal(ai.agents()[0].messages[0].content.indexOf('[truncated for persistence]') > 0, true)
+const migratedOversized = JSON.parse(window.localStorage.getItem('oversized.ai'))
+assert.equal(migratedOversized.persistence.compacted, true)
+assert.equal(storedBytes(window.localStorage, 'oversized.ai') <= 16000, true)
 
 const defaultMemory = storage()
 defaultMemory.setItem('aiditor.ai.v2', JSON.stringify({
@@ -185,6 +219,59 @@ assert.equal(window.localStorage.getItem('aiditor.ai.two'), null)
 }
 
 {
+  const questMemory = storage()
+  ai = loadRuntime(questMemory)
+  ai.configurePersistence({ key: 'quest.ai', maxBytes: 18000, maxMessagesPerAgent: 2, load: false })
+  const questAgent = ai.createAgent({ name: 'Quest Agent' })
+  ai.updateAgent(questAgent.id, {
+    quests: [{
+      id: 'quest-1',
+      goal: 'Keep the plan structurally valid',
+      status: 'running',
+      plan: [{ id: 'step-1', title: 'Inspect state', status: 'running', result: { files: ['one.js', 'two.js'] } }],
+      currentStepId: 'step-1',
+    }],
+  })
+  for (let i = 0; i < 6; i++) {
+    ai.appendMessage(questAgent.id, { role: i % 2 ? 'assistant' : 'user', content: 'quest-message-' + i + ':' + 'x'.repeat(20000) })
+  }
+  ai.save()
+  const storedQuestSnapshot = JSON.parse(window.localStorage.getItem('quest.ai'))
+  const storedQuest = storedQuestSnapshot.agents[0].quests[0]
+  assert.equal(storedQuestSnapshot.persistence.emergency, true)
+  assert.equal(Array.isArray(storedQuest.plan), true)
+  assert.equal(storedQuest.plan[0].id, 'step-1')
+  assert.equal(typeof storedQuest.plan[0], 'object')
+
+  ai = loadRuntime(questMemory)
+  ai.configurePersistence({ key: 'quest.ai', maxBytes: 18000, maxMessagesPerAgent: 2 })
+  const restoredQuest = ai.agents()[0].quests[0]
+  assert.equal(Array.isArray(restoredQuest.plan), true)
+  assert.equal(restoredQuest.plan[0].title, 'Inspect state')
+  assert.equal(restoredQuest.currentStepId, 'step-1')
+}
+
+{
+  const malformedMemory = storage()
+  malformedMemory.setItem('aiditor.ai', JSON.stringify({
+    version: 2,
+    agents: [{
+      id: 'malformed-agent',
+      name: 'Malformed Quest Agent',
+      messages: [{ id: 'kept-message', role: 'assistant', content: 'keep this transcript' }],
+      quests: [{ id: 'malformed-quest', status: 'completed', plan: '[{"id":"step-1"}]' }],
+    }],
+    attachments: [],
+    activeAgentId: 'malformed-agent',
+  }))
+  ai = loadRuntime(malformedMemory)
+  assert.equal(ai.agents()[0].messages[0].content, 'keep this transcript')
+  assert.deepEqual(ai.agents()[0].quests[0].plan, [])
+  ai.save()
+  assert.equal(Array.isArray(JSON.parse(window.localStorage.getItem('aiditor.ai')).agents[0].quests[0].plan), true)
+}
+
+{
   const toolMemory = storage()
   ai = loadRuntime(toolMemory)
   ai.configurePersistence({ key: 'tool.ai', maxBytes: 50000, maxMessagesPerAgent: 5, toolResultPolicy: 'metadata-only', load: false })
@@ -243,6 +330,26 @@ assert.equal(window.localStorage.getItem('aiditor.ai.two'), null)
   ai.save()
   assert.equal(reports, 1)
   assert.equal(failing.attempts(), 2)
+}
+
+{
+  const flushMemory = storage()
+  const events = {}
+  ai = loadRuntime(flushMemory, null, events)
+  ai.configurePersistence({ key: 'flush.ai', load: false })
+  ai.createAgent({ name: 'Flush Agent' })
+  assert.equal(window.localStorage.getItem('flush.ai'), null)
+  events.beforeunload[0]()
+  assert.equal(JSON.parse(window.localStorage.getItem('flush.ai')).agents[0].name, 'Flush Agent')
+
+  ai.createAgent({ name: 'Pagehide Agent' })
+  events.pagehide[0]()
+  assert.equal(JSON.parse(window.localStorage.getItem('flush.ai')).agents.length, 2)
+
+  ai.createAgent({ name: 'Hidden Agent' })
+  document.visibilityState = 'hidden'
+  events.visibilitychange[0]()
+  assert.equal(JSON.parse(window.localStorage.getItem('flush.ai')).agents.length, 3)
 }
 
 console.log('ai persistence tests ok')

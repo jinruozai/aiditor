@@ -42,6 +42,11 @@ contextRefs
 
 Parent/child is an agent relationship, not a new runtime layer.
 
+The tree is the primary agent topology. Child agents are not anonymous helper
+threads; they are addressable runtime nodes with their own transcript, queue,
+quests, inbox, model, permissions, context refs, skills, and tools. Delegation
+should preserve that tree instead of flattening work into one global chat list.
+
 New agents inherit the user's latest selected connection/model when no explicit
 model is provided. This is AI runtime user preference, not project data. The
 fallback order is:
@@ -149,6 +154,14 @@ aiditor.ai.agent.messages(agentId, options, actor)
 Messages may contain text, rich prompt content, context refs, attachments, tool
 calls, quest links, and runtime status.
 
+Transcript display uses the normalized message part pipeline defined in
+[ai-message-rendering.md](./ai-message-rendering.md). Provider-specific content
+blocks normalize into common parts such as text, code, image, file, reference,
+attachment, error, and fallback card. Host projects may register display-only
+renderers for domain card kinds without changing the built-in transcript panel.
+Ordinary text is rendered as safe Markdown; structured provider blocks and host
+cards continue through the renderer registry.
+
 ## Queue
 
 User and system work is queued before execution.
@@ -219,6 +232,8 @@ Implemented abilities:
 aiditor.ai.createQuest(agentId, spec)
 aiditor.ai.findQuest(agentId, questId)
 aiditor.ai.updateQuest(agentId, questId, patch)
+aiditor.ai.updateQuestPlan(agentId, questId, plan)
+aiditor.ai.updateQuestStep(agentId, questId, stepId, patch)
 aiditor.ai.agent.send(toAgentId, spec)
 ```
 
@@ -238,6 +253,31 @@ message.read
 ```
 
 These tools are part of the AI runtime, not product domain tools.
+
+Quest records may carry a compact plan:
+
+```text
+goal
+plan[]             ordered generic steps
+currentStepId
+budget
+```
+
+Each step is a small runtime state record:
+
+```text
+id
+title
+status             pending | running | completed | failed | blocked | skipped
+kind               work by default
+summary
+result
+meta
+```
+
+This is not a project workflow engine. It is a lightweight task-state surface for
+tree agents so a parent can understand what a child is doing, what completed,
+and what blocked without reading a whole transcript.
 
 ## Inbox
 
@@ -341,6 +381,9 @@ Rules:
    stream chunks.
 5. Long conversations should remain cheap because the number of mounted message
    rows is bounded by viewport size, not message count.
+6. Streaming plain text patches its existing text node. Rich Markdown reparses
+   only the changing text part while preserving its root and the surrounding
+   message row.
 
 The live strip is diagnostic UI. It should show the latest model/provider bytes
 as soon as the runtime receives them, then collapse back to idle when the run is
@@ -348,9 +391,19 @@ done.
 
 ## Trace And Audit
 
-Every run creates a `runId`. Provider requests, stream chunks, tool calls,
-operation previews/applies, workspace mutations, extension installs, and
-permission decisions also carry the same `runId` plus a `traceId` or span id.
+Every run creates a `runId`. The AI runtime exposes a compact append-only trace:
+
+```js
+aiditor.ai.trace.events()
+aiditor.ai.trace.append(event)
+aiditor.ai.trace.list(filter)
+aiditor.ai.trace.clear(filter)
+```
+
+Provider requests, model messages, tool preview/run/apply phases, approval
+waits, completion, stop, and failure events use the same `runId` as `traceId`.
+Permission decisions remain in `aiditor.ai.permissionAudit`; host adapters and
+workspace mutation layers should include the same `runId` when they have it.
 
 The runtime should be able to answer:
 
@@ -365,6 +418,10 @@ which resource version was inspected and committed
 This trace is diagnostic infrastructure, not a new model-facing concept. It
 connects `aiditor.log`, tool cards, ChangeSet review, provider usage, and the
 permission audit log.
+
+Trace events are deliberately compact. Large tool results, full files, and
+provider payloads stay in transcript/tool/result storage; trace only records the
+timeline and enough metadata to debug "what happened and why".
 
 ## Tool Call Lifecycle
 

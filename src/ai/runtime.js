@@ -233,6 +233,24 @@
     return names.length ? 'tool: ' + names.join(', ') + (input ? ' · ' + toolInputTail(input) : '') : 'tool call'
   }
 
+  function trace(spec) {
+    return ai.trace && ai.trace.append ? ai.trace.append(spec) : null
+  }
+
+  function toolTraceBase(agentId, call) {
+    const found = ai.findToolCall ? ai.findToolCall(agentId, call.id) : null
+    const message = found && found.message || null
+    const runId = message && message.meta && message.meta.runId || null
+    return {
+      runId: runId,
+      traceId: runId,
+      agentId: agentId,
+      messageId: call.messageId || message && message.id || null,
+      questId: message && message.resultForQuestId || null,
+      entry: call.toolId,
+    }
+  }
+
   function publishToolActivity(agentId, call, label) {
     const input = toolCallInput(call)
     ai.setActiveRunState(agentId, {
@@ -650,9 +668,16 @@
   function executeOneToolCall(agentId, call, actor) {
     const tool = ai.tools.get(call.toolId)
     if (!tool) {
+      trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_missing', status: 'failed', summary: 'tool not found' }))
       appendToolResult(agentId, call, { error: 'Tool not found: ' + call.toolId }, 'error')
       return Promise.resolve({ waiting: false })
     }
+    trace(Object.assign(toolTraceBase(agentId, call), {
+      type: 'tool_started',
+      status: 'running',
+      summary: toolCallName(call),
+      meta: { hasPreview: !!tool.preview, hasRun: !!tool.run, hasApply: !!tool.apply },
+    }))
     publishToolActivity(agentId, call, 'preparing')
     if (tool.apply) {
       publishToolActivity(agentId, call, tool.preview ? 'previewing' : 'preparing')
@@ -661,14 +686,22 @@
         const prepared = current && current.toolCall || call
         const state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
         if (prepared.status === 'failed' || prepared.status === 'rejected') {
+          trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: prepared.status, summary: prepared.error || prepared.status }))
           appendToolResult(agentId, call, prepared.status === 'failed' ? failedToolPayload(prepared) : { rejected: true, reason: prepared.error || 'Rejected' }, prepared.status === 'failed' ? 'error' : 'done')
           return { waiting: false }
         }
         if (shouldAutoApplyTool(ai.findAgent(agentId), prepared, state)) {
           publishToolActivity(agentId, call, 'applying')
-          return applyPreparedApprovalTool(agentId, call, actor)
+          return applyPreparedApprovalTool(agentId, call, actor).then(function (result) {
+            trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: 'applied', summary: toolCallName(call) }))
+            return result
+          })
         }
-        if (isWaitingForUser(state)) return { waiting: true }
+        if (isWaitingForUser(state)) {
+          trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
+          return { waiting: true }
+        }
+        trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: 'failed', summary: 'not actionable' }))
         appendToolResult(agentId, call, { error: 'Tool call was not allowed or did not produce an actionable preview: ' + call.toolId }, 'error')
         return { waiting: false }
       })
@@ -682,6 +715,7 @@
     }
     return run.promise.then(function (done) {
       appendToolResult(agentId, call, done && done.status === 'failed' ? failedToolPayload(done) : done && (done.result || done), done && done.status === 'failed' ? 'error' : 'done')
+      trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: done && done.status === 'failed' ? 'failed' : 'completed', summary: toolCallName(call) }))
       return { waiting: false }
     })
   }
@@ -713,6 +747,17 @@
       runState: 'connecting',
     }
     publishRunState(agentId, state, request, 'connecting', true)
+    trace({
+      type: 'assistant_message_started',
+      runId: request.runId,
+      traceId: request.runId,
+      agentId: agentId,
+      messageId: assistant.id,
+      questId: inputMessage && inputMessage.questId || null,
+      phase: 'model',
+      status: 'running',
+      summary: 'assistant response started',
+    })
     function failTurn(err) {
       if (controller.signal.aborted) return null
       const completedAt = Date.now()
@@ -731,10 +776,27 @@
       state.completedAt = completedAt
       state.error = String(err && err.message ? err.message : err)
       publishRunState(agentId, state, request, 'error', true)
+      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error })
       throw err
     }
     return Promise.resolve().then(function () {
       request.stream = request.stream || !!provider.stream
+      trace({
+        type: 'provider_request_started',
+        runId: request.runId,
+        traceId: request.runId,
+        agentId: agentId,
+        messageId: assistant.id,
+        questId: inputMessage && inputMessage.questId || null,
+        entry: request.connectionName,
+        phase: 'provider',
+        status: 'running',
+        summary: request.connectionName + ' / ' + (request.agent.model || request.model || ''),
+        meta: {
+          messageCount: request.messages ? request.messages.length : 0,
+          toolCount: request.tools ? request.tools.length : 0,
+        },
+      })
       return provider.stream ? provider.stream(request, ctx) : provider.send(request, ctx)
     }).then(function (result) {
       if (controller.signal.aborted) return null
@@ -767,6 +829,7 @@
       if (controller.signal.aborted || !state.count) return message
       const current = ai.findAgent(agentId)
       if (!current || state.waiting) {
+        trace({ type: 'run_waiting_approval', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: message.id, questId: request.input && request.input.questId || null, status: 'waiting_approval', summary: 'waiting for tool approval' })
         publishRunState(agentId, {
           messageId: message.id,
           content: message.content || '',
@@ -870,6 +933,18 @@
       activeMessageId: input && input.id || null,
       activeQuestId: input && input.questId || null,
     })
+    trace({
+      type: 'run_started',
+      runId: request.runId,
+      traceId: request.runId,
+      agentId: agentId,
+      messageId: input && input.id || null,
+      questId: input && input.questId || null,
+      parentAgentId: request.agent && request.agent.parentAgentId || null,
+      phase: 'run',
+      status: 'running',
+      summary: statusText || 'agent run started',
+    })
     if (markInputStarted && input && input.id) ai.updateMessage(agentId, input.id, { status: 'running', startedAt: Date.now() })
     if (markInputStarted && input && input.questId) ai.updateQuest(agentId, input.questId, { status: 'running', startedAt: Date.now() })
 
@@ -919,6 +994,17 @@
     const current = ai.findAgent(agentId)
     if (current && current.status === 'waiting_approval') return result
     completeMessageExecution(agentId, request, result)
+    trace({
+      type: 'run_completed',
+      runId: request.runId,
+      traceId: request.runId,
+      agentId: agentId,
+      messageId: result && result.id || null,
+      questId: request.input && request.input.questId || null,
+      phase: 'run',
+      status: result && result.status === 'error' ? 'failed' : 'completed',
+      summary: result && typeof result.content === 'string' ? result.content.slice(0, 240) : '',
+    })
     const agent = ai.findAgent(agentId)
     if (agent && agent.queue && agent.queue.length) {
       ai.setAgentStatus(agentId, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
@@ -1073,6 +1159,7 @@
       const input = run.request && run.request.input
       if (input && input.id) ai.updateMessage(agent.id, input.id, { status: 'stopped', completedAt: Date.now() })
       if (input && input.questId) ai.updateQuest(agent.id, input.questId, { status: 'stopped', completedAt: Date.now(), summary: 'Stopped' })
+      trace({ type: 'run_stopped', runId: run.runId, traceId: run.runId, agentId: agent.id, messageId: run.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: 'run stopped' })
       if (run.connection && run.connection.abort) {
         if (aiditor.safeCall) aiditor.safeCall({ scope: 'ai', connection: agent.connection || ai.defaultConnection, runId: run.runId }, function () { run.connection.abort(run.runId) })
         else run.connection.abort(run.runId)
@@ -1089,6 +1176,7 @@
       const input = waiting.request && waiting.request.input
       if (input && input.id) ai.updateMessage(agent.id, input.id, { status: 'stopped', completedAt: Date.now() })
       if (input && input.questId) ai.updateQuest(agent.id, input.questId, { status: 'stopped', completedAt: Date.now(), summary: 'Stopped' })
+      trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: 'waiting run stopped' })
       delete waitingRuns[agent.id]
     }
     ai.setAgentStatus(agent.id, status || 'idle')

@@ -58,6 +58,13 @@ const map = await ai.tools.get('code.map').run({ path: 'src', maxFiles: 10 })
 assert.deepEqual(map.files.map(function (file) { return file.path }).sort(), ['src/app.js', 'src/util.js'])
 assert.equal(map.truncated, false)
 
+const rankedMap = await ai.tools.get('code.map').run({ path: 'src', query: 'registerComponent click bus', maxFiles: 10 })
+assert.equal(rankedMap.query, 'registerComponent click bus')
+assert.equal(rankedMap.files[0].path, 'src/app.js')
+assert.equal(rankedMap.files[0].match.score > 0, true)
+assert.equal(rankedMap.files.some(function (file) { return file.path === 'src/util.js' }), false)
+assert.equal(rankedMap.totalMatches, 1)
+
 assert.equal(ai.tools.get('git.status'), undefined)
 ai.configureGit({
   status: function () { return { clean: false, files: ['src/app.js'] } },

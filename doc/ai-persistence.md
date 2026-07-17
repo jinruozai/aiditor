@@ -127,6 +127,11 @@ Restore normalizes transient runtime state. Running, queued, waiting, stopped,
 and failed activity must return to an idle or stopped state that the UI can
 display safely after reload.
 
+Stored data is an external persistence boundary even when AIditor originally
+wrote it. Invalid typed fields are normalized without preventing the rest of a
+recoverable snapshot from loading. For example, a malformed quest `plan`
+becomes an empty plan while the agent and its messages remain available.
+
 ## Save Algorithm
 
 Saving follows one deterministic path:
@@ -151,10 +156,14 @@ Rules:
    count times two is acceptable for `localStorage`.
 3. Compaction is deterministic. The same runtime state and persistence options
    produce the same compact snapshot.
-4. `setItem` quota failures trigger one emergency compaction attempt.
-5. If emergency compaction still cannot be written, persistence is disabled for
+4. Typed runtime records keep their protocol shape during compaction. Quest
+   plans remain arrays of quest-step records; only bounded text and open
+   metadata payloads may be summarized. Compaction must never replace a typed
+   collection with a serialized string.
+5. `setItem` quota failures trigger one emergency compaction attempt.
+6. If emergency compaction still cannot be written, persistence is disabled for
    the current runtime session and the framework emits one throttled warning.
-6. Reactive save ticks must not report the same quota failure repeatedly.
+7. Reactive save ticks must not report the same quota failure repeatedly.
 
 Quota failure is a storage degradation, not a project data failure. The user can
 continue working with the in-memory AI runtime; only reload recovery is degraded
@@ -278,16 +287,27 @@ Repeated quota errors for the same key and runtime session are coalesced. The
 runtime may expose state for diagnostics, but hosts should not need to poll or
 special-case quota failures.
 
+Reactive changes are written through a short debounce so streaming updates do
+not block the UI. The runtime flushes a pending debounced save on
+`beforeunload`, `pagehide`, and `visibilitychange` when the document becomes
+hidden. Hosts should not add their own unload persistence path for AI chat
+state.
+
 ## Read Algorithm
 
 Reading persisted state is also bounded:
 
 1. If storage is unavailable, return no snapshot.
-2. If the stored string is above the configured read budget, remove the key and
-   return no snapshot.
-3. If parsing fails, remove the key only when the failure is clearly caused by
+2. Parse a versioned snapshot before applying the read budget. A valid
+   oversized snapshot is treated as an older/unbounded persistence payload.
+3. If the stored string is above the configured read budget, compact it through
+   the same deterministic persistence compaction path used by save, attempt to
+   write the compacted snapshot back, and restore the compacted data.
+4. If compacted rewrite fails, still restore the compacted in-memory snapshot
+   for this load rather than dropping all chat history.
+5. If parsing fails, remove the key only when the failure is clearly caused by
    this AI persistence payload.
-4. Restore versioned snapshots through the normal `makeAgent`, `makeMessage`,
+6. Restore versioned snapshots through the normal `makeAgent`, `makeMessage`,
    and runtime normalization path.
 
 Compacted snapshots are valid snapshots. Restore must not require host projects
@@ -305,7 +325,8 @@ Required coverage:
   fails after emergency compaction;
 - restored compacted messages and tool calls remain renderable and readable;
 - `clearStoredState()` removes the configured key;
-- stored strings above the read budget are removed on load.
+- valid stored snapshots above the read budget compact and restore on load;
+- pending debounced saves flush before page unload / page hide.
 
 ## Non-Goals
 

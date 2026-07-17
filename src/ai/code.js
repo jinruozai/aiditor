@@ -61,6 +61,55 @@
     return String(line || '').trim().replace(/\s+/g, ' ')
   }
 
+  function tokenize(text) {
+    const words = String(text || '').toLowerCase().split(/[^a-z0-9_$.-]+/).filter(function (item) { return item.length > 1 })
+    const seen = {}
+    const out = []
+    for (let i = 0; i < words.length; i++) {
+      if (seen[words[i]]) continue
+      seen[words[i]] = true
+      out.push(words[i])
+    }
+    return out
+  }
+
+  function includesFolded(text, term) {
+    return String(text || '').toLowerCase().indexOf(term) >= 0
+  }
+
+  function scoreOutline(outline, query) {
+    const terms = tokenize(query)
+    if (!terms.length) return { score: 0, reasons: [] }
+    let score = 0
+    const reasons = []
+    for (let i = 0; i < terms.length; i++) {
+      const term = terms[i]
+      if (includesFolded(outline.path, term)) {
+        score += 12
+        reasons.push('path:' + term)
+      }
+      for (let s = 0; s < outline.symbols.length; s++) {
+        if (includesFolded(outline.symbols[s].name, term)) {
+          score += 10
+          reasons.push('symbol:' + outline.symbols[s].name)
+        }
+      }
+      for (let c = 0; c < outline.calls.length; c++) {
+        if (includesFolded(outline.calls[c].name, term)) {
+          score += 4
+          reasons.push('call:' + outline.calls[c].name)
+        }
+      }
+      for (let e = 0; e < outline.events.length; e++) {
+        if (includesFolded(outline.events[e].text, term)) {
+          score += 3
+          reasons.push('event:' + term)
+        }
+      }
+    }
+    return { score: score, reasons: reasons.slice(0, 8) }
+  }
+
   function outlineText(path, text, opts) {
     const o = opts || {}
     const maxSymbols = o.maxSymbols || 80
@@ -141,22 +190,33 @@
     args = args || {}
     const ws = requireWorkspace()
     const maxFiles = Math.max(1, args.maxFiles || 80)
+    const maxResults = Math.max(1, args.maxResults || maxFiles)
     const paths = []
     const truncated = await walk(ws, args.path || '', paths, maxFiles + 1)
     const files = []
     for (let i = 0; i < paths.length && files.length < maxFiles; i++) {
       const file = await ws.readText(paths[i])
-      files.push(outlineText(file.path, file.text, {
+      const outline = outlineText(file.path, file.text, {
         maxSymbols: args.maxSymbols || 24,
         maxCalls: args.maxCalls || 40,
         maxEvents: args.maxEvents || 16,
-      }))
+      })
+      const match = scoreOutline(outline, args.query || '')
+      if (args.query) outline.match = match
+      files.push(outline)
+    }
+    if (args.query) {
+      files.sort(function (a, b) {
+        return (b.match.score || 0) - (a.match.score || 0) || a.path.localeCompare(b.path)
+      })
     }
     return {
       root: args.path || '',
-      files: files,
+      query: args.query || '',
+      files: args.query ? files.filter(function (file) { return file.match.score > 0 }).slice(0, maxResults) : files,
       truncated: truncated || paths.length > maxFiles,
       scannedFiles: Math.min(paths.length, maxFiles),
+      totalMatches: args.query ? files.filter(function (file) { return file.match.score > 0 }).length : files.length,
     }
   }
 
@@ -172,8 +232,8 @@
     }, { owner: owner, layer: 'builtin' })
     ai.tools.register('code.map', {
       title: 'Map Workspace Code',
-      description: 'Build compact outlines for code files under one workspace path.',
-      schema: { type: 'object', properties: { path: { type: 'string' }, maxFiles: { type: 'number' }, maxSymbols: { type: 'number' }, maxCalls: { type: 'number' }, maxEvents: { type: 'number' } } },
+      description: 'Build compact ranked outlines for code files under one workspace path. Use query to get a relevant repo map before reading exact ranges.',
+      schema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, maxFiles: { type: 'number' }, maxResults: { type: 'number' }, maxSymbols: { type: 'number' }, maxCalls: { type: 'number' }, maxEvents: { type: 'number' } } },
       permissions: ['tool.call'],
       available: workspaceAvailable,
       run: map,
@@ -183,6 +243,7 @@
   ai.code = {
     outlineText: outlineText,
     isCodeFile: isCodeFile,
+    scoreOutline: scoreOutline,
   }
 
   registerTools()

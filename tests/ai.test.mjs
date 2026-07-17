@@ -587,6 +587,8 @@ async function assertGdePatchPreviewRendering() {
   }
   window.aiditor.registerComponent = function (name, spec) { components[name] = spec }
   vm.runInThisContext(readFileSync('src/ui/data/changeReview.js', 'utf8'), { filename: 'ui/data/changeReview.js' })
+  vm.runInThisContext(readFileSync('src/ai/message-markdown.js', 'utf8'), { filename: 'ai/message-markdown.js' })
+  vm.runInThisContext(readFileSync('src/ai/message-renderers.js', 'utf8'), { filename: 'ai/message-renderers.js' })
   vm.runInThisContext(readFileSync('src/ai/panels/message-live-strip.js', 'utf8'), { filename: 'ai/panels/message-live-strip.js' })
   vm.runInThisContext(readFileSync('src/ai/panels/message-virtualizer.js', 'utf8'), { filename: 'ai/panels/message-virtualizer.js' })
   vm.runInThisContext(readFileSync('src/ai/panels/transcript.js', 'utf8'), { filename: 'ai/panels/transcript.js' })

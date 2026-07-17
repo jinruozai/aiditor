@@ -174,14 +174,40 @@
       fromAgentId: spec.fromAgentId || null,
       toAgentId: spec.toAgentId || null,
       requestMessageId: spec.requestMessageId || spec.id || null,
+      goal: spec.goal || spec.title || '',
       status: spec.status || 'queued',
       resultMessageId: spec.resultMessageId || spec.resultId || null,
       summary: spec.summary || '',
+      plan: normalizeQuestPlan(spec.plan || spec.steps || []),
+      currentStepId: spec.currentStepId || null,
+      budget: spec.budget || null,
       createdAt: spec.createdAt || now(),
       startedAt: spec.startedAt || null,
       completedAt: spec.completedAt || null,
       meta: spec.meta || {},
     }
+  }
+
+  function normalizeQuestStep(step, index) {
+    step = step || {}
+    return {
+      id: step.id || ('step_' + String(index + 1)),
+      title: step.title || step.label || step.content || ('Step ' + String(index + 1)),
+      status: normalizeQuestStepStatus(step.status),
+      kind: step.kind || 'work',
+      summary: step.summary || '',
+      result: step.result || null,
+      meta: step.meta || {},
+    }
+  }
+
+  function normalizeQuestStepStatus(status) {
+    if (status === 'running' || status === 'completed' || status === 'failed' || status === 'blocked' || status === 'skipped') return status
+    return 'pending'
+  }
+
+  function normalizeQuestPlan(plan) {
+    return (Array.isArray(plan) ? plan : []).map(normalizeQuestStep)
   }
 
   function makeAttachment(spec) {
@@ -530,12 +556,34 @@
         const quests = (agent.quests || []).map(function (quest) {
           if (quest.id !== questId) return quest
           out = Object.assign({}, quest, patch || {})
+          if (patch && Object.prototype.hasOwnProperty.call(patch, 'plan')) out.plan = normalizeQuestPlan(patch.plan)
+          if (patch && Object.prototype.hasOwnProperty.call(patch, 'steps')) out.plan = normalizeQuestPlan(patch.steps)
           return out
         })
         return Object.assign({}, agent, { quests: quests, updatedAt: now() })
       })
     })
     return out
+  }
+
+  function updateQuestPlan(agentId, questId, plan, patch) {
+    return updateQuest(agentId, questId, Object.assign({}, patch || {}, { plan: normalizeQuestPlan(plan) }))
+  }
+
+  function updateQuestStep(agentId, questId, stepId, patch) {
+    const quest = findQuest(agentId, questId)
+    if (!quest) return null
+    let found = false
+    const plan = (quest.plan || []).map(function (step) {
+      if (step.id !== stepId) return step
+      found = true
+      return normalizeQuestStep(Object.assign({}, step, patch || {}, { id: step.id }), 0)
+    })
+    if (!found) return null
+    return updateQuest(agentId, questId, {
+      plan: plan,
+      currentStepId: patch && patch.status === 'running' ? stepId : quest.currentStepId,
+    })
   }
 
   function appendInboxEvent(agentId, event) {
@@ -842,6 +890,47 @@
     return out
   }
 
+  function compactQuestStep(step, emergency) {
+    return {
+      id: compactString(step.id, emergency ? 80 : 240),
+      title: compactString(step.title, emergency ? 160 : 512),
+      status: step.status,
+      kind: step.kind,
+      summary: compactString(step.summary, emergency ? 240 : 1000),
+      result: compactPersistenceValue(step.result, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+      meta: compactPersistenceValue(step.meta || {}, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+    }
+  }
+
+  function compactQuest(quest, emergency) {
+    const plan = Array.isArray(quest.plan) ? quest.plan : []
+    const maxSteps = emergency ? 32 : 128
+    const meta = compactPersistenceValue(quest.meta || {}, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24) || {}
+    if (plan.length > maxSteps) {
+      meta.persistence = Object.assign({}, meta.persistence && typeof meta.persistence === 'object' ? meta.persistence : {}, {
+        compacted: true,
+        omittedPlanSteps: plan.length - maxSteps,
+      })
+    }
+    return {
+      id: quest.id,
+      fromAgentId: quest.fromAgentId,
+      toAgentId: quest.toAgentId,
+      requestMessageId: quest.requestMessageId,
+      goal: compactString(quest.goal, emergency ? 240 : 1000),
+      status: quest.status,
+      resultMessageId: quest.resultMessageId,
+      summary: compactString(quest.summary, emergency ? 240 : 1000),
+      plan: plan.slice(0, maxSteps).map(function (step) { return compactQuestStep(step, emergency) }),
+      currentStepId: quest.currentStepId,
+      budget: compactPersistenceValue(quest.budget, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+      createdAt: quest.createdAt,
+      startedAt: quest.startedAt,
+      completedAt: quest.completedAt,
+      meta: meta,
+    }
+  }
+
   function compactAgent(agent, emergency) {
     const messages = agent.messages || []
     const maxMessages = Math.max(1, emergency ? Math.min(persistenceMaxMessagesPerAgent, 12) : persistenceMaxMessagesPerAgent)
@@ -864,7 +953,7 @@
         return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24)
       }),
       quests: (agent.quests || []).slice(emergency ? -8 : -32).map(function (item) {
-        return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24)
+        return compactQuest(item, emergency)
       }),
       queue: (agent.queue || []).slice(emergency ? -4 : -16).map(function (item) {
         return compactPersistenceValue(item, 1, 160, 8, 16)
@@ -963,6 +1052,7 @@
   }
 
   function save() {
+    if (saveTimer) clearTimeout(saveTimer)
     saveTimer = null
     const s = storage()
     const data = snapshot()
@@ -1009,6 +1099,19 @@
     saveTimer = setTimeout(save, 800)
   }
 
+  function flushPendingSave() {
+    if (saveTimer) save()
+  }
+
+  function installPersistenceFlushHandlers() {
+    if (!window.addEventListener) return
+    window.addEventListener('beforeunload', flushPendingSave)
+    window.addEventListener('pagehide', flushPendingSave)
+    window.addEventListener('visibilitychange', function () {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushPendingSave()
+    })
+  }
+
   function restore(data) {
     const next = data || readStored()
     if (!next || next.version !== 2) return null
@@ -1029,14 +1132,30 @@
     if (!s) return null
     try {
       const text = s.getItem(persistenceKey)
-      if (text && (text.length > MAX_STORED_STATE_CHARS || storageBytes(text) > persistenceMaxBytes)) {
-        s.removeItem(persistenceKey)
-        return null
+      if (!text) return null
+      const parsed = JSON.parse(text)
+      if (!parsed || parsed.version !== 2) return parsed
+      if (text.length > MAX_STORED_STATE_CHARS || storageBytes(text) > persistenceMaxBytes) {
+        return migrateStoredSnapshot(s, parsed, text)
       }
-      return text ? JSON.parse(text) : null
+      return parsed
     } catch (_) {
       return null
     }
+  }
+
+  function migrateStoredSnapshot(s, data, text) {
+    let prepared = null
+    try {
+      prepared = preparePersistenceSnapshot(data, false)
+    } catch (_) {
+      return null
+    }
+    if (prepared.fits) {
+      try { s.setItem(persistenceKey, prepared.text) } catch (_) {}
+      return prepared.data
+    }
+    return prepared.data
   }
 
   function configurePersistence(opts) {
@@ -1108,6 +1227,10 @@
       status: quest.status,
       resultId: quest.resultMessageId || null,
       summary: quest.summary || '',
+      goal: quest.goal || '',
+      plan: (quest.plan || []).slice(),
+      currentStepId: quest.currentStepId || null,
+      budget: quest.budget || null,
       createdAt: quest.createdAt,
       completedAt: quest.completedAt || null,
     }
@@ -1270,6 +1393,8 @@
   ai.createQuest = createQuest
   ai.findQuest = findQuest
   ai.updateQuest = updateQuest
+  ai.updateQuestPlan = updateQuestPlan
+  ai.updateQuestStep = updateQuestStep
   ai.appendInboxEvent = appendInboxEvent
   ai.markInboxEventConsumed = markInboxEventConsumed
   ai.addAttachment = addAttachment
@@ -1290,6 +1415,7 @@
   ai.agent.read = agentApiRead
   ai.agent.messages = agentMessages
 
+  installPersistenceFlushHandlers()
   restore()
   aiditor.effect(function () {
     agentsSig()

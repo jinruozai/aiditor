@@ -111,6 +111,8 @@ const defaultToolRequest = ai.makeRequest(defaultToolAgent, null, 'run_default_t
 assert.deepEqual(defaultToolRequest.tools, ['edit-record'])
 assert.equal(defaultToolRequest.toolSpecs.length, 1)
 assert.equal(defaultToolRequest.toolSpecs[0].id, 'edit-record')
+assert.equal(defaultToolRequest.toolSpecs[0].capabilities.apply, true)
+assert.equal(defaultToolRequest.toolSpecs[0].capabilities.risk, 'write')
 
 ai.tools.register('hidden-by-default', {
   exposeToModel: false,
@@ -153,6 +155,7 @@ assert.equal(proposed.status, 'proposed')
 assert.equal(proposed.actor, 'user')
 assert.equal(proposed.toolId, 'edit-record')
 assert.equal(ai.findAgent(agent.id).messages.length, 1)
+assert.equal(ai.getToolCallActionState(agent.id, proposed.id, 'user').capabilities.apply, true)
 
 const previewed = ai.previewToolCall(agent.id, proposed.id, 'user')
 assert.equal(previewed.status, 'previewed')
@@ -317,7 +320,7 @@ assert.equal(failedState.canRun, false)
 
 const calls = []
 ai.setPermissionResolver(function (ctx, next) {
-  calls.push({ actor: ctx.actor, scope: ctx.scope, toolId: ctx.toolId, phase: ctx.phase })
+  calls.push({ actor: ctx.actor, scope: ctx.scope, toolId: ctx.toolId, phase: ctx.phase, runId: ctx.runId, risk: ctx.risk })
   if (ctx.actor === 'blocked') return false
   if (ctx.scope === 'tool.apply') return false
   return next(ctx)
@@ -325,13 +328,16 @@ ai.setPermissionResolver(function (ctx, next) {
 
 assert.equal(ai.canUseTool('user', agent.id, 'edit-record', 'call'), true)
 assert.equal(ai.canUseTool('user', agent.id, 'edit-record', 'apply'), false)
+const permissionCall = ai.createToolCall(agent.id, { toolId: 'edit-record' }, 'user')
+ai.updateMessage(agent.id, permissionCall.messageId, { meta: { runId: 'run_permission_test' } })
+assert.equal(ai.getToolCallActionState(agent.id, permissionCall.id, 'user').canApply, false)
 assert.equal(ai.permissionAuditRecords().some(function (item) {
-  return item.scope === 'tool.apply' && item.entry === 'edit-record' && item.decision === 'deny'
+  return item.scope === 'tool.apply' && item.entry === 'edit-record' && item.decision === 'deny' && item.runId === 'run_permission_test' && item.risk === 'write'
 }), true)
 assert.equal(ai.createToolCall(agent.id, { toolId: 'edit-record' }, 'blocked'), null)
-assert.equal(ai.applyToolCall(agent.id, proposed.id, 'user'), null)
+assert.equal(ai.applyToolCall(agent.id, permissionCall.id, 'user'), null)
 assert.deepEqual(calls.some(function (call) {
-  return call.scope === 'tool.apply' && call.toolId === 'edit-record' && call.phase === 'apply'
+  return call.scope === 'tool.apply' && call.toolId === 'edit-record' && call.phase === 'apply' && call.runId === 'run_permission_test' && call.risk === 'write'
 }), true)
 ai.setPermissionResolver(null)
 

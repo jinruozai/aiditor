@@ -19,6 +19,49 @@ not enough bulk data to drown the task
 Exact files, rows, panels, logs, and tool results should enter by reference,
 search, or range reads before they enter as full text.
 
+For workspace-backed code work, the preferred Agent-Computer Interface flow is:
+
+```text
+workspace.fileSummary or code.map({ query })
+workspace.searchFiles when exact text matters
+workspace.readTextRange for the precise current range
+workspace.editText / patchText / writeText with baseHash
+verify.run / verify.diagnostics when available
+```
+
+See [ai-agent-computer-interface.md](./ai-agent-computer-interface.md).
+
+## Context Pack
+
+Every provider request also exposes a compact `contextPack` summary:
+
+```js
+{
+  version: 1,
+  items: [
+    {
+      id,
+      kind,
+      layer,
+      title,
+      summary,
+      uri,
+      source,
+      priority,
+      tokenEstimate,
+      stale,
+      meta
+    }
+  ],
+  totalTokenEstimate
+}
+```
+
+The pack is built from the same system context cards that are sent to the
+provider. It is diagnostic and inspectable runtime state, not another registry
+and not a second prompt channel. It lets UI, trace, and tests explain which
+context layers were included without parsing the final provider messages.
+
 ## Context Layers
 
 AIditor assembles context in this order:

@@ -239,6 +239,7 @@ aiditor/
 - `src/ai/context.js` 只负责 tool-call lifecycle 和 run context helper,不再承担 registry。
 - `src/ai/request.js` 负责请求组装:system context、attachments、reference snapshots、compaction、tool visibility、budgeted transcript。
 - `src/ai/runtime.js` 负责 scheduler/run/resume/tool approval/continuation。
+- `src/ai/message-markdown.js` + `message-renderers.js` 负责安全 Markdown 文本渲染、主流 provider content block 归一化、结构化 message part renderer registry 和一致的复制文本;不执行 raw HTML,不把任意 JSON 猜成 UI。
 - `src/ai/reference.js` 提供 references + operations 协议;`src/ai/change-set.js` 提供 grouped review/apply。
 - Rich prompt token 存 `refId`,不是 `resourceId`;chat attachments 是 runtime state,不是新的 model-facing registry。
 

@@ -124,6 +124,8 @@ Recommended shape:
   openItems: [],
   changedRefs: [],
   toolObservations: [],
+  verification: [],
+  risks: [],
   omittedDetails: [],
   tokenEstimateBefore: 0,
   tokenEstimateAfter: 0,
@@ -140,6 +142,7 @@ work safely:
 - checks that passed, failed, or were not run;
 - unresolved questions and pending follow-ups;
 - known failure causes and repair hints.
+- verification observations and compact risk records from failed tool calls.
 
 Verbose search output, repeated file reads, long generated code, and obsolete
 failed attempts should be summarized or omitted with a clear note.
@@ -161,6 +164,20 @@ Use compaction for old conversation history that is too large to send raw.
 
 Not every compaction updates memory. A compaction may contain temporary search
 results or failed attempts that should not become durable memory.
+
+The deterministic runtime updates memory conservatively. It promotes only
+explicitly marked transcript lines, for example:
+
+```text
+Fact: workspace writes require baseHash
+Decision: keep inactive panels detached from DOM
+Todo: add a visual compaction inspector
+```
+
+Chinese marker forms such as `事实:`、`结论:`、`待办:` are treated the same way.
+Ordinary assistant progress, raw tool output, verification failures, and
+temporary search results remain inside compaction records. They are context for
+continuing the task, not durable memory.
 
 ## Request Assembly
 
@@ -261,10 +278,12 @@ aiditor.ai.compaction.plan(agentId, input)
 aiditor.ai.compaction.run(agentId, plan)
 aiditor.ai.compaction.records(agentId)
 aiditor.ai.compaction.clear(agentId, options)
+aiditor.ai.memory.configure(options)
+aiditor.ai.memory.updateFromCompaction(agentId, record, options)
 ```
 
-This is an AI runtime service. It is not a tool registry and not a context
-registry.
+These are AI runtime services. They are not tool registries and not context
+registries.
 
 Optional human-facing commands may wrap it:
 
@@ -303,6 +322,8 @@ Current code already has useful pieces:
   compaction.
 - `src/ai/store.js` keeps messages, queue, inbox, quests, and runtime status in
   the agent record.
+- `src/ai/memory.js` provides conservative durable memory updates from explicit
+  compaction markers.
 - `src/ai/compaction.js` provides deterministic semantic compaction records,
   safe range planning, request filtering, memory messages, and compaction
   context messages.
@@ -316,7 +337,8 @@ Current code already has useful pieces:
 What is still missing:
 
 - optional model-based compactor output;
-- structured memory update policy beyond preserving existing `agent.memory`;
+- optional richer memory extraction that still remains auditable and
+  conservative;
 - visual UI for inspecting compactions.
 
 These pieces live inside the AI runtime. They should not add a project concept

@@ -21,6 +21,19 @@
     }).filter(function (item) { return !!item.id })
   }
 
+  function normalizeConnectionCapabilities(spec) {
+    const caps = Object.assign({}, spec && spec.capabilities || {})
+    const defaults = spec && spec.configDefaults || {}
+    return {
+      stream: caps.stream != null ? !!caps.stream : defaults.stream !== false,
+      toolCalling: caps.toolCalling !== false,
+      reasoning: !!caps.reasoning,
+      multimodal: !!caps.multimodal,
+      maxInputTokens: Number(caps.maxInputTokens || 0) || null,
+      local: !!caps.local,
+    }
+  }
+
   function registerAuthDriver(type, driver) {
     authDrivers[type] = driver || {}
     return authDrivers[type]
@@ -33,6 +46,7 @@
 
   function registerConnection(id, spec) {
     spec = Object.assign({}, spec || {}, { id: id || spec.id })
+    spec.capabilities = normalizeConnectionCapabilities(spec)
     connections[spec.id] = spec
     connectionsSig.set(connectionOptions())
     if (!activeConnection) activeConnection = spec.id
@@ -133,6 +147,7 @@
         authType: c.auth && c.auth.type || 'none',
         transportType: c.transport && c.transport.type || '',
         modelHints: c.modelHints || [],
+        capabilities: Object.assign({}, c.capabilities || {}),
         order: c.order || 1000,
       }
     }).sort(function (a, b) { return a.order - b.order || a.label.localeCompare(b.label) })
@@ -158,6 +173,11 @@
   function modelHints(id) {
     const c = getConnection(id)
     return c ? (c.modelHints || []) : []
+  }
+
+  function connectionCapabilities(id) {
+    const c = getConnection(id)
+    return c ? Object.assign({}, c.capabilities || normalizeConnectionCapabilities(c)) : {}
   }
 
   function setActiveConnection(id) {
@@ -258,6 +278,7 @@
   ai.connectionOptions = connectionOptions
   ai.connectionConfigKey = configKey
   ai.getConnectionConfig = connectionConfig
+  ai.connectionCapabilities = connectionCapabilities
   ai.modelHints = modelHints
   ai.setActiveConnection = setActiveConnection
   ai.authStatus = authStatus

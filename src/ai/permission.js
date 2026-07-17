@@ -170,8 +170,12 @@
   ai.canRead = function (actorId, targetId, scope) { return allowed(actorId, targetId, scope || 'agent.full') }
   ai.canSend = function (actorId, targetId) { return allowed(actorId, targetId, 'messages.send') }
   ai.canManage = function (actorId, targetId) { return allowed(actorId, targetId, 'agent.manage') }
-  ai.canUseTool = function (actorId, targetId, toolId, phase) {
-    return allowed(actorId, targetId, phase === 'apply' ? 'tool.apply' : 'tool.call', { toolId: toolId, entry: toolId, phase: phase || 'call' })
+  ai.canUseTool = function (actorId, targetId, toolId, phase, details) {
+    return allowed(actorId, targetId, phase === 'apply' ? 'tool.apply' : 'tool.call', Object.assign({
+      toolId: toolId,
+      entry: toolId,
+      phase: phase || 'call',
+    }, details || {}))
   }
   ai.canUseOperation = canUseOperation
   ai.canUseChangeSet = canUseChangeSet

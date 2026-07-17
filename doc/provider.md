@@ -46,6 +46,29 @@ aiditor.ai.connectionModels(connectionId)
 aiditor.ai.connectionStatus(connectionId)
 ```
 
+## Provider Capabilities
+
+Connections expose a normalized capability view:
+
+```js
+aiditor.ai.connectionCapabilities(connectionId)
+```
+
+The default shape is:
+
+```text
+stream
+toolCalling
+reasoning
+multimodal
+maxInputTokens
+local
+```
+
+This is provider metadata, not a routing engine. The request builder includes it
+on provider requests so tools, UI, and diagnostics can inspect what the selected
+connection claims to support without parsing provider ids or model names.
+
 ## Auth Drivers
 
 Implemented API:

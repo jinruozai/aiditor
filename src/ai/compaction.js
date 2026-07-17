@@ -13,6 +13,7 @@
     maxMessages: 80,
     maxRecordsInRequest: 12,
     summaryChars: 900,
+    memoryUpdate: 'conservative',
   }
   let nextCompactionId = 1
 
@@ -240,6 +241,74 @@
     return out
   }
 
+  function lineItems(messages, specs, max) {
+    const out = []
+    for (let i = 0; i < messages.length && out.length < max; i++) {
+      const text = textOf(messages[i].content)
+      const lines = text.split(/\r?\n/)
+      for (let j = 0; j < lines.length && out.length < max; j++) {
+        const line = clip(lines[j], 260)
+        if (!line) continue
+        for (let s = 0; s < specs.length; s++) {
+          const m = line.match(specs[s].re)
+          if (!m) continue
+          out.push({
+            text: clip((m[1] || line).replace(/^[:：\-\s]+/, ''), 240),
+            messageId: messages[i].id,
+            role: messages[i].role || '',
+          })
+          break
+        }
+      }
+    }
+    return out
+  }
+
+  function collectFacts(messages) {
+    return lineItems(messages, [
+      { re: /^(?:fact|facts|context|constraint|rule|invariant|事实|背景|约束|规则|原则)\s*[:：-]\s*(.+)$/i },
+    ], 12)
+  }
+
+  function collectDecisions(messages) {
+    return lineItems(messages, [
+      { re: /^(?:decision|decided|final decision|conclusion|结论|决定|最终方案|采用)\s*[:：-]\s*(.+)$/i },
+    ], 12)
+  }
+
+  function collectOpenItems(messages) {
+    return lineItems(messages, [
+      { re: /^(?:todo|open item|next|follow up|blocker|待办|后续|下一步|阻塞|需要确认)\s*[:：-]\s*(.+)$/i },
+    ], 12)
+  }
+
+  function collectVerification(tools) {
+    const out = []
+    for (let i = 0; i < tools.length; i++) {
+      if (String(tools[i].toolId || '').indexOf('verify.') !== 0) continue
+      out.push({
+        messageId: tools[i].messageId || null,
+        toolId: tools[i].toolId,
+        status: tools[i].status || '',
+        summary: tools[i].summary || tools[i].error || '',
+      })
+    }
+    return out
+  }
+
+  function collectRisks(tools) {
+    const out = []
+    for (let i = 0; i < tools.length && out.length < 12; i++) {
+      if (tools[i].status !== 'failed' && tools[i].status !== 'error' && !tools[i].error) continue
+      out.push({
+        messageId: tools[i].messageId || null,
+        toolId: tools[i].toolId || '',
+        summary: tools[i].error || tools[i].summary || 'failed',
+      })
+    }
+    return out
+  }
+
   function meaningfulLines(messages, role, max) {
     const out = []
     for (let i = 0; i < messages.length && out.length < max; i++) {
@@ -260,6 +329,11 @@
     const assistants = meaningfulLines(selected, 'assistant', 4)
     const tools = collectToolObservations(selected)
     const refs = collectRefs(selected)
+    const facts = collectFacts(selected)
+    const decisions = collectDecisions(selected)
+    const openItems = collectOpenItems(selected)
+    const verification = collectVerification(tools)
+    const risks = collectRisks(tools)
     const source = selected.map(function (message) {
       return [message.id, message.role, message.status, textOf(message.content), safeJson(message.toolCalls || [])].join('\n')
     }).join('\n---\n')
@@ -283,11 +357,13 @@
       model: 'deterministic',
       sourceHash: stableHash(source),
       summary: clip(summaryParts.join('\n'), config.summaryChars),
-      facts: [],
-      decisions: [],
-      openItems: [],
+      facts: facts,
+      decisions: decisions,
+      openItems: openItems,
       changedRefs: refs,
       toolObservations: tools,
+      verification: verification,
+      risks: risks,
       omittedDetails: selected.length > 0 ? ['Full raw messages remain in the transcript and are omitted from provider requests by this compaction record.'] : [],
       tokenEstimateBefore: planValue.tokenEstimateBefore || messagesCost(selected),
       tokenEstimateAfter: planValue.tokenEstimateAfter || estimateTokens(summaryParts.join('\n')),
@@ -301,6 +377,9 @@
     const record = buildRecord(agent, nextPlan)
     const records = (agent.compactions || []).concat([record])
     ai.updateAgent(agent.id, { compactions: records })
+    if (config.memoryUpdate === 'conservative' && ai.memory && ai.memory.updateFromCompaction) {
+      ai.memory.updateFromCompaction(agent.id, record)
+    }
     return record
   }
 
@@ -357,6 +436,8 @@
         openItems: record.openItems || [],
         changedRefs: record.changedRefs || [],
         toolObservations: (record.toolObservations || []).slice(0, 12),
+        verification: record.verification || [],
+        risks: record.risks || [],
         omittedDetails: record.omittedDetails || [],
       }
     })

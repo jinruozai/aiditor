@@ -12000,7 +12000,8 @@
 // opts:
 //   anchor   : HTMLElement                    required (popover anchor)
 //   items    : MenuItem[]
-//                MenuItem = { label, icon?, kbd?, onSelect?, disabled?, danger? }
+//                MenuItem = { label, icon?, kbd?, onSelect?, disabled?, danger?, closeOnSelect? }
+//                         | { type: 'checkbox', label, checked?, onChange?, closeOnSelect? }
 //                         | { type: 'divider' }
 //                         | { type: 'header', label }
 //                         | { label, items: MenuItem[] }    nested submenu
@@ -12061,13 +12062,35 @@
       // ui.icon resolves `name` against the registered icon set (rendering
       // an SVG); unknown names fall back to text. Passing the consumer's
       // string as `name` keeps "icon: 'copy'" working as a real icon.
-      if (it.icon) row.appendChild(ui.icon({ name: it.icon, size: 'sm' }))
+      const checkbox = it.type === 'checkbox'
+      let checkboxIcon = null
+      let checked = false
+      if (checkbox) {
+        checked = !!it.checked
+        checkboxIcon = ui.icon({ name: 'check', size: 'sm' })
+        checkboxIcon.style.visibility = checked ? 'visible' : 'hidden'
+        row.classList.add('aiditor-ui-menu-item-checkbox')
+        row.setAttribute('role', 'menuitemcheckbox')
+        row.setAttribute('aria-checked', String(checked))
+        row.appendChild(checkboxIcon)
+      } else if (it.icon) row.appendChild(ui.icon({ name: it.icon, size: 'sm' }))
       row.appendChild(ui.h('span', 'aiditor-ui-menu-item-label', { text: it.label || '' }))
       if (it.kbd) {
         const k = ui.kbd(it.kbd); k.classList.add('aiditor-ui-menu-item-kbd'); row.appendChild(k)
       }
 
-      if (it.items && it.items.length) {
+      if (checkbox) {
+        row.addEventListener('pointerenter', closeSubs)
+        row.addEventListener('mouseenter', closeSubs)
+        row.addEventListener('click', function () {
+          if (it.disabled) return
+          if (it.closeOnSelect !== false) onSelect && onSelect()
+          checked = !checked
+          checkboxIcon.style.visibility = checked ? 'visible' : 'hidden'
+          row.setAttribute('aria-checked', String(checked))
+          if (it.onChange) it.onChange(checked)
+        })
+      } else if (it.items && it.items.length) {
         row.classList.add('aiditor-ui-menu-item-submenu')
         row.setAttribute('aria-haspopup', 'menu')
         row.setAttribute('aria-expanded', 'false')
@@ -12098,7 +12121,7 @@
         row.addEventListener('mouseenter', closeSubs)
         row.addEventListener('click', function () {
           if (it.disabled) return
-          onSelect && onSelect()
+          if (it.closeOnSelect !== false) onSelect && onSelect()
           if (it.onSelect) it.onSelect()
         })
       }

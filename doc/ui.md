@@ -276,6 +276,18 @@ and validation stay in the host layer.
 `menu` reuses `aiditor.ui.menu`. Menu items accept the same `variant:"danger"`
 shape; actionBar maps it to the existing danger menu styling.
 
+`aiditor.ui.menu` also accepts persistent boolean controls:
+
+```js
+{ type: 'checkbox', label: 'Grid', checked: true, onChange: function (next) {} }
+```
+
+Checkbox items use `menuitemcheckbox` semantics and update their checked state
+in place. Dismissal is an independent item policy: every selectable item closes
+by default, while `closeOnSelect: false` keeps either an action or checkbox item
+open after activation. Outside pointer input and `Escape` still dismiss the
+whole menu.
+
 `aiditor.ui.actionMenu` is the shared adapter for local action menu surfaces.
 It takes `UiAction[]`, the caller's `ctx`, and either an anchor or a mouse
 point, resolves `disabled` / `hidden` / `args` / `menu`, then opens `ui.menu`.

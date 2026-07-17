@@ -91,6 +91,7 @@
   }
 
   function messageCopyText(msg) {
+    if (aiditor.ai.messageCopyText) return aiditor.ai.messageCopyText(msg, { source: 'transcript' })
     const parts = []
     const text = messageText(msg).trim()
     if (text) parts.push(text)
@@ -635,35 +636,35 @@
   }
 
   function renderPayload(msg) {
-    const content = msg.content != null ? msg.content : msg.text
-    if (content && typeof content === 'object' && content.type !== 'rich-prompt') {
-      const pre = ui.h('pre', 'aiditor-ai-message-code aiditor-ui-scrollarea')
-      pre.dataset.messagePayload = 'json'
-      setStableText(pre, JSON.stringify(content, null, 2))
-      return pre
-    }
     const wrap = ui.h('div', 'aiditor-ai-message-content')
-    wrap.dataset.messagePayload = 'text'
-    appendTextParts(wrap, displayText(content))
+    wrap.dataset.messagePayload = 'parts'
+    if (aiditor.ai.messageRenderers && aiditor.ai.messageRenderers.renderParts) {
+      aiditor.ai.messageRenderers.renderParts(wrap, msg, {
+        source: 'transcript',
+        message: msg,
+        options: { includeToolCalls: false, includeRelated: true, includeError: true },
+      })
+    } else {
+      appendTextParts(wrap, displayText(msg.content != null ? msg.content : msg.text))
+    }
     return wrap
   }
 
   function patchPayload(body, msg) {
-    const content = msg.content != null ? msg.content : msg.text
     const current = body.querySelector('[data-message-payload]')
-    const want = content && typeof content === 'object' && content.type !== 'rich-prompt' ? 'json' : 'text'
-    if (!current || current.dataset.messagePayload !== want) {
-      const next = renderPayload(msg)
-      if (current) {
-        body.insertBefore(next, current)
-        disposeTree(current)
-      } else {
-        body.insertBefore(next, body.firstChild || null)
+    if (current) {
+      if (aiditor.ai.messageRenderers && aiditor.ai.messageRenderers.patchParts) {
+        aiditor.ai.messageRenderers.patchParts(current, msg, {
+          source: 'transcript',
+          message: msg,
+          options: { includeToolCalls: false, includeRelated: true, includeError: true },
+        })
+        return
       }
+      patchTextParts(current, displayText(msg.content != null ? msg.content : msg.text))
       return
     }
-    if (want === 'json') setStableText(current, JSON.stringify(content, null, 2))
-    else patchTextParts(current, displayText(content))
+    body.insertBefore(renderPayload(msg), body.firstChild || null)
   }
 
   function renderEmpty(item) {
@@ -742,10 +743,7 @@
     const status = statusOf(msg)
     row.className = messageRowClass(role, status)
     patchPayload(body, msg)
-    patchError(body, msg)
     patchToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
-    patchChips(card, 'aiditor-ai-message-contexts', msg.contextRefs)
-    patchChips(card, 'aiditor-ai-message-attachments', msg.attachments || (msg.meta && msg.meta.attachments))
     patchFooter(stack, msg, runFooters)
     entry.version = version
     entry.listVersion = listVersion
@@ -764,13 +762,8 @@
 
     const body = ui.h('div', 'aiditor-ai-message-body')
     body.appendChild(renderPayload(msg))
-    if (status === 'error' && msg.meta && msg.meta.error) {
-      body.appendChild(ui.h('div', 'aiditor-ai-message-error', { text: msg.meta.error }))
-    }
     renderToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
     card.appendChild(body)
-    appendChips(card, 'aiditor-ai-message-contexts', msg.contextRefs)
-    appendChips(card, 'aiditor-ai-message-attachments', msg.attachments || (msg.meta && msg.meta.attachments))
     stack.appendChild(card)
 
     const footer = renderMessageFooter(msg, runFooters)
