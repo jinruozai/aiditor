@@ -181,6 +181,8 @@
       plan: normalizeQuestPlan(spec.plan || spec.steps || []),
       currentStepId: spec.currentStepId || null,
       budget: spec.budget || null,
+      usage: spec.usage || null,
+      stopReason: spec.stopReason || null,
       createdAt: spec.createdAt || now(),
       startedAt: spec.startedAt || null,
       completedAt: spec.completedAt || null,
@@ -924,6 +926,8 @@
       plan: plan.slice(0, maxSteps).map(function (step) { return compactQuestStep(step, emergency) }),
       currentStepId: quest.currentStepId,
       budget: compactPersistenceValue(quest.budget, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+      usage: compactPersistenceValue(quest.usage, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+      stopReason: quest.stopReason || null,
       createdAt: quest.createdAt,
       startedAt: quest.startedAt,
       completedAt: quest.completedAt,
@@ -1037,7 +1041,7 @@
     })
     const quests = (agent.quests || []).map(function (quest) {
       return (quest.status === 'running' || quest.status === 'queued' || quest.status === 'waiting_approval')
-        ? Object.assign({}, quest, { status: 'stopped', completedAt: quest.completedAt || now(), summary: quest.summary || 'Stopped by reload' })
+        ? Object.assign({}, quest, { status: 'stopped', stopReason: 'reload', completedAt: quest.completedAt || now(), summary: quest.summary || 'Stopped by reload' })
         : quest
     })
     return Object.assign({}, agent, {
@@ -1231,7 +1235,10 @@
       plan: (quest.plan || []).slice(),
       currentStepId: quest.currentStepId || null,
       budget: quest.budget || null,
+      usage: quest.usage || null,
+      stopReason: quest.stopReason || null,
       createdAt: quest.createdAt,
+      startedAt: quest.startedAt || null,
       completedAt: quest.completedAt || null,
     }
   }

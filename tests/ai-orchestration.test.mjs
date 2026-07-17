@@ -58,6 +58,13 @@ assert.equal(builtinTools.includes('message.read'), true)
 assert.equal(builtinTools.includes('agent.stop'), true)
 assert.equal(builtinTools.includes('agent.delete'), true)
 assert.equal(builtinTools.includes('agent.reparent'), true)
+assert.equal(ai.tools.get('agent.delegate').schema.properties.systemPrompt.type, 'string')
+assert.equal(ai.tools.get('agent.delegate').schema.properties.skillRefs.items.type, 'string')
+assert.equal(ai.tools.get('agent.delegate').schema.properties.toolRefs.items.type, 'string')
+assert.equal(ai.tools.get('agent.delegate').schema.properties.budget.properties.timeoutMs.type, 'number')
+assert.equal('permissions' in ai.tools.get('agent.create').schema.properties, false)
+assert.deepEqual(ai.tools.get('agent.reparent').schema.required, ['agentId', 'parentAgentId'])
+assert.match(ai.tools.get('agent.read').description, /Omit agentId/)
 assert.equal(ai.skills.get('orchestration').rules.some(function (rule) {
   return rule.indexOf('Names are display labels') >= 0
 }), true)
@@ -79,6 +86,22 @@ assert.equal(createdAgent.parentAgentId, root.id)
 assert.equal('path' in createdAgent, false)
 assert.equal('groupId' in createdAgent, false)
 assert.equal(ai.activeAgentId(), root.id)
+
+const implicitChild = previewApply(root.id, 'agent.create', {
+  name: 'Implicit Child',
+}, root.id)
+assert.equal(implicitChild.parentAgentId, root.id)
+
+const userRoot = previewApply(root.id, 'agent.create', {
+  name: 'User Root',
+}, 'user')
+assert.equal(userRoot.parentAgentId, null)
+
+const rootEscapeCall = ai.createToolCall(root.id, {
+  toolId: 'agent.create',
+  args: { name: 'Escaped Root', parentAgentId: null },
+}, root.id)
+assert.equal(ai.previewToolCall(root.id, rootEscapeCall.id, root.id).status, 'failed')
 
 const duplicateName = previewApply(root.id, 'agent.create', {
   name: 'Worker',
@@ -148,12 +171,31 @@ assert.equal(!!delegatedExisting.questId, true)
 
 const delegatedNew = previewApply(root.id, 'agent.delegate', {
   name: 'Poet',
-  parentAgentId: root.id,
   systemPrompt: 'Write concise poems.',
+  skillRefs: ['orchestration'],
+  toolRefs: ['agent.read'],
   content: 'write a poem',
 }, root.id)
-assert.equal(ai.findAgent(delegatedNew.agentId).parentAgentId, root.id)
+const delegatedPoet = ai.findAgent(delegatedNew.agentId)
+assert.equal(delegatedPoet.parentAgentId, root.id)
+assert.equal(delegatedPoet.systemPrompt, 'Write concise poems.')
+assert.deepEqual(delegatedPoet.skillRefs, ['orchestration'])
+assert.deepEqual(delegatedPoet.toolRefs, ['agent.read'])
 assert.equal(!!delegatedNew.questId, true)
+
+const mixedDelegateCall = ai.createToolCall(root.id, {
+  toolId: 'agent.delegate',
+  args: { agentId: createdAgent.id, systemPrompt: 'Should not be ignored', content: 'work' },
+}, root.id)
+assert.equal(ai.previewToolCall(root.id, mixedDelegateCall.id, root.id).status, 'failed')
+
+ai.configureRuntime({ maxDelegationDepth: 1 })
+const depthCall = ai.createToolCall(createdAgent.id, {
+  toolId: 'agent.create',
+  args: { name: 'Too Deep' },
+}, createdAgent.id)
+assert.equal(ai.previewToolCall(createdAgent.id, depthCall.id, createdAgent.id).status, 'failed')
+ai.configureRuntime({ maxDelegationDepth: 4 })
 
 let releaseRun
 const held = new Promise(function (resolve) { releaseRun = resolve })

@@ -78,7 +78,7 @@
   }
 
   function visibleToolNames(refs, ctx, explicit) {
-    const list = refs && refs.length ? refs : keys(tools)
+    const list = Array.isArray(refs) ? refs : keys(tools)
     const out = []
     for (let i = 0; i < list.length; i++) {
       if (isToolVisibleToModel(list[i], ctx, !!explicit)) out.push(list[i])

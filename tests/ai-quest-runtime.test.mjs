@@ -253,17 +253,15 @@ ai.registerTransport('capped-tool-flow', {
   },
 })
 ai.registerConnection('capped-tool-flow', { auth: { type: 'none' }, transport: { type: 'capped-tool-flow' }, configDefaults: {} })
-ai.configureRuntime({ maxToolTurns: 0 })
+ai.configureRuntime({ limits: { maxTurns: 1 } })
 const cappedAgent = ai.createAgent({ name: 'Capped Tools', parentAgentId: parent.id, connection: 'capped-tool-flow', permissionMode: 'full', toolRefs: ['capped-read'] })
 const cappedRun = ai.message.send(cappedAgent.id, { content: 'run capped read' })
 await cappedRun.promise
 assert.equal(cappedRequests, 1)
-assert.equal(ai.findAgent(cappedAgent.id).messages.some(function (message) {
-  return message.status === 'error' && /maximum number of tool continuation turns/i.test(message.content || '')
-}), true)
 const cappedToolMessage = ai.findAgent(cappedAgent.id).messages.find(function (message) {
   return message.toolCalls && message.toolCalls.length
 })
+assert.equal(cappedToolMessage.status, 'stopped')
 assert.equal(cappedToolMessage.toolCalls[0].status, 'completed')
 assert.equal(ai.findAgent(cappedAgent.id).messages.some(function (message) {
   return message.role === 'tool' && message.meta && message.meta.toolCallId === cappedToolMessage.toolCalls[0].id
@@ -274,7 +272,103 @@ assert.equal(cappedRequests, 2)
 assert.equal(ai.findAgent(cappedAgent.id).messages.some(function (message) {
   return message.content === 'continued after capped tool'
 }), true)
-ai.configureRuntime({ maxToolTurns: 32 })
+ai.configureRuntime({ limits: { maxTurns: 32 } })
+
+ai.tools.register('budget-read', {
+  run: function () { return { ok: true } },
+})
+ai.registerTransport('budget-turns', {
+  send: function () {
+    return {
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ toolId: 'budget-read', args: {} }],
+    }
+  },
+})
+ai.registerConnection('budget-turns', { auth: { type: 'none' }, transport: { type: 'budget-turns' }, configDefaults: {} })
+const turnBudgetAgent = ai.createAgent({ name: 'Turn Budget', parentAgentId: parent.id, connection: 'budget-turns', permissionMode: 'full', toolRefs: ['budget-read'] })
+const turnBudgetSend = ai.agent.send(turnBudgetAgent.id, {
+  fromAgentId: parent.id,
+  content: 'bounded turn task',
+  budget: { maxTurns: 1 },
+})
+await flush(2)
+const turnBudgetQuest = ai.quest.read(turnBudgetAgent.id, turnBudgetSend.questId, parent.id)
+assert.equal(turnBudgetQuest.status, 'stopped')
+assert.equal(turnBudgetQuest.stopReason, 'max_turns')
+assert.equal(ai.findAgent(parent.id).inbox.some(function (event) {
+  return event.type === 'quest.stopped' && event.questId === turnBudgetSend.questId && event.meta.stopReason === 'max_turns'
+}), true)
+
+ai.registerTransport('budget-tokens', {
+  send: function () {
+    return {
+      role: 'assistant',
+      content: '',
+      usage: { prompt_tokens: 20, completion_tokens: 30, total_tokens: 50 },
+      toolCalls: [{ toolId: 'budget-read', args: {} }],
+    }
+  },
+})
+ai.registerConnection('budget-tokens', { auth: { type: 'none' }, transport: { type: 'budget-tokens' }, configDefaults: {} })
+const tokenBudgetAgent = ai.createAgent({ name: 'Token Budget', parentAgentId: parent.id, connection: 'budget-tokens', permissionMode: 'full', toolRefs: ['budget-read'] })
+const tokenBudgetSend = ai.agent.send(tokenBudgetAgent.id, {
+  fromAgentId: parent.id,
+  content: 'bounded token task',
+  budget: { maxTokens: 10 },
+})
+await flush(2)
+const tokenBudgetQuest = ai.quest.read(tokenBudgetAgent.id, tokenBudgetSend.questId, parent.id)
+assert.equal(tokenBudgetQuest.status, 'stopped')
+assert.equal(tokenBudgetQuest.stopReason, 'max_tokens')
+assert.equal(tokenBudgetQuest.usage.totalTokens, 50)
+
+let budgetApprovalRequests = 0
+ai.registerTransport('budget-approval', {
+  send: function () {
+    budgetApprovalRequests++
+    return {
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ toolId: 'approval-edit', args: { before: 2, after: 3 } }],
+    }
+  },
+})
+ai.registerConnection('budget-approval', { auth: { type: 'none' }, transport: { type: 'budget-approval' }, configDefaults: {} })
+const budgetApprovalAgent = ai.createAgent({ name: 'Budget Approval', parentAgentId: parent.id, connection: 'budget-approval', permissionMode: 'auto', toolRefs: ['approval-edit'] })
+const budgetApprovalSend = ai.agent.send(budgetApprovalAgent.id, {
+  fromAgentId: parent.id,
+  content: 'bounded approval task',
+  budget: { maxTurns: 1 },
+})
+await flush(2)
+const budgetApprovalMessage = ai.findAgent(budgetApprovalAgent.id).messages.find(function (message) {
+  return message.toolCalls && message.toolCalls.length
+})
+assert.equal(ai.applyToolCall(budgetApprovalAgent.id, budgetApprovalMessage.toolCalls[0].id, 'user').status, 'applied')
+assert.equal(ai.resumeAgent(budgetApprovalAgent.id), null)
+assert.equal(budgetApprovalRequests, 1)
+assert.equal(ai.quest.read(budgetApprovalAgent.id, budgetApprovalSend.questId, parent.id).stopReason, 'max_turns')
+
+let releaseTimeout
+const timeoutHold = new Promise(function (resolve) { releaseTimeout = resolve })
+ai.registerTransport('budget-timeout', {
+  send: function () { return timeoutHold.then(function () { return { role: 'assistant', content: 'too late' } }) },
+})
+ai.registerConnection('budget-timeout', { auth: { type: 'none' }, transport: { type: 'budget-timeout' }, configDefaults: {} })
+const timeoutBudgetAgent = ai.createAgent({ name: 'Timeout Budget', parentAgentId: parent.id, connection: 'budget-timeout' })
+const timeoutBudgetSend = ai.agent.send(timeoutBudgetAgent.id, {
+  fromAgentId: parent.id,
+  content: 'bounded timeout task',
+  budget: { timeoutMs: 20 },
+})
+await new Promise(function (resolve) { setTimeout(resolve, 40) })
+const timeoutBudgetQuest = ai.quest.read(timeoutBudgetAgent.id, timeoutBudgetSend.questId, parent.id)
+assert.equal(timeoutBudgetQuest.status, 'stopped')
+assert.equal(timeoutBudgetQuest.stopReason, 'timeout')
+releaseTimeout()
+await flush(2)
 
 let releaseInterrupt
 const interruptedHold = new Promise(function (resolve) { releaseInterrupt = resolve })
@@ -307,9 +401,9 @@ const budgetRequest = ai.makeRequest(ai.findAgent(budgetAgent.id), budgetInput, 
 assert.equal(budgetRequest.messages.some(function (message) { return message.id === budgetInput.id }), true)
 assert.equal(budgetRequest.messages.length < 42, true)
 assert.equal(budgetRequest.messages[0].role, 'system')
-assert.equal(budgetRequest.messages[0].content.includes('Do not stop after a partial setup step'), true)
-assert.equal(budgetRequest.messages[0].content.includes('prefer agent.delegate'), true)
-assert.equal(budgetRequest.messages[0].content.includes('quest.result'), true)
+assert.equal(budgetRequest.messages[0].content.includes('Do not stop after a partial setup step'), false)
+assert.equal(budgetRequest.messages[0].content.includes('NO_CURRENT_AI_WORKSPACE'), false)
+assert.equal(budgetRequest.messages[0].content.includes('Complete the current request'), true)
 
 const hugeToolAgent = ai.createAgent({ name: 'Huge Tool History', parentAgentId: parent.id, connection: 'quest-capture', model: 'tiny', contextBudgetTokens: 200000 })
 const hugeSource = 'function (propsSig, ctx) {\n' + 'x'.repeat(120000) + '\n}'

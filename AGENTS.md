@@ -237,8 +237,9 @@ aiditor/
 - `src/ai/permission.js` 是统一 permission resolver / audit / path rule owner。Tools、operations、ChangeSet apply、workspace writes、extension install、host adapter 调用都走同一套 actor/target/scope 判断。
 - `src/ai/registries.js` 统一管理 tools、skills、context providers、agent templates、bundles。Dotted name 是公开命名和筛选形状;extension 生命周期用 owner 精确清理。
 - `src/ai/context.js` 只负责 tool-call lifecycle 和 run context helper,不再承担 registry。
-- `src/ai/request.js` 负责请求组装:system context、attachments、reference snapshots、compaction、tool visibility、budgeted transcript。
-- `src/ai/runtime.js` 负责 scheduler/run/resume/tool approval/continuation。
+- `src/ai/request.js` 负责请求组装:先解析 active skills/context,再只暴露 `agent.toolRefs + skill.tools + runtimeContext.tools` 的有效工具集;空引用不回退全量工具。Runtime kernel 保持最小,workspace/task/skill catalog 按需注入。
+- `src/ai/runtime.js` 负责 scheduler/run/resume/tool approval/continuation。Quest 使用统一 `{maxTurns,timeoutMs,maxTokens}` budget,达到边界后以稳定 `stopReason` 停止并通知父 Agent;模型委托另受 `maxDelegationDepth` 限制。
+- `src/ai/orchestration.js` 的 `agent.create` / `agent.delegate` 共用父链解析:Agent 省略 `parentAgentId` 时默认创建自己的子节点,用户省略时创建根节点;Agent 不可逃逸到根级。`agent.read({})` 就是权限过滤后的列表入口。
 - `src/ai/message-markdown.js` + `message-renderers.js` 负责安全 Markdown 文本渲染、主流 provider content block 归一化、结构化 message part renderer registry 和一致的复制文本;不执行 raw HTML,不把任意 JSON 猜成 UI。
 - `src/ai/reference.js` 提供 references + operations 协议;`src/ai/change-set.js` 提供 grouped review/apply。
 - Rich prompt token 存 `refId`,不是 `resourceId`;chat attachments 是 runtime state,不是新的 model-facing registry。

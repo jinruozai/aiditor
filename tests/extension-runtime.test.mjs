@@ -63,7 +63,10 @@ assert.equal(typeof ai.tools.get('aiditor.inspectDocks').run, 'function')
 assert.equal(typeof ai.tools.get('aiditor.installExtension').preview, 'function')
 assert.equal(typeof ai.tools.get('aiditor.addPanelToDock').preview, 'function')
 assert.equal(typeof ai.tools.get('aiditor.reloadPanel').preview, 'function')
-const extensionAgent = ai.createAgent({ name: 'Extension Agent' })
+const extensionAgent = ai.createAgent({
+  name: 'Extension Agent',
+  toolRefs: ['aiditor.inspectDocks', 'aiditor.addPanelToDock'],
+})
 const extensionRequest = ai.makeRequest(extensionAgent, null, 'run_extension_tools', 'user', 0)
 assert.equal(extensionRequest.tools.includes('aiditor.installExtension'), false)
 assert.equal(extensionRequest.tools.includes('aiditor.inspectDocks'), true)

@@ -108,11 +108,8 @@ const defaultToolAgent = ai.createAgent({
   connection: 'mock',
 })
 const defaultToolRequest = ai.makeRequest(defaultToolAgent, null, 'run_default_tools', 'user', 0)
-assert.deepEqual(defaultToolRequest.tools, ['edit-record'])
-assert.equal(defaultToolRequest.toolSpecs.length, 1)
-assert.equal(defaultToolRequest.toolSpecs[0].id, 'edit-record')
-assert.equal(defaultToolRequest.toolSpecs[0].capabilities.apply, true)
-assert.equal(defaultToolRequest.toolSpecs[0].capabilities.risk, 'write')
+assert.deepEqual(defaultToolRequest.tools, [])
+assert.equal(defaultToolRequest.toolSpecs.length, 0)
 
 ai.tools.register('hidden-by-default', {
   exposeToModel: false,
@@ -130,15 +127,29 @@ ai.tools.register('ctx-visible', {
   },
   run: function () { return true },
 })
+ai.skills.register('filtered-tools', {
+  title: 'Filtered Tools',
+  tools: ['hidden-by-default', 'currently-unavailable', 'ctx-visible'],
+})
 const filteredToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Filtered Tool Agent',
   path: 'tools/filtered',
   connection: 'mock',
+  skillRefs: ['filtered-tools'],
 }), null, 'run_filtered_tools', 'user', 0)
-assert.equal(filteredToolRequest.tools.includes('hidden-by-default'), false)
+assert.equal(filteredToolRequest.tools.includes('hidden-by-default'), true)
 assert.equal(filteredToolRequest.tools.includes('currently-unavailable'), false)
 assert.equal(filteredToolRequest.tools.includes('ctx-visible'), true)
 assert.equal(availableCtx.actor, 'user')
+ai.context.register('tool-surface', {
+  capture: function () { return { title: 'Current surface', tools: ['ctx-visible'] } },
+})
+const contextToolRequest = ai.makeRequest(ai.createAgent({
+  name: 'Context Tool Agent',
+  connection: 'mock',
+}), null, 'run_context_tools', 'user', 0)
+assert.deepEqual(contextToolRequest.tools, ['ctx-visible'])
+ai.context.unregister('tool-surface')
 const explicitToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Explicit Tool Agent',
   path: 'tools/explicit',

@@ -5,10 +5,16 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const runs = {}
   const waitingRuns = {}
+  const budgetTimers = {}
   const runtimeConfig = {
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
-    maxToolTurns: 32,
+    maxDelegationDepth: 4,
+    limits: {
+      maxTurns: 32,
+      timeoutMs: 600000,
+      maxTokens: null,
+    },
   }
   const STREAM_UI_UPDATE_MS = 200
   const RUN_PREVIEW_UPDATE_MS = 80
@@ -269,6 +275,58 @@
     return 0
   }
 
+  function positiveLimit(value) {
+    const number = Number(value)
+    return number > 0 && Number.isFinite(number) ? Math.floor(number) : null
+  }
+
+  function clampLimit(value, ceiling) {
+    const requested = positiveLimit(value)
+    const maximum = positiveLimit(ceiling)
+    if (requested && maximum) return Math.min(requested, maximum)
+    return requested || maximum || null
+  }
+
+  function effectiveRunBudget(budget) {
+    const requested = budget || {}
+    const limits = runtimeConfig.limits || {}
+    return {
+      maxTurns: clampLimit(requested.maxTurns, limits.maxTurns),
+      timeoutMs: clampLimit(requested.timeoutMs, limits.timeoutMs),
+      maxTokens: clampLimit(requested.maxTokens, limits.maxTokens),
+    }
+  }
+
+  function emptyUsage() {
+    return { promptTokens: 0, outputTokens: 0, totalTokens: 0, reported: false }
+  }
+
+  function normalizedUsage(usage) {
+    if (!usage) return null
+    const promptTokens = usageNumber(usage, ['prompt_tokens', 'input_tokens', 'promptTokens', 'inputTokens'])
+    const outputTokens = usageNumber(usage, ['completion_tokens', 'output_tokens', 'completionTokens', 'outputTokens'])
+    const totalTokens = usageNumber(usage, ['total_tokens', 'totalTokens']) || (promptTokens || outputTokens ? promptTokens + outputTokens : 0)
+    if (!promptTokens && !outputTokens && !totalTokens) return null
+    return { promptTokens: promptTokens, outputTokens: outputTokens, totalTokens: totalTokens, reported: true }
+  }
+
+  function recordRunUsage(agentId, request, usage) {
+    const current = normalizedUsage(usage)
+    if (!current) return null
+    const run = runs[agentId]
+    const total = run && run.usage || emptyUsage()
+    const next = {
+      promptTokens: total.promptTokens + current.promptTokens,
+      outputTokens: total.outputTokens + current.outputTokens,
+      totalTokens: total.totalTokens + current.totalTokens,
+      reported: true,
+    }
+    if (run) run.usage = next
+    const input = request && request.input || (run && run.request && run.request.input)
+    if (input && input.questId) ai.updateQuest(agentId, input.questId, { usage: next })
+    return next
+  }
+
   function streamOutputTokens(state) {
     const usage = state.usage
     const out = usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
@@ -370,6 +428,7 @@
     const usage = message.usage || (result && result.usage) || state.usage || null
     const cost = ai.estimateUsageCost ? ai.estimateUsageCost(request.connectionName, message.model || state.model || request.agent.model, usage) : null
     state.usage = usage
+    recordRunUsage(agentId, request, usage)
     state.cost = cost
     state.completedAt = completedAt
     const firstTokenAt = state.firstTokenAt || null
@@ -844,6 +903,7 @@
           runId: request.runId,
           turn: request.turn || 0,
           messageId: message.id,
+          usage: runs[agentId] && runs[agentId].usage || emptyUsage(),
         }
         ai.setAgentStatus(agentId, {
           status: 'waiting_approval',
@@ -853,9 +913,11 @@
         })
         return message
       }
-      if ((request.turn || 0) >= runtimeConfig.maxToolTurns) {
+      const budgetReason = runBudgetStopReason(agentId, request)
+      if (budgetReason) {
         flushToolResults(agentId, message.id)
-        return appendToolTurnLimitMessage(agentId, request, message)
+        stopRun(agentId, 'idle', budgetReason)
+        return message
       }
       if (hasDelegationBoundary(calls)) {
         enqueuePostDelegationContinuation(agentId, request, ai.readMessage(agentId, message.id) || message)
@@ -863,43 +925,32 @@
       }
       if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agentId, null, { phase: 'before_tool_continuation' })
       const nextRequest = makeRequest(ai.findAgent(agentId) || current, null, request.runId, actor, (request.turn || 0) + 1)
+      nextRequest.input = request.input
+      nextRequest.budget = request.budget
+      nextRequest.startedAt = request.startedAt
       const nextCtx = ai.createRunContext(nextRequest, controller)
       return runChatTurn(agentId, provider, nextRequest, nextCtx, controller, actor)
     })
   }
 
-  function appendToolTurnLimitMessage(agentId, request, sourceMessage) {
-    const content = [
-      'Safety stop: the run reached the maximum number of tool continuation turns.',
-      'The agent did not reach a confident final answer, approval wait, or clear blocker before the guard tripped.',
-      'Review the last tool results, narrow the request, or increase maxToolTurns if this was expected.',
-    ].join(' ')
-    const completedAt = Date.now()
-    return ai.appendMessage(agentId, {
-      from: 'agent:' + agentId,
-      role: 'assistant',
-      content: content,
-      connection: request.connectionName,
-      model: request.agent.model || null,
-      status: 'error',
-      meta: {
-        runId: request.runId,
-        error: 'Tool turn limit reached',
-        sourceMessageId: sourceMessage && sourceMessage.id || null,
-        turn: request.turn || 0,
-        maxToolTurns: runtimeConfig.maxToolTurns,
-      },
-      stats: {
-        runId: request.runId,
-        startTime: sourceMessage && sourceMessage.stats && sourceMessage.stats.startTime || completedAt,
-        completedAt: completedAt,
-        durationMs: 0,
-      },
-    })
+  function runBudgetStopReason(agentId, request) {
+    const budget = request && request.budget || effectiveRunBudget()
+    const run = runs[agentId]
+    return consumedBudgetStopReason(budget, (request.turn || 0) + 1, run && run.usage)
+  }
+
+  function consumedBudgetStopReason(budget, turns, usage) {
+    if (budget.maxTurns && turns >= budget.maxTurns) return 'max_turns'
+    if (budget.maxTokens && usage && usage.reported && usage.totalTokens >= budget.maxTokens) return 'max_tokens'
+    return null
   }
 
   function makeRequest(agent, input, runId, actor, turn) {
-    return ai.makeRequest(agent, input, runId, actor, turn)
+    const request = ai.makeRequest(agent, input, runId, actor, turn)
+    const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
+    request.budget = quest && quest.budget || effectiveRunBudget()
+    request.startedAt = quest && quest.startedAt || Date.now()
+    return request
   }
 
   function providerRunner() {
@@ -908,12 +959,62 @@
     }
   }
 
+  function clearBudgetTimer(agentId) {
+    if (!budgetTimers[agentId]) return
+    clearTimeout(budgetTimers[agentId])
+    delete budgetTimers[agentId]
+  }
+
+  function stopSummary(reason) {
+    if (reason === 'timeout') return 'Stopped: execution timeout reached'
+    if (reason === 'max_turns') return 'Stopped: model turn limit reached'
+    if (reason === 'max_tokens') return 'Stopped: token budget reached'
+    return 'Stopped'
+  }
+
+  function stopQuestExecution(agentId, input, reason, usage) {
+    if (!input || !input.questId) return null
+    const current = ai.findQuest(agentId, input.questId)
+    if (!current || current.status === 'completed' || current.status === 'failed' || current.status === 'stopped') return current
+    const quest = ai.updateQuest(agentId, input.questId, {
+      status: 'stopped',
+      stopReason: reason || 'cancelled',
+      usage: usage && usage.reported ? usage : (current.usage || null),
+      completedAt: Date.now(),
+      summary: stopSummary(reason),
+    })
+    if (quest && quest.fromAgentId) {
+      ai.appendInboxEvent(quest.fromAgentId, {
+        type: 'quest.stopped',
+        fromAgentId: agentId,
+        questId: quest.id,
+        summary: quest.summary,
+        meta: { stopReason: quest.stopReason },
+      })
+      scheduleAgent(quest.fromAgentId)
+    }
+    return quest
+  }
+
+  function armBudgetTimer(agentId, request) {
+    clearBudgetTimer(agentId)
+    const timeoutMs = request && request.budget && request.budget.timeoutMs
+    if (!timeoutMs) return
+    const remaining = Math.max(0, timeoutMs - (Date.now() - request.startedAt))
+    budgetTimers[agentId] = setTimeout(function () {
+      delete budgetTimers[agentId]
+      stopRun(agentId, 'idle', 'timeout')
+      scheduleQueuedAgents()
+    }, remaining)
+  }
+
   function failRunningRequest(agentId, request, controller, key, err) {
+    clearBudgetTimer(agentId)
     delete runs[key]
     const input = request.input
     const stopped = controller.signal.aborted
     if (input && input.id) ai.updateMessage(agentId, input.id, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now() })
-    if (input && input.questId) ai.updateQuest(agentId, input.questId, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now(), summary: String(err && err.message ? err.message : err) })
+    if (input && input.questId && !stopped) ai.updateQuest(agentId, input.questId, { status: 'failed', completedAt: Date.now(), summary: String(err && err.message ? err.message : err) })
     ai.setAgentStatus(agentId, stopped ? 'idle' : 'failed')
     if (!stopped && aiditor.reportError) aiditor.reportError({ scope: 'ai', connection: request.connectionName }, err)
     scheduleQueuedAgents()
@@ -926,7 +1027,15 @@
     const ctx = ai.createRunContext(request, controller)
     const key = agentId
     const input = request.input
-    runs[key] = { controller: controller, connection: runner, runId: request.runId, request: request }
+    const quest = input && input.questId && ai.findQuest ? ai.findQuest(agentId, input.questId) : null
+    request.startedAt = quest && quest.startedAt || request.startedAt || Date.now()
+    runs[key] = {
+      controller: controller,
+      connection: runner,
+      runId: request.runId,
+      request: request,
+      usage: request.accumulatedUsage || (quest && quest.usage) || emptyUsage(),
+    }
     ai.setAgentStatus(agentId, {
       status: 'running',
       statusText: statusText || '',
@@ -946,7 +1055,11 @@
       summary: statusText || 'agent run started',
     })
     if (markInputStarted && input && input.id) ai.updateMessage(agentId, input.id, { status: 'running', startedAt: Date.now() })
-    if (markInputStarted && input && input.questId) ai.updateQuest(agentId, input.questId, { status: 'running', startedAt: Date.now() })
+    if (markInputStarted && input && input.questId) {
+      request.startedAt = Date.now()
+      ai.updateQuest(agentId, input.questId, { status: 'running', startedAt: request.startedAt, stopReason: null })
+    }
+    armBudgetTimer(agentId, request)
 
     const promise = Promise.resolve().then(function () {
       return runChatTurn(agentId, runner, request, ctx, controller, actor)
@@ -993,6 +1106,7 @@
     delete runs[key]
     const current = ai.findAgent(agentId)
     if (current && current.status === 'waiting_approval') return result
+    clearBudgetTimer(agentId)
     completeMessageExecution(agentId, request, result)
     trace({
       type: 'run_completed',
@@ -1141,13 +1255,16 @@
     return activeRunCount() < runtimeConfig.maxConcurrentAgents
   }
 
-  function stopRun(agentId, status) {
+  function stopRun(agentId, status, reason) {
     const agent = ai.findAgent(agentId)
     if (!agent) return false
     const run = runs[agent.id]
     const waiting = waitingRuns[agent.id]
     if (!run && !waiting) return false
+    const stopReason = reason || 'cancelled'
+    clearBudgetTimer(agent.id)
     if (run) {
+      run.controller.__aiditorStopReason = stopReason
       run.controller.abort()
       ai.setActiveRunState(agent.id, {
         runId: run.runId,
@@ -1158,8 +1275,8 @@
       if (run.messageId) ai.updateMessage(agent.id, run.messageId, { status: 'stopped' })
       const input = run.request && run.request.input
       if (input && input.id) ai.updateMessage(agent.id, input.id, { status: 'stopped', completedAt: Date.now() })
-      if (input && input.questId) ai.updateQuest(agent.id, input.questId, { status: 'stopped', completedAt: Date.now(), summary: 'Stopped' })
-      trace({ type: 'run_stopped', runId: run.runId, traceId: run.runId, agentId: agent.id, messageId: run.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: 'run stopped' })
+      stopQuestExecution(agent.id, input, stopReason, run.usage)
+      trace({ type: 'run_stopped', runId: run.runId, traceId: run.runId, agentId: agent.id, messageId: run.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       if (run.connection && run.connection.abort) {
         if (aiditor.safeCall) aiditor.safeCall({ scope: 'ai', connection: agent.connection || ai.defaultConnection, runId: run.runId }, function () { run.connection.abort(run.runId) })
         else run.connection.abort(run.runId)
@@ -1175,8 +1292,8 @@
       })
       const input = waiting.request && waiting.request.input
       if (input && input.id) ai.updateMessage(agent.id, input.id, { status: 'stopped', completedAt: Date.now() })
-      if (input && input.questId) ai.updateQuest(agent.id, input.questId, { status: 'stopped', completedAt: Date.now(), summary: 'Stopped' })
-      trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: 'waiting run stopped' })
+      stopQuestExecution(agent.id, input, stopReason, waiting.usage)
+      trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       delete waitingRuns[agent.id]
     }
     ai.setAgentStatus(agent.id, status || 'idle')
@@ -1191,17 +1308,25 @@
     const message = ai.readMessage(agent.id, waiting.messageId)
     const toolState = appendResolvedToolResults(agent.id, message)
     if (toolState.pending) return null
+    const budgetReason = consumedBudgetStopReason(waiting.request.budget, waiting.turn + 1, waiting.usage)
+    if (budgetReason) {
+      stopRun(agent.id, 'idle', budgetReason)
+      scheduleQueuedAgents()
+      return null
+    }
     delete waitingRuns[agent.id]
     if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agent.id, waiting.request.input, { phase: 'before_resume' })
 
     const request = makeRequest(ai.findAgent(agent.id), waiting.request.input, waiting.runId, waiting.actor, waiting.turn + 1)
+    request.accumulatedUsage = waiting.usage || emptyUsage()
+    request.startedAt = waiting.request.startedAt
     return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing after tool approval', false)
   }
 
   function stopAgent(agentId) {
     const agent = agentId ? ai.findAgent(agentId) : ai.getActiveAgent()
     if (!agent) return false
-    const stopped = stopRun(agent.id, 'idle')
+    const stopped = stopRun(agent.id, 'idle', 'cancelled')
     scheduleQueuedAgents()
     return stopped
   }
@@ -1299,7 +1424,9 @@
       id: message.id,
       fromAgentId: spec.fromAgentId || null,
       requestMessageId: message.id,
+      goal: String(spec.content || '').slice(0, 1000),
       status: 'queued',
+      budget: effectiveRunBudget(spec.budget),
     })
     ai.enqueueMessage(target.id, message.id, {
       interrupt: !!spec.interrupt,
@@ -1322,9 +1449,16 @@
   ai.flushToolResults = flushToolResults
   ai.scheduleAgent = scheduleAgent
   ai.configureRuntime = function (config) {
-    Object.assign(runtimeConfig, config || {})
+    const next = config || {}
+    if (next.maxConcurrentAgents != null) runtimeConfig.maxConcurrentAgents = next.maxConcurrentAgents
+    if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
+    if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
+    if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)
     scheduleQueuedAgents()
-    return Object.assign({}, runtimeConfig)
+    return ai.runtimeConfig()
+  }
+  ai.runtimeConfig = function () {
+    return Object.assign({}, runtimeConfig, { limits: Object.assign({}, runtimeConfig.limits) })
   }
   ai.message = ai.message || {}
   ai.agent = ai.agent || {}

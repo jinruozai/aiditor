@@ -47,6 +47,20 @@ threads; they are addressable runtime nodes with their own transcript, queue,
 quests, inbox, model, permissions, context refs, skills, and tools. Delegation
 should preserve that tree instead of flattening work into one global chat list.
 
+Model-facing creation follows one ownership rule:
+
+```text
+explicit parentAgentId         validate inside the caller's manageable subtree
+omitted parent + agent actor   parent is the calling agent
+omitted parent + user actor    create a root agent
+```
+
+An agent cannot create or reparent a node to the root. The user may organize
+root nodes directly. `agent.create` and `agent.delegate` use the same resolver,
+so `create -> send` and one-step delegation have identical permission behavior.
+The configurable `maxDelegationDepth` applies to model-created tree changes,
+not user-managed tree organization.
+
 New agents inherit the user's latest selected connection/model when no explicit
 model is provided. This is AI runtime user preference, not project data. The
 fallback order is:
@@ -78,8 +92,9 @@ aiditor.ai.skills.list(prefix)
 ```
 
 Agents enable skills by listing skill ids in `agent.skillRefs`. During request
-construction, enabled skills contribute their `systemPrompt` and `rules` into
-the runtime guide.
+construction, enabled skills contribute `systemPrompt`, `rules`, and `tools`.
+Tools remain entries in the one shared tool registry; the skill only controls
+which existing tool schemas are disclosed for the current request.
 
 The framework ships focused built-in authoring skills:
 
@@ -94,7 +109,8 @@ registered components, `factory(propsSig, ctx) -> HTMLElement`, `aiditor.ui.*`
 controls, dock-responsive layout, generated API references, and no
 React/TSX/import/export unless the workspace explicitly provides such a build
 system. The request builder enables the runtime skill automatically for
-UI/panel/dock authoring requests and for workspace-backed editing sessions.
+UI/panel/dock authoring requests. Merely opening a workspace does not activate a
+skill or grant tools to every agent.
 
 The copyable documentation forms are:
 
@@ -121,23 +137,24 @@ operations preview/apply changes
 skills     shape agent behavior
 ```
 
-Extensions and domain code may register skills, but skills should stay small. A skill
-may reference recommended tools or context entries, and a package that installs a
-skill may also register tools. The tools still live in the shared tool registry;
-a skill must not hide a private tool system inside itself.
+Extensions and domain code may register skills, but skills should stay small. A
+package that installs a skill may also register its tools. The tools still live
+in the shared tool registry; a skill must not hide a private tool system inside
+itself.
 
 Recommended skill shape:
 
 ```text
 systemPrompt
 rules
-toolRefs
-contextRefs
-permissionHints
+tools
+auto(ctx)
 ```
 
-The runtime merges these into request construction. Tool execution still goes
-through the shared tool registry and permission system.
+Inactive skills are represented only by a bounded id/title/description catalog
+when orchestration needs to choose a child profile. Full instructions and tool
+schemas enter the request only after activation. Tool execution still goes
+through the shared registry and permission system.
 
 ## Messages
 
@@ -208,8 +225,37 @@ If a run is waiting for user approval, the runtime state should say so and the
 next continuation should be scheduled only after the approval/reject result has
 been appended.
 
-The default tool continuation guard is `maxToolTurns: 32`. It is a safety stop
-for loops, not a normal completion path. Agents are instructed to exit earlier
+Runtime configuration has one limits shape:
+
+```js
+aiditor.ai.configureRuntime({
+  maxConcurrentAgents: 8,
+  maxConcurrentMessagesPerAgent: 1,
+  maxDelegationDepth: 4,
+  limits: {
+    maxTurns: 32,
+    timeoutMs: 600000,
+    maxTokens: null,
+  },
+})
+```
+
+`maxTurns` counts provider request turns, including tool continuations and
+approval resumes. `timeoutMs` starts when execution starts, not while queued.
+`maxTokens` uses reported provider usage; if a provider does not report usage,
+the runtime does not pretend that token enforcement is available.
+
+The built-in Agents panel creates user-facing agents with the focused
+`orchestration` skill. Hosts using `aiditor.ai.createAgent()` directly choose
+their own `skillRefs`; no global tool set is injected as a fallback.
+
+`agent.send` and `agent.delegate` may provide a smaller per-quest `budget` with
+the same three fields. A per-quest value can only tighten the runtime ceiling.
+When a limit is reached the quest becomes `stopped` with stable `stopReason`
+`max_turns`, `timeout`, or `max_tokens`, and its parent receives a
+`quest.stopped` inbox event.
+
+These are safety stops, not normal completion paths. Agents should exit earlier
 with one of four clear states:
 
 ```text
@@ -219,8 +265,7 @@ blocked     required workspace/files/schema/API/permission is missing
 failed      the same operation shape has failed and retrying would be guessing
 ```
 
-When the guard does trip, the runtime appends an explicit safety-stop assistant
-message instead of silently idling.
+Manual `agent.stop` uses the same stop path with `stopReason: "cancelled"`.
 
 ## Quests
 
@@ -254,6 +299,22 @@ message.read
 
 These tools are part of the AI runtime, not product domain tools.
 
+`agent.read({})` lists every agent readable by the caller. Passing `agentId`
+returns the full readable record. There is no separate `agent.list` concept.
+
+`agent.delegate` has two exclusive modes:
+
+```text
+agentId present   send content/context/attachments/budget to an existing agent
+agentId omitted   create a child with name/systemPrompt/model/connection/
+                  skillRefs/toolRefs, then send the task
+```
+
+Creation fields are rejected in existing-agent mode instead of being silently
+ignored. Model-facing creation does not accept raw permissions, memory, state,
+or metadata. Child permissions are inherited as an upper bound and every tool
+call still passes through the permission resolver.
+
 Quest records may carry a compact plan:
 
 ```text
@@ -261,6 +322,8 @@ goal
 plan[]             ordered generic steps
 currentStepId
 budget
+usage
+stopReason
 ```
 
 Each step is a small runtime state record:

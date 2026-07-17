@@ -58,7 +58,17 @@ for (const file of [
 
 const aiditor = window.aiditor
 
-const closedProjectAgent = aiditor.ai.createAgent({ name: 'Closed Project Agent' })
+const closedProjectAgent = aiditor.ai.createAgent({
+  name: 'Closed Project Agent',
+  toolRefs: [
+    'demo.project.readDescriptor',
+    'demo.project.readSource',
+    'demo.project.inspectPanel',
+    'demo.project.runCheck',
+    'workspace.writeText',
+    'workspace.patchText',
+  ],
+})
 const closedProjectRequest = aiditor.ai.makeRequest(closedProjectAgent, null, 'run_closed_project', 'user', 0)
 assert.equal(closedProjectRequest.tools.some(function (tool) { return tool.indexOf('demo.project.') === 0 }), false)
 let cleaned = false

@@ -239,26 +239,14 @@
       }
     })
     return [
-      'SYSTEM: You are running inside AIditor. Some user requests require changing editor state.',
-      'If a user asks you to create, delete, rename, move, reparent, send to, or inspect an AIditor agent, quest, message, or attachment, you MUST request the matching AIditor tool.',
-      'Do not merely say you will do it. The host cannot act unless you emit an aiditor_tool_calls JSON block.',
-      'Complete the user request end-to-end. For delegated work, prefer toolId "agent.delegate" because it creates/reuses an agent and sends the task in one workflow.',
-      'If you use agent.create separately for a delegated task, do not stop after agent.create; continue with agent.send, then quest.read/message.read when the quest completes.',
-      'If a tool result gives you a questId, do not poll quest.result immediately. Child completion is delivered later as an inbox notification; then use quest.result for completed events in that batch.',
-      'A reply that emits agent.delegate or agent.send is an action turn. Do not include final user-visible answer content in the same reply as those tool calls.',
-      'If you need a tool, end your reply with exactly one JSON code block using this shape:',
+      'SYSTEM: AIditor text tool bridge. Use only tools listed in AVAILABLE_TOOLS.',
+      'When an action requires a tool, end the reply with exactly one JSON code block using this shape:',
       '```json',
-      '{"aiditor_tool_calls":[{"toolId":"agent.create","args":{"name":"poet","parentAgentId":"' + ((request.agent && request.agent.id) || '') + '","systemPrompt":"Write concise poems."}}]}',
+      '{"aiditor_tool_calls":[{"toolId":"tool.id","args":{}}]}',
       '```',
-      'For "create an agent" or "create a child agent" with no work, use toolId "agent.create".',
-      'For "create an agent and have it do work", use toolId "agent.delegate".',
-      'For "message another agent", use toolId "agent.send".',
-      'For "get delegated agent result", prefer toolId "quest.result".',
-      'For normal conversation that does not change editor state, answer normally and do not emit aiditor_tool_calls.',
-      'Do not claim that a tool was executed unless you emit an aiditor_tool_calls block. The host UI will preview/apply tools after your reply.',
+      'Multiple calls may appear in that one array. Do not claim execution unless the matching call is emitted.',
+      'For normal conversation, answer without an aiditor_tool_calls block.',
       'CURRENT_AGENT_ID: ' + ((request.agent && request.agent.id) || ''),
-      'CURRENT_AGENT_NAME: ' + ((request.agent && request.agent.name) || ''),
-      'CURRENT_PARENT_AGENT_ID: ' + ((request.agent && request.agent.parentAgentId) || ''),
       'AVAILABLE_TOOLS: ' + JSON.stringify(compact),
     ].join('\n')
   }

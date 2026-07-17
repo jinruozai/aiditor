@@ -59,14 +59,25 @@
     })
   }
 
-  function resolveToolRefs(agent, ctx) {
-    const explicit = !!(agent.toolRefs && agent.toolRefs.length)
-    const refs = explicit ? agent.toolRefs : ai.tools.list()
-    return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, explicit) : refs
+  function addToolRefs(value, refs, seen) {
+    const tools = value && value.tools || []
+    for (let i = 0; i < tools.length; i++) addUnique(refs, seen, tools[i])
+    const nested = value && value.refs || []
+    for (let j = 0; j < nested.length; j++) addToolRefs(nested[j], refs, seen)
+  }
+
+  function resolveToolRefs(agent, ctx, skillSpecs, runtimeContext) {
+    const refs = []
+    const seen = {}
+    const direct = agent.toolRefs || []
+    for (let i = 0; i < direct.length; i++) addUnique(refs, seen, direct[i])
+    for (let j = 0; j < (skillSpecs || []).length; j++) addToolRefs(skillSpecs[j], refs, seen)
+    for (let k = 0; k < (runtimeContext || []).length; k++) addToolRefs(runtimeContext[k] && runtimeContext[k].value, refs, seen)
+    return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, true) : refs
   }
 
   function resolveTools(agent, ctx, toolRefs) {
-    const refs = toolRefs || resolveToolRefs(agent, ctx)
+    const refs = toolRefs || resolveToolRefs(agent, ctx, [], [])
     const out = []
     for (let i = 0; i < refs.length; i++) {
       const tool = ai.tools.get(refs[i])
@@ -93,7 +104,7 @@
     const seen = {}
     const explicit = agent.skillRefs || []
     for (let i = 0; i < explicit.length; i++) addUnique(refs, seen, explicit[i])
-    const needsRuntimeAuthoring = uiAuthoringIntent(input) || (ai.currentWorkspace && ai.currentWorkspace())
+    const needsRuntimeAuthoring = uiAuthoringIntent(input)
     if (ai.skills && ai.skills.get && needsRuntimeAuthoring) {
       if (ai.skills.get('aiditor.runtime-authoring')) addUnique(refs, seen, 'aiditor.runtime-authoring')
       else if (ai.skills.get('aiditor.authoring')) addUnique(refs, seen, 'aiditor.authoring')
@@ -520,36 +531,39 @@
     return lines
   }
 
+  function skillCatalogMessage(requestCtx) {
+    const active = requestCtx && requestCtx.skillRefs || []
+    if (active.indexOf('orchestration') < 0 || !ai.skills || !ai.skills.list) return null
+    const ids = ai.skills.list()
+    const items = []
+    for (let i = 0; i < ids.length; i++) {
+      const skill = ai.skills.get(ids[i])
+      if (!skill || ids[i] === 'aiditor.authoring') continue
+      items.push({ id: ids[i], title: skill.title || ids[i], description: skill.description || '' })
+    }
+    if (!items.length) return null
+    return contextCardMessage(
+      'skills',
+      'skill-catalog',
+      75,
+      'Available skill profiles for newly delegated agents. Pass only the skill ids needed by the child. Full skill instructions and tools load only when active.\n' + compactJson(items, 3600),
+      4000
+    )
+  }
+
   function runtimeGuideMessage(agent, requestCtx) {
     const lines = [
       'You are an AIditor AI agent running inside an editor runtime.',
-      'Complete the user request end-to-end in the current turn whenever the available tools make that possible.',
-      'Do not stop after a partial setup step. For delegated work, prefer agent.delegate because it creates/reuses an agent and sends the task in one workflow.',
-      'If you use agent.create separately for a delegated task, immediately send that agent the task with agent.send unless the user only asked to create the agent.',
-      'agent.send and agent.delegate return a questId. Use quest.result with agentId + questId to read that exact delegated result. Use quest.read only when you only need status.',
-      'Do not poll quest.result immediately after agent.delegate or agent.send. If a delegated quest is still running, continue other useful work when possible; otherwise stop and wait for a later inbox notification.',
-      'Completion events are notifications, not interrupts. If child work completes while you are running, the runtime will queue it for a later scheduler checkpoint.',
-      'When processing an inbox continuation, handle the completed event batch available now. Do not wait for sibling quests that are still pending.',
-      'A response that contains agent.delegate or agent.send is an action turn. Do not put final user-visible answer content in that same message; continue in the runtime follow-up continuation.',
-      'If new user messages are queued while you are running, finish the current request cleanly unless the queued message is explicitly interrupting or marked as guidance.',
-      'Current runtime state in this system message overrides older transcript history. If older messages mention a workspace/tool/capability that is not present now, treat it as unavailable now.',
-      'Stop the run with a clear final answer when the requested work is complete and, for edits, verification is done or explicitly unavailable.',
-      'Stop and clearly report a blocker when required workspace/project state, permissions, APIs, files, schemas, or user decisions are missing. Do not keep searching for workaround tools.',
-      'Stop and ask the user when the next step is ambiguous, destructive, or requires confirmation. Say exactly what decision or input is needed.',
-      'Stop after a repeated equivalent tool/schema failure instead of retrying the same action under new guessed names.',
-      'Do not guess editor operation names. The generic aiditor.previewOperation/applyOperation bridge is hidden from normal requests; use concrete tools exposed in this request.',
-      'Use workspace.fileSummary, code.map, search, and range reads before loading large files.',
-      'When verify.* tools are available, run the narrowest relevant check after editing workspace files and use diagnostics to repair failures before claiming completion.',
-      'Only ask the user for clarification or confirmation when the requested outcome is ambiguous, destructive, or blocked by permissions/errors.',
-      'If you are already a child agent, do not create another child agent unless the user explicitly requests deeper delegation.',
+      'Complete the current request with the capabilities exposed in this request; never claim an action that was not performed.',
+      'Current runtime state and available tools override older transcript claims about capabilities.',
+      'Stop with a clear result when complete, or report the exact blocker when required state, permission, or user input is missing.',
+      'Do not retry an equivalent failed tool call under guessed names.',
       'CURRENT_AGENT_ID: ' + (agent.id || ''),
       'CURRENT_AGENT_NAME: ' + (agent.name || ''),
       'CURRENT_PARENT_AGENT_ID: ' + (agent.parentAgentId || ''),
     ]
-    if (aiditor.ai.workspaceMeta && aiditor.ai.workspaceMeta()) lines.push('CURRENT_AI_WORKSPACE: ' + compactJson(aiditor.ai.workspaceMeta(), 400))
-    else lines.push('NO_CURRENT_AI_WORKSPACE: workspace-backed file tools are unavailable until the user opens or selects a workspace.')
     if (requestCtx && requestCtx.uiAuthoringBlocked) {
-      lines.push('CURRENT_REQUEST_BLOCKED: The user is asking to create or modify UI/panels/docks, but no workspace project is open. Do not call tools, do not search for workaround operations, and do not try older extension/dock paths. Reply briefly that a workspace project must be opened or selected first.')
+      lines.push('CURRENT_REQUEST_BLOCKED: Workspace-backed UI authoring requires the user to open or select a workspace.')
     }
     if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
     const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
@@ -573,6 +587,7 @@
     if (!meta) return null
     const tools = {}
     for (let i = 0; i < (toolRefs || []).length; i++) tools[toolRefs[i]] = true
+    if (!Object.keys(tools).some(function (id) { return id.indexOf('workspace.') === 0 || id.indexOf('code.') === 0 || id.indexOf('verify.') === 0 })) return null
     const flow = [
       tools['workspace.fileSummary'] || tools['code.map'] ? '1. Inspect structure with workspace.fileSummary or code.map.' : null,
       tools['workspace.searchFiles'] ? '2. Locate candidates with workspace.searchFiles.' : null,
@@ -594,6 +609,7 @@
     const prefixes = toolPrefixSummary(toolRefs || [])
     const queue = agent.queue || []
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
+    if (!quest && !(requestCtx && requestCtx.turn) && !queue.length && !(requestCtx && requestCtx.uiAuthoringBlocked)) return null
     return contextCardMessage('task', 'task', 70, [
       'Current task state.',
       'permissionMode: ' + (agent.permissionMode || 'default'),
@@ -625,12 +641,14 @@
     const out = [runtimeGuideMessage(agent, requestCtx)]
     const workspace = workspaceContextMessage(requestCtx, toolRefs)
     const task = taskStateContextMessage(agent, input, requestCtx, toolRefs)
+    const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
     const inbox = inboxContextMessage(agent, input)
     const queued = queuedContextMessage(agent, input)
     if (workspace) out.push(workspace)
     if (task) out.push(task)
+    if (skills) out.push(skills)
     if (runtimeContext) out.push(runtimeContext)
     if (attachments) out.push(attachments)
     const compacted = compactionContextMessages(agent)
@@ -675,9 +693,11 @@
     const contextRefs = effectiveContextRefs(agent, input)
     const resolvedAttachments = allowedAttachments ? resolveAttachments(contextRefs, baseCtx) : []
     const attachmentRefs = allowedAttachments ? describeAttachments(contextRefs, baseCtx) : []
-    const tools = resolveToolRefs(agent, baseCtx)
-    baseCtx.toolRefs = tools
-    const toolSpecs = resolveTools(agent, baseCtx, tools)
+    const skillRefs = effectiveSkillRefs(agent, input, baseCtx)
+    const skillSpecs = resolveSkillSpecs(skillRefs)
+    baseCtx.skillRefs = skillRefs
+    baseCtx.skillSpecs = skillSpecs
+    const initialTools = resolveToolRefs(agent, baseCtx, skillSpecs, [])
     const requestShell = {
       runId: runId,
       agent: agent,
@@ -685,14 +705,13 @@
       input: input || null,
       target: agent,
       event: input && input.event ? input.event : null,
-      tools: tools,
-      toolSpecs: toolSpecs,
+      tools: initialTools,
+      toolSpecs: resolveTools(agent, baseCtx, initialTools),
     }
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
-    const skillRefs = effectiveSkillRefs(agent, input, baseCtx)
-    const skillSpecs = resolveSkillSpecs(skillRefs)
-    baseCtx.skillRefs = skillRefs
-    baseCtx.skillSpecs = skillSpecs
+    const tools = resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext)
+    baseCtx.toolRefs = tools
+    const toolSpecs = resolveTools(agent, baseCtx, tools)
     const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
@@ -709,6 +728,8 @@
         meta: {
           messageCount: messages.length,
           toolCount: tools.length,
+          toolRefs: tools.slice(),
+          skillRefs: skillRefs.slice(),
           contextItems: contextPack ? contextPack.items.length : 0,
           contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
         },

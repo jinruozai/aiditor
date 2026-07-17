@@ -34,7 +34,7 @@
       whenToUse: skill.whenToUse || '',
       whenNotToUse: skill.whenNotToUse || '',
       relatedApis: skill.relatedApis || [],
-      relatedTools: skill.relatedTools || [],
+      tools: skill.tools || [],
       docPath: skill.docPath || '',
     }
   }
@@ -99,7 +99,7 @@
       skill.whenToUse,
       skill.whenNotToUse,
       (skill.relatedApis || []).join(' '),
-      (skill.relatedTools || []).join(' '),
+      (skill.tools || []).join(' '),
       (skill.rules || []).join(' '),
     ].join(' ').toLowerCase()
   }
@@ -136,7 +136,7 @@
         whenToUse: { type: 'string' },
         whenNotToUse: { type: 'string' },
         relatedApis: { type: 'array' },
-        relatedTools: { type: 'array' },
+        tools: { type: 'array' },
         docPath: { type: 'string' },
         systemPrompt: { type: 'string' },
         rules: { type: 'array' },

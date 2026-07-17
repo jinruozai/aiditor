@@ -70,6 +70,7 @@ AIditor assembles context in this order:
 runtime        current AI runtime rules and active skills
 workspace      current workspace boundary and recommended file workflow
 task           current permission/queue/task state
+skills         bounded child-skill catalog when orchestration is active
 context        compact runtime context providers
 attachments    user-attached references and selected editor objects
 memory         durable agent memory
@@ -91,6 +92,23 @@ tools       actions and exact reads
 operations  preview/apply changes
 ```
 
+Request construction resolves capabilities before serializing schemas:
+
+```text
+capture base request context
+  -> resolve explicit and auto skills
+  -> collect compact runtime context
+  -> union agent.toolRefs + activeSkill.tools + runtimeContext.tools
+  -> filter by tool.available
+  -> serialize only the effective tool schemas
+  -> assemble context cards and transcript
+```
+
+An empty `agent.toolRefs` no longer means every registered tool. An agent with
+no active skill, direct tool, or context-contributed tool receives no model
+tools. Exposure is not permission: every resulting call still passes through
+the permission resolver.
+
 ## Budget Rules
 
 Each system layer should be compact by default:
@@ -108,7 +126,8 @@ never included without its matching tool result messages.
 
 ## Workspace Context
 
-When a workspace is bound, the request includes a small workspace card:
+When a workspace is bound and at least one workspace/code/verification tool is
+effective for the current request, the request includes a small workspace card:
 
 ```text
 workspace id / label / kind
@@ -120,13 +139,15 @@ recommended flow:
   verify.run when available
 ```
 
-When no workspace is bound, the runtime card must be explicit. For durable UI
-or code-authoring requests, the model should report the blocker instead of
-guessing older dock/extension paths.
+No global `NO_CURRENT_AI_WORKSPACE` warning is injected into unrelated chat.
+For durable UI authoring requests, the auto-activated authoring skill and one
+compact blocker card tell the model that the user must open or select a
+workspace. Workspace binding remains a host action.
 
 ## Task State
 
-The task card summarizes volatile run state:
+The task card summarizes volatile run state only when a quest, continuation,
+queue, or current blocker makes that state relevant:
 
 ```text
 permission mode

@@ -128,6 +128,25 @@ by framework code but should not appear in normal model requests. Direct
 registry access is unchanged; the visibility rule only decides what the request
 builder sends to the provider.
 
+The registry is not the request tool list. The request builder derives one
+effective surface:
+
+```text
+agent.toolRefs
+  union activeSkill.tools
+  union runtimeContext.tools
+  filtered by tool.available(requestContext)
+```
+
+No source means no model tools; the builder never falls back to `tools.list()`.
+Direct, skill, and runtime-context references are deliberate exposure, so they
+may include a tool whose `exposeToModel` default is false. This still does not
+grant execution permission. Permission checks remain mandatory for every call,
+preview, and apply.
+
+Skills use a plain `tools: string[]` field. Do not add `relatedTools`, private
+skill tool registries, or a second capability model with overlapping meaning.
+
 Tool specs also have a normalized capability view:
 
 ```js

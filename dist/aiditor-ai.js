@@ -727,6 +727,8 @@
       plan: normalizeQuestPlan(spec.plan || spec.steps || []),
       currentStepId: spec.currentStepId || null,
       budget: spec.budget || null,
+      usage: spec.usage || null,
+      stopReason: spec.stopReason || null,
       createdAt: spec.createdAt || now(),
       startedAt: spec.startedAt || null,
       completedAt: spec.completedAt || null,
@@ -1470,6 +1472,8 @@
       plan: plan.slice(0, maxSteps).map(function (step) { return compactQuestStep(step, emergency) }),
       currentStepId: quest.currentStepId,
       budget: compactPersistenceValue(quest.budget, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+      usage: compactPersistenceValue(quest.usage, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
+      stopReason: quest.stopReason || null,
       createdAt: quest.createdAt,
       startedAt: quest.startedAt,
       completedAt: quest.completedAt,
@@ -1583,7 +1587,7 @@
     })
     const quests = (agent.quests || []).map(function (quest) {
       return (quest.status === 'running' || quest.status === 'queued' || quest.status === 'waiting_approval')
-        ? Object.assign({}, quest, { status: 'stopped', completedAt: quest.completedAt || now(), summary: quest.summary || 'Stopped by reload' })
+        ? Object.assign({}, quest, { status: 'stopped', stopReason: 'reload', completedAt: quest.completedAt || now(), summary: quest.summary || 'Stopped by reload' })
         : quest
     })
     return Object.assign({}, agent, {
@@ -1777,7 +1781,10 @@
       plan: (quest.plan || []).slice(),
       currentStepId: quest.currentStepId || null,
       budget: quest.budget || null,
+      usage: quest.usage || null,
+      stopReason: quest.stopReason || null,
       createdAt: quest.createdAt,
+      startedAt: quest.startedAt || null,
       completedAt: quest.completedAt || null,
     }
   }
@@ -3098,26 +3105,14 @@
       }
     })
     return [
-      'SYSTEM: You are running inside AIditor. Some user requests require changing editor state.',
-      'If a user asks you to create, delete, rename, move, reparent, send to, or inspect an AIditor agent, quest, message, or attachment, you MUST request the matching AIditor tool.',
-      'Do not merely say you will do it. The host cannot act unless you emit an aiditor_tool_calls JSON block.',
-      'Complete the user request end-to-end. For delegated work, prefer toolId "agent.delegate" because it creates/reuses an agent and sends the task in one workflow.',
-      'If you use agent.create separately for a delegated task, do not stop after agent.create; continue with agent.send, then quest.read/message.read when the quest completes.',
-      'If a tool result gives you a questId, do not poll quest.result immediately. Child completion is delivered later as an inbox notification; then use quest.result for completed events in that batch.',
-      'A reply that emits agent.delegate or agent.send is an action turn. Do not include final user-visible answer content in the same reply as those tool calls.',
-      'If you need a tool, end your reply with exactly one JSON code block using this shape:',
+      'SYSTEM: AIditor text tool bridge. Use only tools listed in AVAILABLE_TOOLS.',
+      'When an action requires a tool, end the reply with exactly one JSON code block using this shape:',
       '```json',
-      '{"aiditor_tool_calls":[{"toolId":"agent.create","args":{"name":"poet","parentAgentId":"' + ((request.agent && request.agent.id) || '') + '","systemPrompt":"Write concise poems."}}]}',
+      '{"aiditor_tool_calls":[{"toolId":"tool.id","args":{}}]}',
       '```',
-      'For "create an agent" or "create a child agent" with no work, use toolId "agent.create".',
-      'For "create an agent and have it do work", use toolId "agent.delegate".',
-      'For "message another agent", use toolId "agent.send".',
-      'For "get delegated agent result", prefer toolId "quest.result".',
-      'For normal conversation that does not change editor state, answer normally and do not emit aiditor_tool_calls.',
-      'Do not claim that a tool was executed unless you emit an aiditor_tool_calls block. The host UI will preview/apply tools after your reply.',
+      'Multiple calls may appear in that one array. Do not claim execution unless the matching call is emitted.',
+      'For normal conversation, answer without an aiditor_tool_calls block.',
       'CURRENT_AGENT_ID: ' + ((request.agent && request.agent.id) || ''),
-      'CURRENT_AGENT_NAME: ' + ((request.agent && request.agent.name) || ''),
-      'CURRENT_PARENT_AGENT_ID: ' + ((request.agent && request.agent.parentAgentId) || ''),
       'AVAILABLE_TOOLS: ' + JSON.stringify(compact),
     ].join('\n')
   }
@@ -3870,7 +3865,7 @@
   }
 
   function visibleToolNames(refs, ctx, explicit) {
-    const list = refs && refs.length ? refs : keys(tools)
+    const list = Array.isArray(refs) ? refs : keys(tools)
     const out = []
     for (let i = 0; i < list.length; i++) {
       if (isToolVisibleToModel(list[i], ctx, !!explicit)) out.push(list[i])
@@ -4648,7 +4643,7 @@
     whenToUse: 'Use when the agent is running inside an AIditor host and the user asks for UI to appear in current docks.',
     whenNotToUse: 'Do not use for standalone repository or host-app implementation work outside the live editor runtime.',
     relatedApis: ['aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel', 'aiditor.registerComponent', 'aiditor.runtime.loadScript'],
-    relatedTools: ['workspace.fileSummary', 'workspace.writeText', 'workspace.editText', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
+    tools: ['workspace.fileSummary', 'workspace.searchFiles', 'workspace.readTextRange', 'workspace.writeText', 'workspace.editText', 'code.map', 'verify.run', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
     docPath: 'doc/skill/aiditor-runtime-authoring/SKILL.md',
     systemPrompt: 'You are running inside an AIditor host. Create durable UI by writing plain JavaScript workspace component files, then mount or replace registered components in live docks through AIditor tools.',
     rules: RUNTIME_RULES,
@@ -4660,7 +4655,7 @@
     whenToUse: 'Use when coding an AIditor-based project, host app, demo, layout, or component library outside the live editor agent runtime.',
     whenNotToUse: 'Do not use when the task is to place UI into the currently running editor dock; use aiditor.runtime-authoring instead.',
     relatedApis: ['aiditor.registerComponent', 'aiditor.ui.propertyForm', 'aiditor.inspector.registerProvider', 'aiditor.runtime.loadScript'],
-    relatedTools: ['workspace.searchFiles', 'workspace.readText', 'workspace.editText', 'workspace.writeText'],
+    tools: ['workspace.fileSummary', 'workspace.searchFiles', 'workspace.readTextRange', 'workspace.editText', 'workspace.writeText', 'code.map', 'verify.run'],
     docPath: 'doc/skill/aiditor-library-authoring/SKILL.md',
     systemPrompt: 'Use AIditor as a zero-build, plain JavaScript editor UI library in a repository or host app. Author registered components and host integration code without React, TSX, JSX, import/export, or bundled-module assumptions.',
     rules: LIBRARY_RULES,
@@ -4672,7 +4667,7 @@
     whenToUse: 'Use only for older agents or when a focused AIditor authoring skill is unavailable.',
     whenNotToUse: 'Prefer aiditor.runtime-authoring in live editor sessions and aiditor.library-authoring in repository work.',
     relatedApis: ['aiditor.registerComponent', 'aiditor.inspectDocks', 'aiditor.addPanelToDock'],
-    relatedTools: ['aiditor.inspectDocks', 'aiditor.addPanelToDock'],
+    tools: ['aiditor.inspectDocks', 'aiditor.addPanelToDock'],
     docPath: 'doc/skill/aiditor-authoring/SKILL.md',
     systemPrompt: 'Compatibility skill for AIditor authoring. Prefer aiditor.runtime-authoring inside the live editor, and aiditor.library-authoring when coding a host app or repository.',
     rules: [
@@ -7154,7 +7149,7 @@
       whenToUse: skill.whenToUse || '',
       whenNotToUse: skill.whenNotToUse || '',
       relatedApis: skill.relatedApis || [],
-      relatedTools: skill.relatedTools || [],
+      tools: skill.tools || [],
       docPath: skill.docPath || '',
     }
   }
@@ -7219,7 +7214,7 @@
       skill.whenToUse,
       skill.whenNotToUse,
       (skill.relatedApis || []).join(' '),
-      (skill.relatedTools || []).join(' '),
+      (skill.tools || []).join(' '),
       (skill.rules || []).join(' '),
     ].join(' ').toLowerCase()
   }
@@ -7256,7 +7251,7 @@
         whenToUse: { type: 'string' },
         whenNotToUse: { type: 'string' },
         relatedApis: { type: 'array' },
-        relatedTools: { type: 'array' },
+        tools: { type: 'array' },
         docPath: { type: 'string' },
         systemPrompt: { type: 'string' },
         rules: { type: 'array' },
@@ -10609,6 +10604,73 @@
     if (actor(ctx) !== agentId) requireManage(ctx, agentId)
   }
 
+  function hasOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value || {}, key)
+  }
+
+  function agentDepth(agentId) {
+    let depth = 0
+    let current = ai.findAgent(agentId)
+    while (current && current.parentAgentId) {
+      depth++
+      current = ai.findAgent(current.parentAgentId)
+    }
+    return depth
+  }
+
+  function subtreeHeight(agentId) {
+    if (!agentId) return 0
+    const agents = ai.agents.peek()
+    let height = 0
+    for (let i = 0; i < agents.length; i++) {
+      if (!ai.isDescendant(agentId, agents[i].id)) continue
+      height = Math.max(height, agentDepth(agents[i].id) - agentDepth(agentId))
+    }
+    return height
+  }
+
+  function maxDelegationDepth() {
+    const config = ai.runtimeConfig ? ai.runtimeConfig() : null
+    const value = Number(config && config.maxDelegationDepth)
+    return value > 0 ? value : 4
+  }
+
+  function resolveParentAgentId(args, ctx, movingAgentId) {
+    const who = actor(ctx)
+    const explicit = hasOwn(args, 'parentAgentId')
+    const parentAgentId = explicit ? (args.parentAgentId || null) : (who === 'user' ? null : who)
+    if (movingAgentId && parentAgentId && (parentAgentId === movingAgentId || ai.isDescendant(movingAgentId, parentAgentId))) {
+      throw new Error('Agent tree cycle is not allowed')
+    }
+    if (who === 'user') {
+      if (parentAgentId) requireManageOrSelf(ctx, parentAgentId)
+      return parentAgentId
+    }
+    if (!parentAgentId) throw new Error('Permission denied: agents cannot create or move root agents')
+    requireManageOrSelf(ctx, parentAgentId)
+    const resultingDepth = agentDepth(parentAgentId) + 1 + subtreeHeight(movingAgentId)
+    if (resultingDepth > maxDelegationDepth()) throw new Error('Delegation depth limit reached')
+    return parentAgentId
+  }
+
+  function newAgentSpec(args, ctx, fallbackName) {
+    const parentAgentId = resolveParentAgentId(args, ctx)
+    const parent = parentAgentId && ai.findAgent(parentAgentId)
+    const inherited = parent || ctx.agent || null
+    return {
+      name: args.name || fallbackName,
+      parentAgentId: parentAgentId,
+      connection: args.connection || (inherited && inherited.connection) || ai.defaultConnection || 'mock',
+      model: args.model || (inherited && inherited.model) || '',
+      systemPrompt: args.systemPrompt || '',
+      contextRefs: clone(args.contextRefs || []),
+      skillRefs: clone(args.skillRefs || []),
+      toolRefs: clone(args.toolRefs || []),
+      permissionMode: inherited && inherited.permissionMode || 'full',
+      permissions: clone(inherited && inherited.permissions || null),
+    }
+  }
+
   function agentSummary(agent, full) {
     const out = {
       id: agent.id,
@@ -10661,25 +10723,11 @@
   }
 
   function createAgentPreview(args, ctx) {
-    if (args.parentAgentId) requireManageOrSelf(ctx, args.parentAgentId)
     const existingNames = ai.agents.peek().map(function (agent) { return agent.name })
     return {
       action: 'create',
       kind: 'agent',
-      agent: {
-        name: args.name || ai.generateAgentName(existingNames),
-        parentAgentId: args.parentAgentId || null,
-        connection: args.connection || (ctx.agent && ctx.agent.connection) || ai.defaultConnection || 'mock',
-        model: args.model || (ctx.agent && ctx.agent.model) || '',
-        systemPrompt: args.systemPrompt || '',
-        contextRefs: clone(args.contextRefs || []),
-        skillRefs: clone(args.skillRefs || []),
-        toolRefs: clone(args.toolRefs || []),
-        permissions: clone(args.permissions || null),
-        state: clone(args.state || {}),
-        memory: clone(args.memory || {}),
-        meta: clone(args.meta || {}),
-      },
+      agent: newAgentSpec(args, ctx, ai.generateAgentName(existingNames)),
     }
   }
 
@@ -10694,6 +10742,10 @@
     const target = args.agentId ? ai.findAgent(args.agentId) : null
     if (args.agentId) {
       if (!target) throw new Error('Agent not found')
+      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'skillRefs', 'toolRefs']
+      for (let i = 0; i < creationKeys.length; i++) {
+        if (hasOwn(args, creationKeys[i])) throw new Error('Agent configuration is only valid when delegate creates a new agent')
+      }
       requireSend(ctx, target.id)
       return {
         action: 'delegate',
@@ -10705,33 +10757,20 @@
         meta: clone(args.meta || null),
         interrupt: !!args.interrupt,
         guidance: args.guidance || null,
+        budget: clone(args.budget || null),
       }
     }
-    const parentId = args.parentAgentId || (ctx.agent && ctx.agent.id) || null
-    if (parentId) requireManageOrSelf(ctx, parentId)
     return {
       action: 'delegate',
       kind: 'agent',
-      agent: {
-        name: args.name || 'Agent',
-        parentAgentId: parentId,
-        connection: args.connection || (ctx.agent && ctx.agent.connection) || ai.defaultConnection || 'mock',
-        model: args.model || (ctx.agent && ctx.agent.model) || '',
-        systemPrompt: args.systemPrompt || '',
-        contextRefs: clone(args.agentContextRefs || []),
-        skillRefs: clone(args.skillRefs || []),
-        toolRefs: clone(args.toolRefs || []),
-        permissions: clone(args.permissions || null),
-        state: clone(args.state || {}),
-        memory: clone(args.memory || {}),
-        meta: clone(args.agentMeta || {}),
-      },
+      agent: newAgentSpec(Object.assign({}, args, { contextRefs: [] }), ctx, 'Agent'),
       content: args.content || '',
       contextRefs: clone(args.contextRefs || []),
       attachments: clone(args.attachments || []),
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
       guidance: args.guidance || null,
+      budget: clone(args.budget || null),
     }
   }
 
@@ -10746,6 +10785,7 @@
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
       guidance: args.guidance || null,
+      budget: clone(args.budget || null),
     })
     return {
       applied: true,
@@ -10761,13 +10801,13 @@
     const agent = ai.findAgent(args.agentId)
     if (!agent) throw new Error('Agent not found')
     requireManage(ctx, agent.id)
-    if (args.parentAgentId) requireManageOrSelf(ctx, args.parentAgentId)
+    const parentAgentId = resolveParentAgentId(args, ctx, agent.id)
     return {
       action: 'reparent',
       kind: 'agent',
       agentId: agent.id,
       fromParentAgentId: agent.parentAgentId || null,
-      toParentAgentId: args.parentAgentId || null,
+      toParentAgentId: parentAgentId,
       order: args.order == null ? agent.order : args.order,
     }
   }
@@ -10807,6 +10847,7 @@
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
       guidance: args.guidance || null,
+      budget: clone(args.budget || null),
     })
   }
 
@@ -10833,10 +10874,21 @@
     return { stopped: ai.stopAgent(args.agentId) }
   }
 
+  const RUN_BUDGET_SCHEMA = {
+    type: 'object',
+    properties: {
+      maxTurns: { type: 'number', description: 'Maximum model request turns for this task.' },
+      timeoutMs: { type: 'number', description: 'Maximum wall-clock execution time after the task starts.' },
+      maxTokens: { type: 'number', description: 'Maximum reported provider tokens across this task.' },
+    },
+  }
+
+  const STRING_ARRAY_SCHEMA = { type: 'array', items: { type: 'string' } }
+
   ai.tools.register('agent.read', {
     title: 'Read Agents',
-    description: 'Read one agent or list readable agent summaries.',
-    schema: { type: 'object', properties: { agentId: { type: 'string' } } },
+    description: 'Read one full agent by id. Omit agentId to list every agent readable by the caller, including parentAgentId and runtime status.',
+    schema: { type: 'object', properties: { agentId: { type: 'string', description: 'Agent to read. Omit to list readable agents.' } } },
     permissions: ['tool.call'],
     run: readAgent,
   })
@@ -10848,17 +10900,13 @@
       type: 'object',
       properties: {
         name: { type: 'string' },
-        parentAgentId: { type: 'string' },
+        parentAgentId: { type: 'string', description: 'Parent agent id. Omit to create under the calling agent, or at root when called by the user.' },
         connection: { type: 'string' },
         model: { type: 'string' },
         systemPrompt: { type: 'string' },
-        contextRefs: { type: 'array' },
-        skillRefs: { type: 'array' },
-        toolRefs: { type: 'array' },
-        permissions: { type: 'object' },
-        state: { type: 'object' },
-        memory: { type: 'object' },
-        meta: { type: 'object' },
+        contextRefs: STRING_ARRAY_SCHEMA,
+        skillRefs: STRING_ARRAY_SCHEMA,
+        toolRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -10876,12 +10924,17 @@
         agentId: { type: 'string' },
         name: { type: 'string' },
         parentAgentId: { type: 'string' },
-        systemPrompt: { type: 'string' },
+        connection: { type: 'string' },
+        model: { type: 'string' },
+        systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
+        skillRefs: STRING_ARRAY_SCHEMA,
+        toolRefs: STRING_ARRAY_SCHEMA,
         content: { type: 'string' },
-        contextRefs: { type: 'array' },
+        contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },
         interrupt: { type: 'boolean' },
         guidance: { type: 'string' },
+        budget: RUN_BUDGET_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -10891,8 +10944,16 @@
 
   ai.tools.register('agent.reparent', {
     title: 'Reparent Agent',
-    description: 'Move an agent under another agent, or to the root when parentAgentId is empty.',
-    schema: { type: 'object', required: ['agentId'] },
+    description: 'Move an agent under another agent. Only the user may move an agent to the root by passing null.',
+    schema: {
+      type: 'object',
+      required: ['agentId', 'parentAgentId'],
+      properties: {
+        agentId: { type: 'string' },
+        parentAgentId: { type: ['string', 'null'] },
+        order: { type: 'number' },
+      },
+    },
     permissions: ['tool.call', 'tool.apply'],
     preview: reparentAgentPreview,
     apply: reparentAgentApply,
@@ -10910,7 +10971,19 @@
   ai.tools.register('agent.send', {
     title: 'Send Agent Message',
     description: 'Send a message to another agent. Returns a questId for this exact delegated task; prefer quest.result after the runtime reports completion.',
-    schema: { type: 'object', required: ['agentId', 'content'] },
+    schema: {
+      type: 'object',
+      required: ['agentId', 'content'],
+      properties: {
+        agentId: { type: 'string' },
+        content: { type: 'string' },
+        contextRefs: STRING_ARRAY_SCHEMA,
+        attachments: { type: 'array' },
+        interrupt: { type: 'boolean' },
+        guidance: { type: 'string' },
+        budget: RUN_BUDGET_SCHEMA,
+      },
+    },
     permissions: ['tool.call'],
     run: sendAgent,
   })
@@ -10955,11 +11028,14 @@
     systemPrompt: 'Use agent.* and quest.* tools to coordinate aiditor.ai agents. Complete delegated tasks end-to-end when possible. Prefer agent.delegate for create/reuse + send. Delegation is parallel: continue useful local work, then use quest.result for completed inbox event batches.',
     rules: [
       'Agents are identified by id. Names are display labels and may repeat.',
-      'Use parentAgentId for parent/child ownership. There are no groups and no path identity.',
+      'Omitting parentAgentId creates under the calling agent; user-created agents may be roots. Agents cannot escape their ownership subtree.',
       'Use agent.delegate when the user asks an agent to do work; it is the stable one-step delegation workflow.',
+      'agent.delegate accepts systemPrompt, model, skillRefs, and toolRefs only when creating a new child. When agentId is present it only sends work to that existing agent.',
+      'If agent.create is used separately for delegated work, follow it with agent.send unless the user only asked to create an agent.',
+      'Use a task budget to tighten maxTurns, timeoutMs, or maxTokens when delegated work needs a smaller execution bound.',
       'After agent.delegate or agent.send, do not immediately poll quest.result. Continue useful work or stop; child completions arrive later as inbox notifications.',
       'When processing an inbox event batch, use quest.result for completed events in that batch and do not wait for pending sibling quests.',
-      'If you are already running as a child agent, do not create further child agents unless the user explicitly requests deeper delegation.',
+      'A response that delegates or sends work is an action turn; continue user-visible synthesis after the runtime delivers child completion events.',
     ],
     tools: [
       'agent.read',
@@ -11038,14 +11114,25 @@
     })
   }
 
-  function resolveToolRefs(agent, ctx) {
-    const explicit = !!(agent.toolRefs && agent.toolRefs.length)
-    const refs = explicit ? agent.toolRefs : ai.tools.list()
-    return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, explicit) : refs
+  function addToolRefs(value, refs, seen) {
+    const tools = value && value.tools || []
+    for (let i = 0; i < tools.length; i++) addUnique(refs, seen, tools[i])
+    const nested = value && value.refs || []
+    for (let j = 0; j < nested.length; j++) addToolRefs(nested[j], refs, seen)
+  }
+
+  function resolveToolRefs(agent, ctx, skillSpecs, runtimeContext) {
+    const refs = []
+    const seen = {}
+    const direct = agent.toolRefs || []
+    for (let i = 0; i < direct.length; i++) addUnique(refs, seen, direct[i])
+    for (let j = 0; j < (skillSpecs || []).length; j++) addToolRefs(skillSpecs[j], refs, seen)
+    for (let k = 0; k < (runtimeContext || []).length; k++) addToolRefs(runtimeContext[k] && runtimeContext[k].value, refs, seen)
+    return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, true) : refs
   }
 
   function resolveTools(agent, ctx, toolRefs) {
-    const refs = toolRefs || resolveToolRefs(agent, ctx)
+    const refs = toolRefs || resolveToolRefs(agent, ctx, [], [])
     const out = []
     for (let i = 0; i < refs.length; i++) {
       const tool = ai.tools.get(refs[i])
@@ -11072,7 +11159,7 @@
     const seen = {}
     const explicit = agent.skillRefs || []
     for (let i = 0; i < explicit.length; i++) addUnique(refs, seen, explicit[i])
-    const needsRuntimeAuthoring = uiAuthoringIntent(input) || (ai.currentWorkspace && ai.currentWorkspace())
+    const needsRuntimeAuthoring = uiAuthoringIntent(input)
     if (ai.skills && ai.skills.get && needsRuntimeAuthoring) {
       if (ai.skills.get('aiditor.runtime-authoring')) addUnique(refs, seen, 'aiditor.runtime-authoring')
       else if (ai.skills.get('aiditor.authoring')) addUnique(refs, seen, 'aiditor.authoring')
@@ -11499,36 +11586,39 @@
     return lines
   }
 
+  function skillCatalogMessage(requestCtx) {
+    const active = requestCtx && requestCtx.skillRefs || []
+    if (active.indexOf('orchestration') < 0 || !ai.skills || !ai.skills.list) return null
+    const ids = ai.skills.list()
+    const items = []
+    for (let i = 0; i < ids.length; i++) {
+      const skill = ai.skills.get(ids[i])
+      if (!skill || ids[i] === 'aiditor.authoring') continue
+      items.push({ id: ids[i], title: skill.title || ids[i], description: skill.description || '' })
+    }
+    if (!items.length) return null
+    return contextCardMessage(
+      'skills',
+      'skill-catalog',
+      75,
+      'Available skill profiles for newly delegated agents. Pass only the skill ids needed by the child. Full skill instructions and tools load only when active.\n' + compactJson(items, 3600),
+      4000
+    )
+  }
+
   function runtimeGuideMessage(agent, requestCtx) {
     const lines = [
       'You are an AIditor AI agent running inside an editor runtime.',
-      'Complete the user request end-to-end in the current turn whenever the available tools make that possible.',
-      'Do not stop after a partial setup step. For delegated work, prefer agent.delegate because it creates/reuses an agent and sends the task in one workflow.',
-      'If you use agent.create separately for a delegated task, immediately send that agent the task with agent.send unless the user only asked to create the agent.',
-      'agent.send and agent.delegate return a questId. Use quest.result with agentId + questId to read that exact delegated result. Use quest.read only when you only need status.',
-      'Do not poll quest.result immediately after agent.delegate or agent.send. If a delegated quest is still running, continue other useful work when possible; otherwise stop and wait for a later inbox notification.',
-      'Completion events are notifications, not interrupts. If child work completes while you are running, the runtime will queue it for a later scheduler checkpoint.',
-      'When processing an inbox continuation, handle the completed event batch available now. Do not wait for sibling quests that are still pending.',
-      'A response that contains agent.delegate or agent.send is an action turn. Do not put final user-visible answer content in that same message; continue in the runtime follow-up continuation.',
-      'If new user messages are queued while you are running, finish the current request cleanly unless the queued message is explicitly interrupting or marked as guidance.',
-      'Current runtime state in this system message overrides older transcript history. If older messages mention a workspace/tool/capability that is not present now, treat it as unavailable now.',
-      'Stop the run with a clear final answer when the requested work is complete and, for edits, verification is done or explicitly unavailable.',
-      'Stop and clearly report a blocker when required workspace/project state, permissions, APIs, files, schemas, or user decisions are missing. Do not keep searching for workaround tools.',
-      'Stop and ask the user when the next step is ambiguous, destructive, or requires confirmation. Say exactly what decision or input is needed.',
-      'Stop after a repeated equivalent tool/schema failure instead of retrying the same action under new guessed names.',
-      'Do not guess editor operation names. The generic aiditor.previewOperation/applyOperation bridge is hidden from normal requests; use concrete tools exposed in this request.',
-      'Use workspace.fileSummary, code.map, search, and range reads before loading large files.',
-      'When verify.* tools are available, run the narrowest relevant check after editing workspace files and use diagnostics to repair failures before claiming completion.',
-      'Only ask the user for clarification or confirmation when the requested outcome is ambiguous, destructive, or blocked by permissions/errors.',
-      'If you are already a child agent, do not create another child agent unless the user explicitly requests deeper delegation.',
+      'Complete the current request with the capabilities exposed in this request; never claim an action that was not performed.',
+      'Current runtime state and available tools override older transcript claims about capabilities.',
+      'Stop with a clear result when complete, or report the exact blocker when required state, permission, or user input is missing.',
+      'Do not retry an equivalent failed tool call under guessed names.',
       'CURRENT_AGENT_ID: ' + (agent.id || ''),
       'CURRENT_AGENT_NAME: ' + (agent.name || ''),
       'CURRENT_PARENT_AGENT_ID: ' + (agent.parentAgentId || ''),
     ]
-    if (aiditor.ai.workspaceMeta && aiditor.ai.workspaceMeta()) lines.push('CURRENT_AI_WORKSPACE: ' + compactJson(aiditor.ai.workspaceMeta(), 400))
-    else lines.push('NO_CURRENT_AI_WORKSPACE: workspace-backed file tools are unavailable until the user opens or selects a workspace.')
     if (requestCtx && requestCtx.uiAuthoringBlocked) {
-      lines.push('CURRENT_REQUEST_BLOCKED: The user is asking to create or modify UI/panels/docks, but no workspace project is open. Do not call tools, do not search for workaround operations, and do not try older extension/dock paths. Reply briefly that a workspace project must be opened or selected first.')
+      lines.push('CURRENT_REQUEST_BLOCKED: Workspace-backed UI authoring requires the user to open or select a workspace.')
     }
     if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
     const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
@@ -11552,6 +11642,7 @@
     if (!meta) return null
     const tools = {}
     for (let i = 0; i < (toolRefs || []).length; i++) tools[toolRefs[i]] = true
+    if (!Object.keys(tools).some(function (id) { return id.indexOf('workspace.') === 0 || id.indexOf('code.') === 0 || id.indexOf('verify.') === 0 })) return null
     const flow = [
       tools['workspace.fileSummary'] || tools['code.map'] ? '1. Inspect structure with workspace.fileSummary or code.map.' : null,
       tools['workspace.searchFiles'] ? '2. Locate candidates with workspace.searchFiles.' : null,
@@ -11573,6 +11664,7 @@
     const prefixes = toolPrefixSummary(toolRefs || [])
     const queue = agent.queue || []
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
+    if (!quest && !(requestCtx && requestCtx.turn) && !queue.length && !(requestCtx && requestCtx.uiAuthoringBlocked)) return null
     return contextCardMessage('task', 'task', 70, [
       'Current task state.',
       'permissionMode: ' + (agent.permissionMode || 'default'),
@@ -11604,12 +11696,14 @@
     const out = [runtimeGuideMessage(agent, requestCtx)]
     const workspace = workspaceContextMessage(requestCtx, toolRefs)
     const task = taskStateContextMessage(agent, input, requestCtx, toolRefs)
+    const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
     const inbox = inboxContextMessage(agent, input)
     const queued = queuedContextMessage(agent, input)
     if (workspace) out.push(workspace)
     if (task) out.push(task)
+    if (skills) out.push(skills)
     if (runtimeContext) out.push(runtimeContext)
     if (attachments) out.push(attachments)
     const compacted = compactionContextMessages(agent)
@@ -11654,9 +11748,11 @@
     const contextRefs = effectiveContextRefs(agent, input)
     const resolvedAttachments = allowedAttachments ? resolveAttachments(contextRefs, baseCtx) : []
     const attachmentRefs = allowedAttachments ? describeAttachments(contextRefs, baseCtx) : []
-    const tools = resolveToolRefs(agent, baseCtx)
-    baseCtx.toolRefs = tools
-    const toolSpecs = resolveTools(agent, baseCtx, tools)
+    const skillRefs = effectiveSkillRefs(agent, input, baseCtx)
+    const skillSpecs = resolveSkillSpecs(skillRefs)
+    baseCtx.skillRefs = skillRefs
+    baseCtx.skillSpecs = skillSpecs
+    const initialTools = resolveToolRefs(agent, baseCtx, skillSpecs, [])
     const requestShell = {
       runId: runId,
       agent: agent,
@@ -11664,14 +11760,13 @@
       input: input || null,
       target: agent,
       event: input && input.event ? input.event : null,
-      tools: tools,
-      toolSpecs: toolSpecs,
+      tools: initialTools,
+      toolSpecs: resolveTools(agent, baseCtx, initialTools),
     }
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
-    const skillRefs = effectiveSkillRefs(agent, input, baseCtx)
-    const skillSpecs = resolveSkillSpecs(skillRefs)
-    baseCtx.skillRefs = skillRefs
-    baseCtx.skillSpecs = skillSpecs
+    const tools = resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext)
+    baseCtx.toolRefs = tools
+    const toolSpecs = resolveTools(agent, baseCtx, tools)
     const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
@@ -11688,6 +11783,8 @@
         meta: {
           messageCount: messages.length,
           toolCount: tools.length,
+          toolRefs: tools.slice(),
+          skillRefs: skillRefs.slice(),
           contextItems: contextPack ? contextPack.items.length : 0,
           contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
         },
@@ -11733,10 +11830,16 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const runs = {}
   const waitingRuns = {}
+  const budgetTimers = {}
   const runtimeConfig = {
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
-    maxToolTurns: 32,
+    maxDelegationDepth: 4,
+    limits: {
+      maxTurns: 32,
+      timeoutMs: 600000,
+      maxTokens: null,
+    },
   }
   const STREAM_UI_UPDATE_MS = 200
   const RUN_PREVIEW_UPDATE_MS = 80
@@ -11997,6 +12100,58 @@
     return 0
   }
 
+  function positiveLimit(value) {
+    const number = Number(value)
+    return number > 0 && Number.isFinite(number) ? Math.floor(number) : null
+  }
+
+  function clampLimit(value, ceiling) {
+    const requested = positiveLimit(value)
+    const maximum = positiveLimit(ceiling)
+    if (requested && maximum) return Math.min(requested, maximum)
+    return requested || maximum || null
+  }
+
+  function effectiveRunBudget(budget) {
+    const requested = budget || {}
+    const limits = runtimeConfig.limits || {}
+    return {
+      maxTurns: clampLimit(requested.maxTurns, limits.maxTurns),
+      timeoutMs: clampLimit(requested.timeoutMs, limits.timeoutMs),
+      maxTokens: clampLimit(requested.maxTokens, limits.maxTokens),
+    }
+  }
+
+  function emptyUsage() {
+    return { promptTokens: 0, outputTokens: 0, totalTokens: 0, reported: false }
+  }
+
+  function normalizedUsage(usage) {
+    if (!usage) return null
+    const promptTokens = usageNumber(usage, ['prompt_tokens', 'input_tokens', 'promptTokens', 'inputTokens'])
+    const outputTokens = usageNumber(usage, ['completion_tokens', 'output_tokens', 'completionTokens', 'outputTokens'])
+    const totalTokens = usageNumber(usage, ['total_tokens', 'totalTokens']) || (promptTokens || outputTokens ? promptTokens + outputTokens : 0)
+    if (!promptTokens && !outputTokens && !totalTokens) return null
+    return { promptTokens: promptTokens, outputTokens: outputTokens, totalTokens: totalTokens, reported: true }
+  }
+
+  function recordRunUsage(agentId, request, usage) {
+    const current = normalizedUsage(usage)
+    if (!current) return null
+    const run = runs[agentId]
+    const total = run && run.usage || emptyUsage()
+    const next = {
+      promptTokens: total.promptTokens + current.promptTokens,
+      outputTokens: total.outputTokens + current.outputTokens,
+      totalTokens: total.totalTokens + current.totalTokens,
+      reported: true,
+    }
+    if (run) run.usage = next
+    const input = request && request.input || (run && run.request && run.request.input)
+    if (input && input.questId) ai.updateQuest(agentId, input.questId, { usage: next })
+    return next
+  }
+
   function streamOutputTokens(state) {
     const usage = state.usage
     const out = usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
@@ -12098,6 +12253,7 @@
     const usage = message.usage || (result && result.usage) || state.usage || null
     const cost = ai.estimateUsageCost ? ai.estimateUsageCost(request.connectionName, message.model || state.model || request.agent.model, usage) : null
     state.usage = usage
+    recordRunUsage(agentId, request, usage)
     state.cost = cost
     state.completedAt = completedAt
     const firstTokenAt = state.firstTokenAt || null
@@ -12572,6 +12728,7 @@
           runId: request.runId,
           turn: request.turn || 0,
           messageId: message.id,
+          usage: runs[agentId] && runs[agentId].usage || emptyUsage(),
         }
         ai.setAgentStatus(agentId, {
           status: 'waiting_approval',
@@ -12581,9 +12738,11 @@
         })
         return message
       }
-      if ((request.turn || 0) >= runtimeConfig.maxToolTurns) {
+      const budgetReason = runBudgetStopReason(agentId, request)
+      if (budgetReason) {
         flushToolResults(agentId, message.id)
-        return appendToolTurnLimitMessage(agentId, request, message)
+        stopRun(agentId, 'idle', budgetReason)
+        return message
       }
       if (hasDelegationBoundary(calls)) {
         enqueuePostDelegationContinuation(agentId, request, ai.readMessage(agentId, message.id) || message)
@@ -12591,43 +12750,32 @@
       }
       if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agentId, null, { phase: 'before_tool_continuation' })
       const nextRequest = makeRequest(ai.findAgent(agentId) || current, null, request.runId, actor, (request.turn || 0) + 1)
+      nextRequest.input = request.input
+      nextRequest.budget = request.budget
+      nextRequest.startedAt = request.startedAt
       const nextCtx = ai.createRunContext(nextRequest, controller)
       return runChatTurn(agentId, provider, nextRequest, nextCtx, controller, actor)
     })
   }
 
-  function appendToolTurnLimitMessage(agentId, request, sourceMessage) {
-    const content = [
-      'Safety stop: the run reached the maximum number of tool continuation turns.',
-      'The agent did not reach a confident final answer, approval wait, or clear blocker before the guard tripped.',
-      'Review the last tool results, narrow the request, or increase maxToolTurns if this was expected.',
-    ].join(' ')
-    const completedAt = Date.now()
-    return ai.appendMessage(agentId, {
-      from: 'agent:' + agentId,
-      role: 'assistant',
-      content: content,
-      connection: request.connectionName,
-      model: request.agent.model || null,
-      status: 'error',
-      meta: {
-        runId: request.runId,
-        error: 'Tool turn limit reached',
-        sourceMessageId: sourceMessage && sourceMessage.id || null,
-        turn: request.turn || 0,
-        maxToolTurns: runtimeConfig.maxToolTurns,
-      },
-      stats: {
-        runId: request.runId,
-        startTime: sourceMessage && sourceMessage.stats && sourceMessage.stats.startTime || completedAt,
-        completedAt: completedAt,
-        durationMs: 0,
-      },
-    })
+  function runBudgetStopReason(agentId, request) {
+    const budget = request && request.budget || effectiveRunBudget()
+    const run = runs[agentId]
+    return consumedBudgetStopReason(budget, (request.turn || 0) + 1, run && run.usage)
+  }
+
+  function consumedBudgetStopReason(budget, turns, usage) {
+    if (budget.maxTurns && turns >= budget.maxTurns) return 'max_turns'
+    if (budget.maxTokens && usage && usage.reported && usage.totalTokens >= budget.maxTokens) return 'max_tokens'
+    return null
   }
 
   function makeRequest(agent, input, runId, actor, turn) {
-    return ai.makeRequest(agent, input, runId, actor, turn)
+    const request = ai.makeRequest(agent, input, runId, actor, turn)
+    const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
+    request.budget = quest && quest.budget || effectiveRunBudget()
+    request.startedAt = quest && quest.startedAt || Date.now()
+    return request
   }
 
   function providerRunner() {
@@ -12636,12 +12784,62 @@
     }
   }
 
+  function clearBudgetTimer(agentId) {
+    if (!budgetTimers[agentId]) return
+    clearTimeout(budgetTimers[agentId])
+    delete budgetTimers[agentId]
+  }
+
+  function stopSummary(reason) {
+    if (reason === 'timeout') return 'Stopped: execution timeout reached'
+    if (reason === 'max_turns') return 'Stopped: model turn limit reached'
+    if (reason === 'max_tokens') return 'Stopped: token budget reached'
+    return 'Stopped'
+  }
+
+  function stopQuestExecution(agentId, input, reason, usage) {
+    if (!input || !input.questId) return null
+    const current = ai.findQuest(agentId, input.questId)
+    if (!current || current.status === 'completed' || current.status === 'failed' || current.status === 'stopped') return current
+    const quest = ai.updateQuest(agentId, input.questId, {
+      status: 'stopped',
+      stopReason: reason || 'cancelled',
+      usage: usage && usage.reported ? usage : (current.usage || null),
+      completedAt: Date.now(),
+      summary: stopSummary(reason),
+    })
+    if (quest && quest.fromAgentId) {
+      ai.appendInboxEvent(quest.fromAgentId, {
+        type: 'quest.stopped',
+        fromAgentId: agentId,
+        questId: quest.id,
+        summary: quest.summary,
+        meta: { stopReason: quest.stopReason },
+      })
+      scheduleAgent(quest.fromAgentId)
+    }
+    return quest
+  }
+
+  function armBudgetTimer(agentId, request) {
+    clearBudgetTimer(agentId)
+    const timeoutMs = request && request.budget && request.budget.timeoutMs
+    if (!timeoutMs) return
+    const remaining = Math.max(0, timeoutMs - (Date.now() - request.startedAt))
+    budgetTimers[agentId] = setTimeout(function () {
+      delete budgetTimers[agentId]
+      stopRun(agentId, 'idle', 'timeout')
+      scheduleQueuedAgents()
+    }, remaining)
+  }
+
   function failRunningRequest(agentId, request, controller, key, err) {
+    clearBudgetTimer(agentId)
     delete runs[key]
     const input = request.input
     const stopped = controller.signal.aborted
     if (input && input.id) ai.updateMessage(agentId, input.id, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now() })
-    if (input && input.questId) ai.updateQuest(agentId, input.questId, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now(), summary: String(err && err.message ? err.message : err) })
+    if (input && input.questId && !stopped) ai.updateQuest(agentId, input.questId, { status: 'failed', completedAt: Date.now(), summary: String(err && err.message ? err.message : err) })
     ai.setAgentStatus(agentId, stopped ? 'idle' : 'failed')
     if (!stopped && aiditor.reportError) aiditor.reportError({ scope: 'ai', connection: request.connectionName }, err)
     scheduleQueuedAgents()
@@ -12654,7 +12852,15 @@
     const ctx = ai.createRunContext(request, controller)
     const key = agentId
     const input = request.input
-    runs[key] = { controller: controller, connection: runner, runId: request.runId, request: request }
+    const quest = input && input.questId && ai.findQuest ? ai.findQuest(agentId, input.questId) : null
+    request.startedAt = quest && quest.startedAt || request.startedAt || Date.now()
+    runs[key] = {
+      controller: controller,
+      connection: runner,
+      runId: request.runId,
+      request: request,
+      usage: request.accumulatedUsage || (quest && quest.usage) || emptyUsage(),
+    }
     ai.setAgentStatus(agentId, {
       status: 'running',
       statusText: statusText || '',
@@ -12674,7 +12880,11 @@
       summary: statusText || 'agent run started',
     })
     if (markInputStarted && input && input.id) ai.updateMessage(agentId, input.id, { status: 'running', startedAt: Date.now() })
-    if (markInputStarted && input && input.questId) ai.updateQuest(agentId, input.questId, { status: 'running', startedAt: Date.now() })
+    if (markInputStarted && input && input.questId) {
+      request.startedAt = Date.now()
+      ai.updateQuest(agentId, input.questId, { status: 'running', startedAt: request.startedAt, stopReason: null })
+    }
+    armBudgetTimer(agentId, request)
 
     const promise = Promise.resolve().then(function () {
       return runChatTurn(agentId, runner, request, ctx, controller, actor)
@@ -12721,6 +12931,7 @@
     delete runs[key]
     const current = ai.findAgent(agentId)
     if (current && current.status === 'waiting_approval') return result
+    clearBudgetTimer(agentId)
     completeMessageExecution(agentId, request, result)
     trace({
       type: 'run_completed',
@@ -12869,13 +13080,16 @@
     return activeRunCount() < runtimeConfig.maxConcurrentAgents
   }
 
-  function stopRun(agentId, status) {
+  function stopRun(agentId, status, reason) {
     const agent = ai.findAgent(agentId)
     if (!agent) return false
     const run = runs[agent.id]
     const waiting = waitingRuns[agent.id]
     if (!run && !waiting) return false
+    const stopReason = reason || 'cancelled'
+    clearBudgetTimer(agent.id)
     if (run) {
+      run.controller.__aiditorStopReason = stopReason
       run.controller.abort()
       ai.setActiveRunState(agent.id, {
         runId: run.runId,
@@ -12886,8 +13100,8 @@
       if (run.messageId) ai.updateMessage(agent.id, run.messageId, { status: 'stopped' })
       const input = run.request && run.request.input
       if (input && input.id) ai.updateMessage(agent.id, input.id, { status: 'stopped', completedAt: Date.now() })
-      if (input && input.questId) ai.updateQuest(agent.id, input.questId, { status: 'stopped', completedAt: Date.now(), summary: 'Stopped' })
-      trace({ type: 'run_stopped', runId: run.runId, traceId: run.runId, agentId: agent.id, messageId: run.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: 'run stopped' })
+      stopQuestExecution(agent.id, input, stopReason, run.usage)
+      trace({ type: 'run_stopped', runId: run.runId, traceId: run.runId, agentId: agent.id, messageId: run.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       if (run.connection && run.connection.abort) {
         if (aiditor.safeCall) aiditor.safeCall({ scope: 'ai', connection: agent.connection || ai.defaultConnection, runId: run.runId }, function () { run.connection.abort(run.runId) })
         else run.connection.abort(run.runId)
@@ -12903,8 +13117,8 @@
       })
       const input = waiting.request && waiting.request.input
       if (input && input.id) ai.updateMessage(agent.id, input.id, { status: 'stopped', completedAt: Date.now() })
-      if (input && input.questId) ai.updateQuest(agent.id, input.questId, { status: 'stopped', completedAt: Date.now(), summary: 'Stopped' })
-      trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: 'waiting run stopped' })
+      stopQuestExecution(agent.id, input, stopReason, waiting.usage)
+      trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       delete waitingRuns[agent.id]
     }
     ai.setAgentStatus(agent.id, status || 'idle')
@@ -12919,17 +13133,25 @@
     const message = ai.readMessage(agent.id, waiting.messageId)
     const toolState = appendResolvedToolResults(agent.id, message)
     if (toolState.pending) return null
+    const budgetReason = consumedBudgetStopReason(waiting.request.budget, waiting.turn + 1, waiting.usage)
+    if (budgetReason) {
+      stopRun(agent.id, 'idle', budgetReason)
+      scheduleQueuedAgents()
+      return null
+    }
     delete waitingRuns[agent.id]
     if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agent.id, waiting.request.input, { phase: 'before_resume' })
 
     const request = makeRequest(ai.findAgent(agent.id), waiting.request.input, waiting.runId, waiting.actor, waiting.turn + 1)
+    request.accumulatedUsage = waiting.usage || emptyUsage()
+    request.startedAt = waiting.request.startedAt
     return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing after tool approval', false)
   }
 
   function stopAgent(agentId) {
     const agent = agentId ? ai.findAgent(agentId) : ai.getActiveAgent()
     if (!agent) return false
-    const stopped = stopRun(agent.id, 'idle')
+    const stopped = stopRun(agent.id, 'idle', 'cancelled')
     scheduleQueuedAgents()
     return stopped
   }
@@ -13027,7 +13249,9 @@
       id: message.id,
       fromAgentId: spec.fromAgentId || null,
       requestMessageId: message.id,
+      goal: String(spec.content || '').slice(0, 1000),
       status: 'queued',
+      budget: effectiveRunBudget(spec.budget),
     })
     ai.enqueueMessage(target.id, message.id, {
       interrupt: !!spec.interrupt,
@@ -13050,9 +13274,16 @@
   ai.flushToolResults = flushToolResults
   ai.scheduleAgent = scheduleAgent
   ai.configureRuntime = function (config) {
-    Object.assign(runtimeConfig, config || {})
+    const next = config || {}
+    if (next.maxConcurrentAgents != null) runtimeConfig.maxConcurrentAgents = next.maxConcurrentAgents
+    if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
+    if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
+    if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)
     scheduleQueuedAgents()
-    return Object.assign({}, runtimeConfig)
+    return ai.runtimeConfig()
+  }
+  ai.runtimeConfig = function () {
+    return Object.assign({}, runtimeConfig, { limits: Object.assign({}, runtimeConfig.limits) })
   }
   ai.message = ai.message || {}
   ai.agent = ai.agent || {}
@@ -14152,7 +14383,7 @@
   }
 
   function createAgent(parentAgentId) {
-    aiditor.ai.createAgent({ parentAgentId: parentAgentId || null })
+    aiditor.ai.createAgent({ parentAgentId: parentAgentId || null, skillRefs: ['orchestration'] })
   }
 
   function renameNode(node) {

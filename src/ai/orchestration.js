@@ -28,6 +28,73 @@
     if (actor(ctx) !== agentId) requireManage(ctx, agentId)
   }
 
+  function hasOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value || {}, key)
+  }
+
+  function agentDepth(agentId) {
+    let depth = 0
+    let current = ai.findAgent(agentId)
+    while (current && current.parentAgentId) {
+      depth++
+      current = ai.findAgent(current.parentAgentId)
+    }
+    return depth
+  }
+
+  function subtreeHeight(agentId) {
+    if (!agentId) return 0
+    const agents = ai.agents.peek()
+    let height = 0
+    for (let i = 0; i < agents.length; i++) {
+      if (!ai.isDescendant(agentId, agents[i].id)) continue
+      height = Math.max(height, agentDepth(agents[i].id) - agentDepth(agentId))
+    }
+    return height
+  }
+
+  function maxDelegationDepth() {
+    const config = ai.runtimeConfig ? ai.runtimeConfig() : null
+    const value = Number(config && config.maxDelegationDepth)
+    return value > 0 ? value : 4
+  }
+
+  function resolveParentAgentId(args, ctx, movingAgentId) {
+    const who = actor(ctx)
+    const explicit = hasOwn(args, 'parentAgentId')
+    const parentAgentId = explicit ? (args.parentAgentId || null) : (who === 'user' ? null : who)
+    if (movingAgentId && parentAgentId && (parentAgentId === movingAgentId || ai.isDescendant(movingAgentId, parentAgentId))) {
+      throw new Error('Agent tree cycle is not allowed')
+    }
+    if (who === 'user') {
+      if (parentAgentId) requireManageOrSelf(ctx, parentAgentId)
+      return parentAgentId
+    }
+    if (!parentAgentId) throw new Error('Permission denied: agents cannot create or move root agents')
+    requireManageOrSelf(ctx, parentAgentId)
+    const resultingDepth = agentDepth(parentAgentId) + 1 + subtreeHeight(movingAgentId)
+    if (resultingDepth > maxDelegationDepth()) throw new Error('Delegation depth limit reached')
+    return parentAgentId
+  }
+
+  function newAgentSpec(args, ctx, fallbackName) {
+    const parentAgentId = resolveParentAgentId(args, ctx)
+    const parent = parentAgentId && ai.findAgent(parentAgentId)
+    const inherited = parent || ctx.agent || null
+    return {
+      name: args.name || fallbackName,
+      parentAgentId: parentAgentId,
+      connection: args.connection || (inherited && inherited.connection) || ai.defaultConnection || 'mock',
+      model: args.model || (inherited && inherited.model) || '',
+      systemPrompt: args.systemPrompt || '',
+      contextRefs: clone(args.contextRefs || []),
+      skillRefs: clone(args.skillRefs || []),
+      toolRefs: clone(args.toolRefs || []),
+      permissionMode: inherited && inherited.permissionMode || 'full',
+      permissions: clone(inherited && inherited.permissions || null),
+    }
+  }
+
   function agentSummary(agent, full) {
     const out = {
       id: agent.id,
@@ -80,25 +147,11 @@
   }
 
   function createAgentPreview(args, ctx) {
-    if (args.parentAgentId) requireManageOrSelf(ctx, args.parentAgentId)
     const existingNames = ai.agents.peek().map(function (agent) { return agent.name })
     return {
       action: 'create',
       kind: 'agent',
-      agent: {
-        name: args.name || ai.generateAgentName(existingNames),
-        parentAgentId: args.parentAgentId || null,
-        connection: args.connection || (ctx.agent && ctx.agent.connection) || ai.defaultConnection || 'mock',
-        model: args.model || (ctx.agent && ctx.agent.model) || '',
-        systemPrompt: args.systemPrompt || '',
-        contextRefs: clone(args.contextRefs || []),
-        skillRefs: clone(args.skillRefs || []),
-        toolRefs: clone(args.toolRefs || []),
-        permissions: clone(args.permissions || null),
-        state: clone(args.state || {}),
-        memory: clone(args.memory || {}),
-        meta: clone(args.meta || {}),
-      },
+      agent: newAgentSpec(args, ctx, ai.generateAgentName(existingNames)),
     }
   }
 
@@ -113,6 +166,10 @@
     const target = args.agentId ? ai.findAgent(args.agentId) : null
     if (args.agentId) {
       if (!target) throw new Error('Agent not found')
+      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'skillRefs', 'toolRefs']
+      for (let i = 0; i < creationKeys.length; i++) {
+        if (hasOwn(args, creationKeys[i])) throw new Error('Agent configuration is only valid when delegate creates a new agent')
+      }
       requireSend(ctx, target.id)
       return {
         action: 'delegate',
@@ -124,33 +181,20 @@
         meta: clone(args.meta || null),
         interrupt: !!args.interrupt,
         guidance: args.guidance || null,
+        budget: clone(args.budget || null),
       }
     }
-    const parentId = args.parentAgentId || (ctx.agent && ctx.agent.id) || null
-    if (parentId) requireManageOrSelf(ctx, parentId)
     return {
       action: 'delegate',
       kind: 'agent',
-      agent: {
-        name: args.name || 'Agent',
-        parentAgentId: parentId,
-        connection: args.connection || (ctx.agent && ctx.agent.connection) || ai.defaultConnection || 'mock',
-        model: args.model || (ctx.agent && ctx.agent.model) || '',
-        systemPrompt: args.systemPrompt || '',
-        contextRefs: clone(args.agentContextRefs || []),
-        skillRefs: clone(args.skillRefs || []),
-        toolRefs: clone(args.toolRefs || []),
-        permissions: clone(args.permissions || null),
-        state: clone(args.state || {}),
-        memory: clone(args.memory || {}),
-        meta: clone(args.agentMeta || {}),
-      },
+      agent: newAgentSpec(Object.assign({}, args, { contextRefs: [] }), ctx, 'Agent'),
       content: args.content || '',
       contextRefs: clone(args.contextRefs || []),
       attachments: clone(args.attachments || []),
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
       guidance: args.guidance || null,
+      budget: clone(args.budget || null),
     }
   }
 
@@ -165,6 +209,7 @@
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
       guidance: args.guidance || null,
+      budget: clone(args.budget || null),
     })
     return {
       applied: true,
@@ -180,13 +225,13 @@
     const agent = ai.findAgent(args.agentId)
     if (!agent) throw new Error('Agent not found')
     requireManage(ctx, agent.id)
-    if (args.parentAgentId) requireManageOrSelf(ctx, args.parentAgentId)
+    const parentAgentId = resolveParentAgentId(args, ctx, agent.id)
     return {
       action: 'reparent',
       kind: 'agent',
       agentId: agent.id,
       fromParentAgentId: agent.parentAgentId || null,
-      toParentAgentId: args.parentAgentId || null,
+      toParentAgentId: parentAgentId,
       order: args.order == null ? agent.order : args.order,
     }
   }
@@ -226,6 +271,7 @@
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
       guidance: args.guidance || null,
+      budget: clone(args.budget || null),
     })
   }
 
@@ -252,10 +298,21 @@
     return { stopped: ai.stopAgent(args.agentId) }
   }
 
+  const RUN_BUDGET_SCHEMA = {
+    type: 'object',
+    properties: {
+      maxTurns: { type: 'number', description: 'Maximum model request turns for this task.' },
+      timeoutMs: { type: 'number', description: 'Maximum wall-clock execution time after the task starts.' },
+      maxTokens: { type: 'number', description: 'Maximum reported provider tokens across this task.' },
+    },
+  }
+
+  const STRING_ARRAY_SCHEMA = { type: 'array', items: { type: 'string' } }
+
   ai.tools.register('agent.read', {
     title: 'Read Agents',
-    description: 'Read one agent or list readable agent summaries.',
-    schema: { type: 'object', properties: { agentId: { type: 'string' } } },
+    description: 'Read one full agent by id. Omit agentId to list every agent readable by the caller, including parentAgentId and runtime status.',
+    schema: { type: 'object', properties: { agentId: { type: 'string', description: 'Agent to read. Omit to list readable agents.' } } },
     permissions: ['tool.call'],
     run: readAgent,
   })
@@ -267,17 +324,13 @@
       type: 'object',
       properties: {
         name: { type: 'string' },
-        parentAgentId: { type: 'string' },
+        parentAgentId: { type: 'string', description: 'Parent agent id. Omit to create under the calling agent, or at root when called by the user.' },
         connection: { type: 'string' },
         model: { type: 'string' },
         systemPrompt: { type: 'string' },
-        contextRefs: { type: 'array' },
-        skillRefs: { type: 'array' },
-        toolRefs: { type: 'array' },
-        permissions: { type: 'object' },
-        state: { type: 'object' },
-        memory: { type: 'object' },
-        meta: { type: 'object' },
+        contextRefs: STRING_ARRAY_SCHEMA,
+        skillRefs: STRING_ARRAY_SCHEMA,
+        toolRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -295,12 +348,17 @@
         agentId: { type: 'string' },
         name: { type: 'string' },
         parentAgentId: { type: 'string' },
-        systemPrompt: { type: 'string' },
+        connection: { type: 'string' },
+        model: { type: 'string' },
+        systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
+        skillRefs: STRING_ARRAY_SCHEMA,
+        toolRefs: STRING_ARRAY_SCHEMA,
         content: { type: 'string' },
-        contextRefs: { type: 'array' },
+        contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },
         interrupt: { type: 'boolean' },
         guidance: { type: 'string' },
+        budget: RUN_BUDGET_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -310,8 +368,16 @@
 
   ai.tools.register('agent.reparent', {
     title: 'Reparent Agent',
-    description: 'Move an agent under another agent, or to the root when parentAgentId is empty.',
-    schema: { type: 'object', required: ['agentId'] },
+    description: 'Move an agent under another agent. Only the user may move an agent to the root by passing null.',
+    schema: {
+      type: 'object',
+      required: ['agentId', 'parentAgentId'],
+      properties: {
+        agentId: { type: 'string' },
+        parentAgentId: { type: ['string', 'null'] },
+        order: { type: 'number' },
+      },
+    },
     permissions: ['tool.call', 'tool.apply'],
     preview: reparentAgentPreview,
     apply: reparentAgentApply,
@@ -329,7 +395,19 @@
   ai.tools.register('agent.send', {
     title: 'Send Agent Message',
     description: 'Send a message to another agent. Returns a questId for this exact delegated task; prefer quest.result after the runtime reports completion.',
-    schema: { type: 'object', required: ['agentId', 'content'] },
+    schema: {
+      type: 'object',
+      required: ['agentId', 'content'],
+      properties: {
+        agentId: { type: 'string' },
+        content: { type: 'string' },
+        contextRefs: STRING_ARRAY_SCHEMA,
+        attachments: { type: 'array' },
+        interrupt: { type: 'boolean' },
+        guidance: { type: 'string' },
+        budget: RUN_BUDGET_SCHEMA,
+      },
+    },
     permissions: ['tool.call'],
     run: sendAgent,
   })
@@ -374,11 +452,14 @@
     systemPrompt: 'Use agent.* and quest.* tools to coordinate aiditor.ai agents. Complete delegated tasks end-to-end when possible. Prefer agent.delegate for create/reuse + send. Delegation is parallel: continue useful local work, then use quest.result for completed inbox event batches.',
     rules: [
       'Agents are identified by id. Names are display labels and may repeat.',
-      'Use parentAgentId for parent/child ownership. There are no groups and no path identity.',
+      'Omitting parentAgentId creates under the calling agent; user-created agents may be roots. Agents cannot escape their ownership subtree.',
       'Use agent.delegate when the user asks an agent to do work; it is the stable one-step delegation workflow.',
+      'agent.delegate accepts systemPrompt, model, skillRefs, and toolRefs only when creating a new child. When agentId is present it only sends work to that existing agent.',
+      'If agent.create is used separately for delegated work, follow it with agent.send unless the user only asked to create an agent.',
+      'Use a task budget to tighten maxTurns, timeoutMs, or maxTokens when delegated work needs a smaller execution bound.',
       'After agent.delegate or agent.send, do not immediately poll quest.result. Continue useful work or stop; child completions arrive later as inbox notifications.',
       'When processing an inbox event batch, use quest.result for completed events in that batch and do not wait for pending sibling quests.',
-      'If you are already running as a child agent, do not create further child agents unless the user explicitly requests deeper delegation.',
+      'A response that delegates or sends work is an action turn; continue user-visible synthesis after the runtime delivers child completion events.',
     ],
     tools: [
       'agent.read',

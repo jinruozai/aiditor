@@ -28,6 +28,8 @@ assert.ok(index.entries.some(function (entry) { return /live editor/.test(entry.
 const runtime = aiditor.ai.references.read({ uri: 'aiditor://skills/aiditor.runtime-authoring' })
 assert.equal(runtime.id, 'aiditor.runtime-authoring')
 assert.ok(runtime.relatedApis.includes('aiditor.addPanelToDock'))
+assert.ok(runtime.tools.includes('aiditor.addPanelToDock'))
+assert.equal(Object.hasOwn(runtime, 'relatedTools'), false)
 assert.ok(runtime.rules.some(function (rule) { return /inspect docks/.test(rule) }))
 
 const libraryRefs = aiditor.ai.references.search({ query: 'library authoring repository', limit: 20 })

@@ -216,6 +216,7 @@ assert.equal(ai.peekActiveRunState(streamApproval.id).state, 'waiting_approval')
 assert.equal(ai.peekActiveRunState(streamApproval.id).previewTail, 'Need approval before editing. ')
 assert.equal(ai.peekActiveRunState(streamApproval.id).modelTail, 'Need approval before editing. stream-approval-edit{"before":1,"after":2}')
 assert.equal(ai.peekActiveRunState(streamApproval.id).activityText, 'previewing stream-approval-edit · {"before":1,"after":2}')
+assert.equal(ai.stopAgent(streamApproval.id), true)
 
 ai.registerTransport('stream-reasoning-flow', {
   send: function () {
