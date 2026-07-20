@@ -18,6 +18,7 @@ for (const file of [
   'src/core/settings.js',
   'src/core/commands.js',
   'src/core/registry.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/reference.js',
   'src/ui/form/typeconfig.js',

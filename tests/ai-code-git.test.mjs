@@ -12,6 +12,8 @@ for (const file of [
   'src/ai/name-generator.js',
   'src/ai/permission.js',
   'src/ai/store.js',
+  'src/ai/adapter.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/workdir.js',

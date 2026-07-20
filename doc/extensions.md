@@ -58,6 +58,14 @@ reported before any registry is mutated.
         visibleToModel: true
       }
     ],
+    skills: [
+      {
+        id: 'authoring',
+        description: 'Guide an Agent through this extension workflow.',
+        systemPrompt: 'Use the extension tools through their registered ids.',
+        tools: ['makeThing']
+      }
+    ],
     context: [
       { id: 'schema', adapter: 'sample.adapter' }
     ],
@@ -143,6 +151,7 @@ Uninstall removes by owner:
 
 ```js
 aiditor.ai.tools.unregisterOwner('extension:sample')
+aiditor.ai.skills.unregisterOwner('extension:sample')
 aiditor.ai.context.unregisterOwner('extension:sample')
 aiditor.ai.references.unregisterOwner('extension:sample')
 aiditor.ai.operations.unregisterOwner('extension:sample')

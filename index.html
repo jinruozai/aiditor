@@ -155,12 +155,15 @@
     }
 
     if (!isPopup) {
-      const agents = aiditor.ai.agents.peek()
-      const activeId = aiditor.ai.activeAgentId.peek()
-      const demoAgent = agents.find(function (agent) { return agent.id === activeId }) ||
-        agents[0] ||
-        aiditor.ai.createAgent({ name: 'main', select: false })
-      aiditor.ai.selectAgent(demoAgent.id)
+      function ensureDemoAgent() {
+        const agents = aiditor.ai.agents.peek()
+        const activeId = aiditor.ai.activeAgentId.peek()
+        const demoAgent = agents.find(function (agent) { return agent.id === activeId }) ||
+          agents[0] ||
+          aiditor.ai.createAgent({ name: 'main', select: false })
+        aiditor.ai.selectAgent(demoAgent.id)
+      }
+      aiditor.ai.persistence.ready().then(ensureDemoAgent)
     }
 
     const layout = createDockLayout(document.getElementById('app'), {

@@ -10520,24 +10520,26 @@
       rowEl.dataset.treeNodeId = String(id)
     }
 
-    function attachRowEvents(rowEl, row) {
+    function attachRowEvents(rowEl, entry) {
       rowEl.addEventListener('click', function (ev) {
-        handleRowClick(row, ev)
+        handleRowClick(entry.row, ev)
       })
       rowEl.addEventListener('dblclick', function (ev) {
-        handleRowDblClick(row, ev)
+        handleRowDblClick(entry.row, ev)
       })
       // Opt-in HTML5 drag source. Coexists with tree.dnd (pointer-based
       // row reordering): the two listen to disjoint event families and
       // the browser routes them independently. Use case: cross-component
       // transfers (entity drag-out → file path input / ref_id / external).
       if (typeof o.rowDragSource === 'function') {
-        const payload = o.rowDragSource(row.node, row)
-        if (payload) ui.dragsource(rowEl, { getData: function () { return payload } })
+        const payload = o.rowDragSource(entry.row.node, entry.row)
+        if (payload) ui.dragsource(rowEl, {
+          getData: function () { return o.rowDragSource(entry.row.node, entry.row) },
+        })
       }
       if (typeof o.contextMenu === 'function') {
         rowEl.addEventListener('contextmenu', function (ev) {
-          const items = o.contextMenu(row.node)
+          const items = o.contextMenu(entry.row.node)
           if (!items || !items.length) return
           ev.preventDefault()
           ui.contextMenu({ x: ev.clientX, y: ev.clientY }, items)
@@ -10636,11 +10638,10 @@
     }
 
     // ── virtualizer ────────────────────────────────────────────────
-    // Mirrors the ui.list pattern: maintain a per-index cache of row
-    // elements for the current viewport, rebuild on flat changes. Keeping
-    // the cache indexed by position (not node id) matches how the scroll
-    // window maps to rows; the trade-off is that a pure expand/collapse
-    // above the viewport causes rows to re-render (fine at tree scale).
+    // Slots and renderRow use the simple per-index cache. renderTemplate is
+    // the stable high-frequency path: visible instances reconcile by node id
+    // and update in place, so data refreshes cannot interrupt pointer/focus
+    // sessions inside an unchanged row.
     function discardRow(entry) {
       if (entry.tpl && tier3) {
         if (typeof entry.tpl.reset === 'function') entry.tpl.reset()
@@ -10651,6 +10652,79 @@
       }
     }
 
+    function makeEntry(row) {
+      const built = renderRow(row)
+      let entry = built.tpl && built.el.__aiditorTreeEntry
+      if (entry) {
+        entry.tpl = built.tpl
+        entry.row = row
+      } else {
+        entry = { el: built.el, tpl: built.tpl, row: row }
+        if (built.tpl) built.el.__aiditorTreeEntry = entry
+        attachRowEvents(built.el, entry)
+      }
+      built.el.style.height = rowH + 'px'
+      applyRowState(built.el, row)
+      return entry
+    }
+
+    function updateTemplateEntry(entry, row) {
+      entry.row = row
+      entry.tpl.update(row.node, row, makeCtx(row))
+      entry.el.setAttribute('data-depth', String(row.depth))
+      entry.el.style.paddingLeft = (4 + row.depth * indent) + 'px'
+      applyRowState(entry.el, row)
+    }
+
+    function paintSimple(flat, start, end) {
+      const want = new Set()
+      for (let i = start; i < end; i++) want.add(i)
+      rowCache.forEach(function (entry, idx) {
+        if (!want.has(idx)) { discardRow(entry); rowCache.delete(idx) }
+      })
+      for (let i = start; i < end; i++) {
+        if (!rowCache.has(i)) {
+          const entry = makeEntry(flat[i])
+          rowCache.set(i, entry)
+          win.appendChild(entry.el)
+        }
+      }
+    }
+
+    function paintTemplates(flat, start, end) {
+      const byId = new Map()
+      rowCache.forEach(function (entry) { byId.set(entry.row.node.id, entry) })
+
+      const next = new Map()
+      const retained = new Set()
+      for (let i = start; i < end; i++) {
+        const row = flat[i]
+        let entry = byId.get(row.node.id)
+        if (entry && !retained.has(entry)) {
+          retained.add(entry)
+          if (entry.row !== row) updateTemplateEntry(entry, row)
+        } else {
+          entry = makeEntry(row)
+        }
+        next.set(i, entry)
+      }
+
+      rowCache.forEach(function (entry) {
+        if (!retained.has(entry)) discardRow(entry)
+      })
+      rowCache.clear()
+      next.forEach(function (entry, index) { rowCache.set(index, entry) })
+
+      let cursor = win.firstChild
+      next.forEach(function (entry) {
+        if (entry.el === cursor) cursor = cursor.nextSibling
+        else {
+          win.insertBefore(entry.el, cursor)
+          cursor = entry.el.nextSibling
+        }
+      })
+    }
+
     function paint() {
       const flat = flatSig.peek()
       spacer.style.height = (flat.length * rowH) + 'px'
@@ -10659,26 +10733,12 @@
       const start = Math.max(0, Math.floor(top / rowH) - 4)
       const end   = Math.min(flat.length, Math.ceil((top + h) / rowH) + 4)
       win.style.transform = 'translateY(' + (start * rowH) + 'px)'
-
-      const want = new Set()
-      for (let i = start; i < end; i++) want.add(i)
-      rowCache.forEach(function (entry, idx) {
-        if (!want.has(idx)) { discardRow(entry); rowCache.delete(idx) }
-      })
-      for (let i = start; i < end; i++) {
-        if (!rowCache.has(i)) {
-          const row = flat[i]
-          const built = renderRow(row)
-          built.el.style.height = rowH + 'px'
-          applyRowState(built.el, row)
-          attachRowEvents(built.el, row)
-          rowCache.set(i, { el: built.el, tpl: built.tpl, row: row })
-          win.appendChild(built.el)
-        }
-      }
+      if (tier3) paintTemplates(flat, start, end)
+      else paintSimple(flat, start, end)
     }
 
     function rebuild() {
+      if (tier3) { paint(); return }
       rowCache.forEach(discardRow)
       rowCache.clear()
       paint()

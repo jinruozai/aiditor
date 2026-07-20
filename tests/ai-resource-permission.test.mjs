@@ -15,6 +15,7 @@ vm.runInThisContext(readFileSync('src/ai/provider.js', 'utf8'), { filename: 'ai/
 vm.runInThisContext(readFileSync('src/ai/provider-auth.js', 'utf8'), { filename: 'ai/provider-auth.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { filename: 'ai/provider-transports.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
+vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
 vm.runInThisContext(readFileSync('src/ai/context.js', 'utf8'), { filename: 'ai/context.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
@@ -25,6 +26,7 @@ const ai = window.aiditor.ai
 let requestSeen = null
 
 ai.registerTransport('capture', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     requestSeen = request
     return { role: 'assistant', content: 'ok' }

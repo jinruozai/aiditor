@@ -44,6 +44,8 @@ aiditor.ai.defaultConnection
 aiditor.ai.connections
 aiditor.ai.connectionModels(connectionId)
 aiditor.ai.connectionStatus(connectionId)
+aiditor.ai.connectionHealth
+aiditor.ai.connectionHealthState(connectionId)
 ```
 
 ## Provider Capabilities
@@ -58,16 +60,32 @@ The default shape is:
 
 ```text
 stream
+toolProtocol       native | text | none
 toolCalling
+outputProtocol     native | text
 reasoning
 multimodal
 maxInputTokens
 local
 ```
 
-This is provider metadata, not a routing engine. The request builder includes it
-on provider requests so tools, UI, and diagnostics can inspect what the selected
-connection claims to support without parsing provider ids or model names.
+`toolProtocol` is declared by the transport, not guessed from a provider or model
+name. `toolCalling` is derived from it and is true unless the protocol is `none`.
+`native` means the transport maps the provider's structured function/tool blocks
+to AIditor's canonical tool-call shape. `text` is the explicit JSON envelope
+fallback. `none` means no model-facing tools are exposed.
+
+This is capability metadata, not a routing engine. The request builder includes
+it on provider requests so tools, UI, and diagnostics can inspect the selected
+connection without parsing provider ids or model names. Unsupported transports
+must report `none`; capability flags must not pretend that a driver implements a
+tool lifecycle it does not encode and decode.
+
+`outputProtocol` describes structured final output separately from tool calling.
+`native` lets the adapter use a provider JSON-schema wire format. `text` adds the
+same provider-neutral final-output contract to model context and validates the
+returned JSON in the runtime. Provider ids and model names are never used to
+guess this capability.
 
 ## Auth Drivers
 
@@ -108,27 +126,60 @@ local-bridge
 codex-bridge
 ```
 
-Transport drivers send normalized requests and return normalized assistant
-messages, tool calls, usage, and streaming deltas.
+Transport drivers declare one `toolProtocol` and send normalized requests. They
+return one canonical assistant shape regardless of the provider:
+
+```js
+{
+  role: 'assistant',
+  content: '...',
+  reasoning_content: '...',
+  toolCalls: [{ id, toolId, args }],
+  usage,
+  finishReason,
+}
+```
+
+OpenAI-compatible and Anthropic wire formats are adapter details. They must not
+leak into the Agent Runtime.
 
 ## Reliability Contract
 
-Every transport should expose the same operational contract:
+`sendViaConnection` applies one provider-neutral reliability policy around every
+transport:
 
-```text
-timeoutMs
-abort
-retryPolicy
-rateLimitState
-capabilities
-health
-lastError
+```js
+aiditor.ai.registerConnection('service', {
+  transport: { type: 'service' },
+  retryPolicy: {
+    maxAttempts: 3,
+    baseDelayMs: 400,
+    maxDelayMs: 4000,
+    jitter: 0.2,
+  },
+})
 ```
 
-Retries must be bounded and should respect provider status codes such as 429.
-Abort must stop local parsing and prevent late chunks from mutating the finished
-run. Capability and model discovery may be cached, but cache entries need an
-explicit refresh path.
+Only errors explicitly marked `retryable` are retried. Built-in HTTP helpers mark
+network failures, 408, 429, and 5xx responses as retryable and preserve
+`status`, `code`, and `retryAfterMs`. Abort never retries. A response stream is
+never replayed after its first chunk; stream failures update connection health
+and propagate to the existing run failure path.
+
+Connection health is diagnostic state:
+
+```text
+state                 unknown | healthy | degraded | rate_limited | offline
+consecutiveFailures
+lastSuccessAt
+lastFailureAt
+lastError             { code, message, status, retryable }
+retryAfterMs
+```
+
+It is not a circuit breaker and does not make routing decisions. Hosts may show
+the state or choose another connection, while the Agent Runtime remains
+provider-neutral. Retry attempts emit compact `provider_retry` trace events.
 
 ## Streaming
 
@@ -157,6 +208,40 @@ The adapter layer formats that assembled request for a provider. It converts
 AIditor messages, images, tools, and text-tool fallbacks into provider payload
 shapes without owning context selection policy.
 
+Public tool ids remain dotted registry ids such as `agent.create`. Provider APIs
+may require a restricted function name. The adapter therefore builds a stable,
+collision-checked alias map for each request and uses the same map for request
+schemas, assistant tool calls, replay, and response decoding. Aliases are wire
+identifiers only; permission checks, execution, logs, and UI always use the
+public tool id.
+
+Tool schemas are normalized and validated when tools are registered. An object
+schema with `required` entries must define matching `properties`; invalid schemas
+are rejected before a provider request is made.
+
+## Structured Final Output
+
+An Agent may define a provider-neutral JSON schema in `outputSchema`. Request
+assembly adds a final-output instruction, adapters optionally select a native
+provider format, and the runtime always parses and validates the final assistant
+reply. Intermediate assistant turns containing tool calls are not final output.
+
+```js
+const agent = aiditor.ai.createAgent({
+  outputSchema: {
+    type: 'object',
+    required: ['answer'],
+    properties: { answer: { type: 'string' } },
+  },
+})
+```
+
+Validated data is stored in `message.output` and returned as
+`quest.result(...).output`. Raw JSON text remains in `message.content` for
+transcript and diagnostics. Malformed JSON fails with `OUTPUT_JSON_INVALID`;
+schema mismatch fails with `OUTPUT_SCHEMA_INVALID`. The runtime accepts plain
+JSON or one complete `json` fenced block, but does not extract JSON from prose.
+
 Implemented helpers include:
 
 ```js
@@ -165,13 +250,41 @@ aiditor.ai.openAiMessages(messages, request)
 aiditor.ai.openAiTools(request)
 aiditor.ai.normalizeOpenAiToolCalls(calls, request)
 aiditor.ai.anthropicPayloadMessages(messages, request)
+aiditor.ai.anthropicTools(request)
+aiditor.ai.normalizeAnthropicContent(content, request)
 aiditor.ai.anthropicSystem(messages)
 aiditor.ai.encodeTextToolRequest(request)
 aiditor.ai.decodeTextToolResponse(result)
 ```
 
 The text tool protocol is a fallback for models or transports that do not expose
-native function calling.
+native function calling. It is enabled only by a transport that declares
+`toolProtocol: 'text'`.
+
+Text that merely resembles a tool call, such as `<invoke ...>`, is never parsed
+and executed by a native transport. When a native-tool request returns explicit
+tool-invocation markup without structured tool calls, the runtime reports
+`TOOL_PROTOCOL_INVALID` and keeps the raw assistant text for diagnosis. This
+prevents prompt text from becoming an execution channel.
+
+## Provider Completion
+
+The Agent Runtime classifies normalized `finishReason` values into:
+
+```text
+complete       normal stop or end turn
+tool           provider stopped for structured tool calls
+truncated      output token/length limit
+blocked        provider content policy rejected the output
+interrupted    provider or service stopped before completion
+unknown        provider-specific reason not known to the runtime
+```
+
+`truncated`, `blocked`, and `interrupted` are failures with stable error codes;
+they are not rendered as successful idle turns. A tool finish reason without
+structured tool calls is also a protocol failure. Unknown reasons remain visible
+in message metadata and trace events so adapters can be corrected without losing
+the provider evidence.
 
 ## Usage And Cost
 

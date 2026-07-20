@@ -17,6 +17,7 @@ for (const file of [
   'src/ai/provider-auth.js',
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/orchestration.js',
@@ -50,10 +51,12 @@ function previewApply(agentId, toolId, args, actor) {
 const builtinTools = ai.tools.list()
 assert.deepEqual(builtinTools.filter(function (id) { return id.indexOf('group.') === 0 }), [])
 assert.equal(builtinTools.includes('agent.create'), true)
+assert.equal(builtinTools.includes('agent.configure'), true)
 assert.equal(builtinTools.includes('agent.delegate'), true)
 assert.equal(builtinTools.includes('agent.read'), true)
 assert.equal(builtinTools.includes('agent.send'), true)
 assert.equal(builtinTools.includes('quest.result'), true)
+assert.equal(builtinTools.includes('quest.cancel'), true)
 assert.equal(builtinTools.includes('message.read'), true)
 assert.equal(builtinTools.includes('agent.stop'), true)
 assert.equal(builtinTools.includes('agent.delete'), true)
@@ -62,9 +65,11 @@ assert.equal(ai.tools.get('agent.delegate').schema.properties.systemPrompt.type,
 assert.equal(ai.tools.get('agent.delegate').schema.properties.skillRefs.items.type, 'string')
 assert.equal(ai.tools.get('agent.delegate').schema.properties.toolRefs.items.type, 'string')
 assert.equal(ai.tools.get('agent.delegate').schema.properties.budget.properties.timeoutMs.type, 'number')
+assert.equal('guidance' in ai.tools.get('agent.delegate').schema.properties, false)
+assert.equal('guidance' in ai.tools.get('agent.send').schema.properties, false)
 assert.equal('permissions' in ai.tools.get('agent.create').schema.properties, false)
 assert.deepEqual(ai.tools.get('agent.reparent').schema.required, ['agentId', 'parentAgentId'])
-assert.match(ai.tools.get('agent.read').description, /Omit agentId/)
+assert.match(ai.tools.get('agent.read').description, /direct children/)
 assert.equal(ai.skills.get('orchestration').rules.some(function (rule) {
   return rule.indexOf('Names are display labels') >= 0
 }), true)
@@ -121,9 +126,45 @@ assert.equal(readableAgents.status, 'completed')
 assert.equal(readableAgents.result.some(function (agent) {
   return agent.id === createdAgent.id && agent.parentAgentId === root.id
 }), true)
+assert.equal(readableAgents.result.some(function (agent) { return agent.id === reparented.id }), false)
+
+const recursiveAgents = await runCall(root.id, 'agent.read', { parentAgentId: root.id, recursive: true }, root.id)
+assert.equal(recursiveAgents.result.some(function (agent) { return agent.id === reparented.id }), true)
+
+const exactAgent = await runCall(root.id, 'agent.read', { agentId: createdAgent.id }, root.id)
+assert.equal(exactAgent.result.systemPrompt, '')
+assert.equal('messages' in exactAgent.result, false)
+assert.equal('queue' in exactAgent.result, false)
+assert.equal('inbox' in exactAgent.result, false)
+
+const configuredAgent = previewApply(root.id, 'agent.configure', {
+  agentId: createdAgent.id,
+  model: 'configured-model',
+  systemPrompt: 'Review precisely.',
+  skillRefs: ['orchestration'],
+  toolRefs: ['agent.read'],
+}, root.id)
+assert.equal(configuredAgent.model, 'configured-model')
+assert.equal(configuredAgent.systemPrompt, 'Review precisely.')
+assert.deepEqual(configuredAgent.skillRefs, ['orchestration'])
+assert.deepEqual(configuredAgent.toolRefs, ['agent.read'])
+
+const selfConfigureCall = ai.createToolCall(createdAgent.id, {
+  toolId: 'agent.configure',
+  args: { agentId: createdAgent.id, systemPrompt: 'Self modified' },
+}, createdAgent.id)
+assert.equal(ai.previewToolCall(createdAgent.id, selfConfigureCall.id, createdAgent.id).status, 'failed')
+assert.equal(ai.findAgent(createdAgent.id).systemPrompt, 'Review precisely.')
+
+const unknownToolConfigureCall = ai.createToolCall(root.id, {
+  toolId: 'agent.configure',
+  args: { agentId: createdAgent.id, toolRefs: ['missing.tool'] },
+}, root.id)
+assert.equal(ai.previewToolCall(root.id, unknownToolConfigureCall.id, root.id).status, 'failed')
 
 let sentRequest = null
 ai.registerTransport('capture-send', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     sentRequest = request
     return { role: 'assistant', content: 'done' }
@@ -153,6 +194,18 @@ assert.equal(quest.status, 'completed')
 const resultMessage = ai.message.read(createdAgent.id, quest.resultId, root.id)
 assert.equal(resultMessage.content, 'done')
 assert.equal(ai.quest.result(createdAgent.id, sent.result.questId, root.id).content, 'done')
+const readableQuests = await runCall(root.id, 'quest.read', { agentId: createdAgent.id, limit: 5 }, root.id)
+assert.equal(readableQuests.result.some(function (item) { return item.questId === sent.result.questId }), true)
+assert.equal(readableQuests.result.some(function (item) { return Object.prototype.hasOwnProperty.call(item, 'plan') }), false)
+const completedQuests = await runCall(root.id, 'quest.read', { agentId: createdAgent.id, status: 'completed' }, root.id)
+assert.equal(completedQuests.result.length > 0, true)
+assert.equal(completedQuests.result.every(function (item) { return item.status === 'completed' }), true)
+const queuedQuests = await runCall(root.id, 'quest.read', { agentId: createdAgent.id, status: 'queued' }, root.id)
+assert.equal(queuedQuests.result.length, 0)
+const completedCancellation = await runCall(root.id, 'quest.cancel', { agentId: createdAgent.id, questId: sent.result.questId }, root.id)
+assert.equal(completedCancellation.result.cancelled, false)
+assert.equal(completedCancellation.result.outcome, 'already_terminal')
+assert.equal(completedCancellation.result.previousStatus, 'completed')
 assert.equal(sentRequest.agent.id, createdAgent.id)
 assert.equal(sentRequest.messages.some(function (message) {
   return message.role === 'system'
@@ -200,14 +253,30 @@ ai.configureRuntime({ maxDelegationDepth: 4 })
 let releaseRun
 const held = new Promise(function (resolve) { releaseRun = resolve })
 ai.registerTransport('hold-orchestration', {
+  toolProtocol: 'native',
   send: function () { return held.then(function () { return 'late' }) },
 })
 ai.registerConnection('hold-orchestration', { auth: { type: 'none' }, transport: { type: 'hold-orchestration' }, configDefaults: {} })
 ai.updateAgent(createdAgent.id, { connection: 'hold-orchestration' })
 const run = ai.runAgent(createdAgent.id)
 assert.equal(ai.findAgent(createdAgent.id).status, 'running')
+const configuredWhileRunning = previewApply(root.id, 'agent.configure', {
+  agentId: createdAgent.id,
+  systemPrompt: 'Use this on the next request.',
+}, root.id)
+assert.equal(run.request.agent.systemPrompt, 'Review precisely.')
+assert.equal(configuredWhileRunning.systemPrompt, 'Use this on the next request.')
 const stopped = await runCall(root.id, 'agent.stop', { agentId: createdAgent.id }, root.id)
-assert.deepEqual(stopped.result, { stopped: true })
+assert.equal(stopped.result.outcome, 'stopped')
+assert.equal(stopped.result.stopped, true)
+assert.equal(stopped.result.agentId, createdAgent.id)
+assert.equal(stopped.result.previousStatus, 'running')
+assert.equal(stopped.result.status, 'idle')
+assert.equal(stopped.result.stopReason, 'cancelled')
+const stoppedAgain = await runCall(root.id, 'agent.stop', { agentId: createdAgent.id }, root.id)
+assert.equal(stoppedAgain.result.outcome, 'not_running')
+assert.equal(stoppedAgain.result.stopped, false)
+assert.equal(stoppedAgain.result.previousStatus, 'idle')
 releaseRun()
 assert.equal(await run.promise, null)
 

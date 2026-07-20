@@ -18,6 +18,7 @@ for (const file of [
   'src/ai/provider-auth.js',
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/request.js',
@@ -35,6 +36,7 @@ function byId(items, id) {
 let streamRequest = null
 let streamCtx = null
 ai.registerTransport('stream-capture', {
+  toolProtocol: 'native',
   send: async function (connection, request, ctx) {
     streamRequest = request
     streamCtx = ctx
@@ -64,7 +66,9 @@ assert.equal(streamRequest.model, 'stream-model')
 assert.equal(streamRequest.messages.at(-1).content, 'stream this')
 assert.equal(streamCtx.runId, streamRequest.runId)
 assert.equal(streamedReply.content, 'alphabetagamma')
-assert.deepEqual(streamedReply.meta, { chunks: ['alpha', 'beta', 'gamma'] })
+assert.deepEqual(streamedReply.meta.chunks, ['alpha', 'beta', 'gamma'])
+assert.equal(streamedReply.meta.runId, streamRequest.runId)
+assert.equal(streamedReply.meta.responseId, sent.message.id)
 assert.equal(byId(ai.agents(), streamed.id).status, 'idle')
 assert.equal(ai.peekActiveRunState(streamed.id).state, 'idle')
 assert.equal(ai.peekActiveRunState(streamed.id).previewTail, 'alphabetagamma')
@@ -73,6 +77,7 @@ let release
 const held = new Promise(function (resolve) { release = resolve })
 let abortCtx = null
 ai.registerTransport('stream-hold', {
+  toolProtocol: 'native',
   send: function (connection, request, ctx) {
     abortCtx = ctx
     return held.then(function () {
@@ -105,6 +110,7 @@ ai.tools.register('stream-read', {
 })
 let toolStreamRequests = 0
 ai.registerTransport('stream-tool-flow', {
+  toolProtocol: 'native',
   send: function () {
     toolStreamRequests += 1
     if (toolStreamRequests === 1) {
@@ -151,6 +157,7 @@ ai.tools.register('stream-hidden-tool', {
 let hiddenToolRequests = 0
 let hiddenToolExecuted = 0
 ai.registerTransport('stream-hidden-tool-flow', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     hiddenToolRequests += 1
     assert.equal(request.tools.includes('stream-hidden-tool'), false)
@@ -193,6 +200,7 @@ ai.tools.register('stream-approval-edit', {
   apply: function (preview) { return { applied: true, preview: preview } },
 })
 ai.registerTransport('stream-approval-flow', {
+  toolProtocol: 'native',
   send: function () {
     return {
       deltas: (async function* () {
@@ -219,6 +227,7 @@ assert.equal(ai.peekActiveRunState(streamApproval.id).activityText, 'previewing 
 assert.equal(ai.stopAgent(streamApproval.id), true)
 
 ai.registerTransport('stream-reasoning-flow', {
+  toolProtocol: 'native',
   send: function () {
     return {
       deltas: (async function* () {
@@ -252,6 +261,7 @@ ai.tools.register('circular-tool-result', {
 })
 let circularRequests = 0
 ai.registerTransport('stream-circular-tool-flow', {
+  toolProtocol: 'native',
   send: function () {
     circularRequests += 1
     if (circularRequests === 1) {
@@ -279,5 +289,36 @@ assert.equal(byId(ai.agents(), circularAgent.id).messages.some(function (message
   return message.role === 'tool' && /\[Circular\]/.test(message.content)
 }), true)
 assert.equal(ai.peekActiveRunState(circularAgent.id).state, 'idle')
+
+let textProtocolRequests = 0
+let textProtocolCalls = 0
+ai.tools.register('stream-text-tool', {
+  run: function () { textProtocolCalls += 1; return { ok: true } },
+})
+ai.registerTransport('stream-text-protocol', {
+  toolProtocol: 'text',
+  send: function () {
+    textProtocolRequests += 1
+    if (textProtocolRequests === 1) {
+      return {
+        deltas: (async function* () {
+          yield { text: '```json\n' }
+          yield { text: '{"aiditor_tool_calls":[{"toolId":"stream-text-tool","args":{}}]}\n```' }
+        })(),
+      }
+    }
+    return { role: 'assistant', content: 'text protocol complete' }
+  },
+})
+ai.registerConnection('stream-text-protocol', { auth: { type: 'none' }, transport: { type: 'stream-text-protocol' }, configDefaults: {} })
+const textProtocolAgent = ai.createAgent({
+  name: 'Text Protocol',
+  connection: 'stream-text-protocol',
+  toolRefs: ['stream-text-tool'],
+})
+await ai.message.send(textProtocolAgent.id, { content: 'use text protocol tool' }, 'user').promise
+assert.equal(textProtocolCalls, 1)
+assert.equal(textProtocolRequests, 2)
+assert.equal(byId(ai.agents(), textProtocolAgent.id).messages.at(-1).content, 'text protocol complete')
 
 console.log('ai stream tests ok')

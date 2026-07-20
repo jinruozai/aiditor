@@ -151,50 +151,138 @@
     return (msg.meta && msg.meta.runId) || (msg.stats && msg.stats.runId) || ''
   }
 
+  function responseIdOf(msg) {
+    return (msg.meta && msg.meta.responseId) || runIdOf(msg)
+  }
+
   function isAssistantMessage(msg) {
     return (msg.role || msg.type) === 'assistant'
   }
 
-  function runFooterInfo(messages) {
-    const groups = {}
-    const out = {}
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i]
-      const runId = runIdOf(msg)
-      if (!runId || !isAssistantMessage(msg)) continue
-      if (!groups[runId]) {
-        groups[runId] = {
-          lastId: null,
-          content: [],
-          toolCalls: 0,
-          duration: 0,
-          totalTokens: 0,
-          outputTokens: 0,
-          cost: 0,
-          complete: false,
-        }
-      }
-      const group = groups[runId]
-      group.lastId = msg.id
-      const text = messageCopyText(msg).trim()
-      if (text) group.content.push(text)
-      group.toolCalls += toolCallsOf(msg).length
-      group.duration += durationMs(msg)
-      const usage = usageOf(msg)
-      group.totalTokens += usageNumber(usage, ['total_tokens', 'totalTokens'])
-      group.outputTokens += usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
-      const cost = msg.stats && msg.stats.cost
-      if (cost && cost.amount > 0) group.cost += Number(cost.amount || 0)
-      group.complete = statusOf(msg) !== 'running' && statusOf(msg) !== 'queued'
-    }
-    Object.keys(groups).forEach(function (runId) {
-      const group = groups[runId]
-      out[group.lastId] = group
-    })
-    return out
+  function isPendingStatus(status) {
+    return status === 'running' || status === 'queued' || status === 'waiting' || status === 'waiting_approval'
   }
 
-  function runMetricText(info, fallback) {
+  function messageStartTime(msg) {
+    const stats = msg.stats || {}
+    return msg.createdAt || msg.time || msg.startedAt || stats.startTime || 0
+  }
+
+  function messageEndTime(msg) {
+    const stats = msg.stats || {}
+    return msg.completedAt || stats.completedAt || (isPendingStatus(statusOf(msg)) ? 0 : (msg.time || msg.createdAt || 0))
+  }
+
+  function responseGraphIndex() {
+    const agents = aiditor.ai.agents && aiditor.ai.agents.peek ? aiditor.ai.agents.peek() : []
+    const agentById = {}
+    const questById = {}
+    for (let i = 0; i < agents.length; i++) {
+      agentById[agents[i].id] = agents[i]
+      const quests = agents[i].quests || []
+      for (let j = 0; j < quests.length; j++) questById[questKey(agents[i].id, quests[j].id)] = quests[j]
+    }
+    return { agentById: agentById, questById: questById }
+  }
+
+  function responseMessages(index, agentId, responseId) {
+    const agent = index.agentById[agentId]
+    const messages = agent && agent.messages || []
+    return messages.filter(function (msg) {
+      return (msg.role || msg.type) !== 'tool' && responseIdOf(msg) === responseId
+    })
+  }
+
+  function responseInfo(messages, includeContent) {
+    const info = {
+      lastId: null,
+      content: [],
+      toolCalls: 0,
+      startTime: 0,
+      endTime: 0,
+      duration: 0,
+      totalTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+      complete: true,
+      calls: [],
+    }
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]
+      const start = messageStartTime(msg)
+      const end = messageEndTime(msg)
+      if (start && (!info.startTime || start < info.startTime)) info.startTime = start
+      if (end > info.endTime) info.endTime = end
+      if (isPendingStatus(statusOf(msg))) info.complete = false
+      if (!isAssistantMessage(msg)) continue
+      info.lastId = msg.id
+      if (includeContent) {
+        const text = messageCopyText(msg).trim()
+        if (text) info.content.push(text)
+      }
+      const calls = toolCallsOf(msg)
+      info.toolCalls += calls.length
+      info.calls.push.apply(info.calls, calls)
+      const usage = usageOf(msg)
+      info.totalTokens += usageNumber(usage, ['total_tokens', 'totalTokens'])
+      info.outputTokens += usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
+      const cost = msg.stats && msg.stats.cost
+      if (cost && cost.amount > 0) info.cost += Number(cost.amount || 0)
+    }
+    return info
+  }
+
+  function mergeResponseInfo(target, source) {
+    target.toolCalls += source.toolCalls
+    target.totalTokens += source.totalTokens
+    target.outputTokens += source.outputTokens
+    target.cost += source.cost
+    target.complete = target.complete && source.complete
+    if (source.endTime > target.endTime) target.endTime = source.endTime
+  }
+
+  function aggregateResponse(index, agentId, responseId, messages, includeContent, seen, relatedAgentIds) {
+    const key = questKey(agentId, responseId)
+    if (seen[key]) return responseInfo([], false)
+    seen[key] = true
+    relatedAgentIds[agentId] = true
+    const info = responseInfo(messages || responseMessages(index, agentId, responseId), includeContent)
+    for (let i = 0; i < info.calls.length; i++) {
+      const call = info.calls[i]
+      if (!isQuestProducingCall(call)) continue
+      const result = call.applyResult || call.result || {}
+      if (!result.agentId || !result.questId) continue
+      const quest = index.questById[questKey(result.agentId, result.questId)]
+      if (quest && isPendingStatus(quest.status)) info.complete = false
+      const childAgent = index.agentById[result.agentId]
+      if (!childAgent) continue
+      const requestMessage = (childAgent.messages || []).find(function (msg) { return msg.id === result.questId })
+      const childResponseId = requestMessage && responseIdOf(requestMessage) || result.questId
+      mergeResponseInfo(info, aggregateResponse(index, result.agentId, childResponseId, null, false, seen, relatedAgentIds))
+    }
+    info.duration = info.startTime && info.endTime >= info.startTime ? info.endTime - info.startTime : 0
+    return info
+  }
+
+  function responseFooterInfo(agentId, messages) {
+    const groups = {}
+    const out = {}
+    const relatedAgentIds = {}
+    const index = responseGraphIndex()
+    for (let i = 0; i < messages.length; i++) {
+      const responseId = responseIdOf(messages[i])
+      if (!responseId) continue
+      if (!groups[responseId]) groups[responseId] = []
+      groups[responseId].push(messages[i])
+    }
+    Object.keys(groups).forEach(function (responseId) {
+      const info = aggregateResponse(index, agentId, responseId, groups[responseId], true, {}, relatedAgentIds)
+      if (info.lastId) out[info.lastId] = info
+    })
+    return { items: out, agentIds: Object.keys(relatedAgentIds).sort() }
+  }
+
+  function responseMetricText(info, fallback) {
     if (!info) return fallback || ''
     const parts = []
     if (info.duration) parts.push(formatDuration(info.duration))
@@ -678,21 +766,21 @@
     return 'aiditor-ai-message-row aiditor-ai-message-row-' + role + ' aiditor-ai-message-row-status-' + status
   }
 
-  function renderMessageFooter(msg, runFooters) {
+  function renderMessageFooter(msg, responseFooters) {
     const role = msg.role || msg.type || 'message'
-    const runId = runIdOf(msg)
-    const runFooter = runId && runFooters ? runFooters[msg.id] : null
-    if (runId && isAssistantMessage(msg) && !runFooter) return null
-    if (runFooter && !runFooter.complete) return null
+    const responseId = responseIdOf(msg)
+    const responseFooter = responseId && responseFooters ? responseFooters[msg.id] : null
+    if (responseId && isAssistantMessage(msg) && !responseFooter) return null
+    if (responseFooter && !responseFooter.complete) return null
 
-    const copyText = runFooter && runFooter.content.length ? runFooter.content.join('\n\n') : messageCopyText(msg)
+    const copyText = responseFooter && responseFooter.content.length ? responseFooter.content.join('\n\n') : messageCopyText(msg)
     const footer = ui.h('div', 'aiditor-ai-message-footer')
-    footer.appendChild(ui.copyButton({ text: copyText, title: runFooter ? 'Copy run' : 'Copy message', size: 'sm' }))
+    footer.appendChild(ui.copyButton({ text: copyText, title: responseFooter ? 'Copy response' : 'Copy message', size: 'sm' }))
     const calls = toolCallsOf(msg)
-    const callCount = runFooter ? runFooter.toolCalls : calls.length
+    const callCount = responseFooter ? responseFooter.toolCalls : calls.length
     if (callCount) footer.appendChild(ui.h('span', 'aiditor-ai-message-metrics', { text: callCount + ' tool call' + (callCount === 1 ? '' : 's') }))
     if (role !== 'user') {
-      const metrics = runFooter ? runMetricText(runFooter, metricText(msg)) : metricText(msg)
+      const metrics = responseFooter ? responseMetricText(responseFooter, metricText(msg)) : metricText(msg)
       if (metrics) footer.appendChild(ui.h('span', 'aiditor-ai-message-metrics', { text: metrics }))
     }
     return footer
@@ -721,9 +809,9 @@
     appendChips(card, className, items)
   }
 
-  function patchFooter(stack, msg, runFooters) {
+  function patchFooter(stack, msg, responseFooters) {
     const existing = stack.querySelector('.aiditor-ai-message-footer')
-    const next = renderMessageFooter(msg, runFooters)
+    const next = renderMessageFooter(msg, responseFooters)
     if (!next) {
       if (existing) disposeTree(existing)
       return
@@ -732,7 +820,7 @@
     else stack.appendChild(next)
   }
 
-  function patchMessageRow(entry, agent, msg, runFooters, viewState, listVersion, version) {
+  function patchMessageRow(entry, agent, msg, responseFooters, viewState, listVersion, version, footerVersion) {
     if (!entry || entry.patchable === false || msg.empty || runtimeEventsOf(msg).length) return false
     const row = entry.el
     const stack = row.querySelector('.aiditor-ai-message-stack')
@@ -744,13 +832,14 @@
     row.className = messageRowClass(role, status)
     patchPayload(body, msg)
     patchToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
-    patchFooter(stack, msg, runFooters)
+    patchFooter(stack, msg, responseFooters)
     entry.version = version
     entry.listVersion = listVersion
+    entry.footerVersion = footerVersion
     return true
   }
 
-  function renderMessage(agent, msg, runFooters, viewState) {
+  function renderMessage(agent, msg, responseFooters, viewState) {
     if (msg.empty) return renderEmpty(msg)
     if (runtimeEventsOf(msg).length) return renderRuntimeEvent(agent, msg)
 
@@ -766,7 +855,7 @@
     card.appendChild(body)
     stack.appendChild(card)
 
-    const footer = renderMessageFooter(msg, runFooters)
+    const footer = renderMessageFooter(msg, responseFooters)
     if (footer) stack.appendChild(footer)
     row.appendChild(stack)
     return row
@@ -816,7 +905,10 @@
     let cacheAgentId = null
     let cacheListVersion = -1
     let cacheMessages = []
-    let cacheRunFooters = {}
+    let cacheResponseFooters = {}
+    let cacheResponseAgentIds = []
+    let cacheGraphVersion = ''
+    let cacheFooterVersion = 0
     let emptyEl = null
     let stickToBottom = true
     let selectingTranscript = false
@@ -889,27 +981,44 @@
       emptyEl = next
     }
 
-    function messagesForAgent(agentId) {
+    function sourceMessagesForAgent(agentId) {
       const ids = aiditor.ai.agentMessageIds ? aiditor.ai.agentMessageIds(agentId) : []
       const out = []
       if (ids.length) {
         for (let i = 0; i < ids.length; i++) {
           const msg = aiditor.ai.readMessage(agentId, ids[i])
-          if (msg && (msg.role || msg.type) !== 'tool' && !isHiddenRuntimeMessage(msg)) out.push(msg)
+          if (msg && (msg.role || msg.type) !== 'tool') out.push(msg)
         }
-        return projectedMessages(out)
+        return out
       }
       const agent = activeAgent()
-      return projectedMessages(messagesOf(agent))
+      return agent ? (agent.messages || agent.transcript || agent.history || []).filter(function (msg) {
+        return (msg.role || msg.type) !== 'tool'
+      }) : []
+    }
+
+    function messagesForAgent(source) {
+      return projectedMessages(source.filter(function (msg) { return !isHiddenRuntimeMessage(msg) }))
+    }
+
+    function graphVersion(agentIds) {
+      if (!aiditor.ai.agentVersion) return ''
+      return agentIds.map(function (id) { return id + ':' + aiditor.ai.agentVersion(id) }).join('|')
     }
 
     function ensureCache(agentId) {
       const version = aiditor.ai.messageListVersion ? aiditor.ai.messageListVersion(agentId) : 0
-      if (cacheAgentId === agentId && cacheListVersion === version) return
+      const nextGraphVersion = graphVersion(cacheResponseAgentIds)
+      if (cacheAgentId === agentId && cacheListVersion === version && cacheGraphVersion === nextGraphVersion) return
       cacheAgentId = agentId
       cacheListVersion = version
-      cacheMessages = messagesForAgent(agentId)
-      cacheRunFooters = runFooterInfo(cacheMessages)
+      const source = sourceMessagesForAgent(agentId)
+      cacheMessages = messagesForAgent(source)
+      const footerInfo = responseFooterInfo(agentId, source)
+      cacheResponseFooters = footerInfo.items
+      cacheResponseAgentIds = footerInfo.agentIds
+      cacheGraphVersion = graphVersion(cacheResponseAgentIds)
+      cacheFooterVersion++
       virtualizer.setMessages(cacheMessages)
     }
 
@@ -926,9 +1035,9 @@
       const id = msg.id
       const version = aiditor.ai.messageVersion ? aiditor.ai.messageVersion(agent.id, id) : 0
       const entry = rows[id]
-      if (entry && entry.version === version && entry.listVersion === cacheListVersion) return entry.el
-      if (entry && patchMessageRow(entry, agent, msg, cacheRunFooters, viewState, cacheListVersion, version)) return entry.el
-      const next = renderMessage(agent, msg, cacheRunFooters, viewState)
+      if (entry && entry.version === version && entry.listVersion === cacheListVersion && entry.footerVersion === cacheFooterVersion) return entry.el
+      if (entry && patchMessageRow(entry, agent, msg, cacheResponseFooters, viewState, cacheListVersion, version, cacheFooterVersion)) return entry.el
+      const next = renderMessage(agent, msg, cacheResponseFooters, viewState)
       if (entry) {
         if (entry.el.parentNode && entry.el.parentNode.replaceChild) entry.el.parentNode.replaceChild(next, entry.el)
         else {
@@ -937,7 +1046,7 @@
         }
         disposeTree(entry.el)
       }
-      rows[id] = { el: next, version: version, listVersion: cacheListVersion, patchable: !msg.empty && !runtimeEventsOf(msg).length }
+      rows[id] = { el: next, version: version, listVersion: cacheListVersion, footerVersion: cacheFooterVersion, patchable: !msg.empty && !runtimeEventsOf(msg).length }
       return next
     }
 

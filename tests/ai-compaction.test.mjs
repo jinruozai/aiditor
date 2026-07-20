@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
 function loadCore(storage) {
-  global.window = { aiditor: {}, localStorage: storage || null }
+  global.document = { visibilityState: 'visible', addEventListener: function () {} }
+  global.window = { aiditor: {}, localStorage: storage || null, addEventListener: function () {} }
   vm.runInThisContext(readFileSync('src/core/signal.js', 'utf8'), { filename: 'signal.js' })
   vm.runInThisContext(readFileSync('src/core/log.js', 'utf8'), { filename: 'log.js' })
   vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'names.js' })
@@ -12,6 +13,7 @@ function loadCore(storage) {
   vm.runInThisContext(readFileSync('src/ai/serialize.js', 'utf8'), { filename: 'ai/serialize.js' })
   vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
   vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
+  vm.runInThisContext(readFileSync('src/ai/persistence.js', 'utf8'), { filename: 'ai/persistence.js' })
   vm.runInThisContext(readFileSync('src/ai/memory.js', 'utf8'), { filename: 'ai/memory.js' })
   vm.runInThisContext(readFileSync('src/ai/compaction.js', 'utf8'), { filename: 'ai/compaction.js' })
 }
@@ -23,7 +25,8 @@ function loadRequestRuntime() {
   vm.runInThisContext(readFileSync('src/ai/provider-auth.js', 'utf8'), { filename: 'ai/provider-auth.js' })
   vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { filename: 'ai/provider-transports.js' })
   vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
-  vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
+  vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
+vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
   vm.runInThisContext(readFileSync('src/ai/context.js', 'utf8'), { filename: 'ai/context.js' })
   vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
   vm.runInThisContext(readFileSync('src/ai/runtime.js', 'utf8'), { filename: 'ai/runtime.js' })
@@ -31,10 +34,16 @@ function loadRequestRuntime() {
 
 function storage() {
   const data = {}
+  const records = new Map()
   return {
     getItem: function (key) { return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null },
     setItem: function (key, value) { data[key] = String(value) },
     removeItem: function (key) { delete data[key] },
+    adapter: {
+      load: function (key) { return Promise.resolve(records.get(key) || null) },
+      save: function (key, value) { records.set(key, JSON.parse(JSON.stringify(value))); return Promise.resolve() },
+      remove: function (key) { records.delete(key); return Promise.resolve() },
+    },
   }
 }
 
@@ -73,12 +82,14 @@ function assertCompactionRecordAndRequestView() {
     memory: { decisions: ['Keep UI component model single.'] },
     messages: messages,
   })
+  const transcriptBefore = ai.snapshot().agents[0].messages.map(function (message) { return message.content })
 
   const plan = ai.compaction.plan(agent.id, null, { force: true })
   assert.ok(plan)
   assert.deepEqual(plan.messageIds, messages.slice(0, 8).map(function (_, i) { return agent.messages[i].id }))
 
   const record = ai.compaction.run(agent.id, plan)
+  assert.deepEqual(ai.snapshot().agents[0].messages.map(function (message) { return message.content }), transcriptBefore)
   assert.equal(record.messageIds.length, 8)
   assert.match(record.summary, /Compacted 8 older messages/)
   assert.equal(record.decisions[0].text, 'Keep dock panel runtime detached when inactive.')
@@ -163,6 +174,7 @@ function assertRuntimeSafePointCompactsBeforeRequest() {
   ai.compaction.configure({ tailMessages: 1, minMessages: 3, softLimitRatio: 0.01 })
   let requestSeen = null
   ai.registerTransport('capture-compaction', {
+    toolProtocol: 'native',
     send: function (connection, request) {
       requestSeen = request
       return { role: 'assistant', content: 'done' }
@@ -184,11 +196,11 @@ function assertRuntimeSafePointCompactsBeforeRequest() {
   })
 }
 
-function assertCompactionsPersist() {
+async function assertCompactionsPersist() {
   const s = storage()
   loadCore(s)
   let ai = window.aiditor.ai
-  ai.configurePersistence({ key: 'test.compaction', load: false })
+  ai.configurePersistence({ key: 'test.compaction', adapter: s.adapter, load: false })
   const agent = ai.createAgent({
     name: 'Persistent Compact',
     messages: [
@@ -199,12 +211,13 @@ function assertCompactionsPersist() {
     ],
   })
   const record = ai.compaction.run(agent.id, ai.compaction.plan(agent.id, null, { force: true, tailMessages: 1, minMessages: 1 }))
-  ai.save()
+  await ai.save()
   assert.ok(record)
 
   loadCore(s)
   ai = window.aiditor.ai
-  ai.configurePersistence({ key: 'test.compaction' })
+  ai.configurePersistence({ key: 'test.compaction', adapter: s.adapter })
+  await ai.persistence.ready()
   const restored = ai.findAgent(agent.id)
   assert.equal(restored.compactions.length, 1)
   assert.equal(restored.compactions[0].id, record.id)
@@ -236,7 +249,7 @@ assertCompactionRecordAndRequestView()
 assertOpenToolSequenceIsProtected()
 assertToolGroupBudgetStaysTogether()
 await assertRuntimeSafePointCompactsBeforeRequest()
-assertCompactionsPersist()
+await assertCompactionsPersist()
 assertCommandsWrapService()
 
 console.log('ai compaction tests ok')

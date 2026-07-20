@@ -39,6 +39,8 @@
   }
 
   ai.registerTransport('mock', {
+    toolProtocol: 'none',
+    outputProtocol: 'text',
     send: function (connection, request, ctx) {
       const config = ai.getConnectionConfig(connection.id)
       if (ctx.signal && ctx.signal.aborted) throw new Error('aborted')
@@ -52,6 +54,8 @@
   })
 
   ai.registerTransport('openai-compatible', {
+    toolProtocol: 'native',
+    outputProtocol: 'text',
     models: function (connection, config) {
       return http.requestJson(http.joinUrl(config.baseUrl, '/models'), {
         method: 'GET',
@@ -75,6 +79,12 @@
       if (tools.length) {
         body.tools = tools
         body.tool_choice = 'auto'
+      }
+      if (request.outputSchema && request.connectionCapabilities && request.connectionCapabilities.outputProtocol === 'native') {
+        body.response_format = {
+          type: 'json_schema',
+          json_schema: { name: 'aiditor_output', schema: request.outputSchema },
+        }
       }
       return http.requestMaybeStream(http.joinUrl(config.baseUrl, '/chat/completions'), {
         method: 'POST',
@@ -126,6 +136,8 @@
   })
 
   ai.registerTransport('anthropic', {
+    toolProtocol: 'native',
+    outputProtocol: 'text',
     models: function (connection, config) {
       const headers = http.authHeaders(config, 'anthropic')
       headers['anthropic-version'] = '2023-06-01'
@@ -145,6 +157,8 @@
         max_tokens: configuredMaxTokens(config, 8192),
         stream: !!(request.stream && config.stream),
       }
+      const tools = ai.anthropicTools(request)
+      if (tools.length) body.tools = tools
       headers['anthropic-version'] = '2023-06-01'
       const system = ai.anthropicSystem(request.messages)
       if (system) body.system = system
@@ -154,19 +168,39 @@
         signal: ctx.signal,
         body: JSON.stringify(body),
       }, function (data) {
-        if (data.type === 'content_block_delta' && data.delta) return data.delta.text || ''
-        if (data.type === 'content_block_start' && data.content_block) return data.content_block.text || ''
+        if (data.type === 'content_block_delta' && data.delta) {
+          if (data.delta.type === 'input_json_delta') {
+            return { toolCalls: [{ index: data.index, function: { arguments: data.delta.partial_json || '' } }] }
+          }
+          return data.delta.text || ''
+        }
+        if (data.type === 'content_block_start' && data.content_block) {
+          if (data.content_block.type === 'tool_use') {
+            return {
+              toolCalls: [{
+                index: data.index,
+                id: data.content_block.id,
+                type: 'function',
+                function: {
+                  name: data.content_block.name,
+                  arguments: Object.keys(data.content_block.input || {}).length ? JSON.stringify(data.content_block.input) : '',
+                },
+              }],
+            }
+          }
+          return data.content_block.text || ''
+        }
         if (data.type === 'message_delta' && data.delta) return { finishReason: data.delta.stop_reason || data.delta.stopReason || '', usage: data.usage || null }
         return ''
       }).then(function (data) {
         if (data.streamed && data.deltas) return { deltas: data.deltas }
         if (data.streamed) return { role: 'assistant', content: data.content, usage: data.usage || null }
         data = data.data
-        const chunks = data.content || []
+        const normalized = ai.normalizeAnthropicContent(data.content || [], request)
         return {
           role: 'assistant',
-          content: chunks.map(function (item) { return item.text || '' }).join(''),
-          toolCalls: data.tool_calls || data.toolCalls || [],
+          content: normalized.content,
+          toolCalls: normalized.toolCalls,
           usage: data.usage || null,
           finishReason: data.stop_reason || data.stopReason || null,
         }
@@ -175,6 +209,8 @@
   })
 
   ai.registerTransport('local-bridge', {
+    toolProtocol: 'native',
+    outputProtocol: 'text',
     models: function (connection, config) {
       return http.requestJson(http.joinUrl(config.baseUrl, '/models'), {
         method: 'GET',
@@ -208,6 +244,8 @@
   })
 
   ai.registerTransport('codex-bridge', {
+    toolProtocol: 'text',
+    outputProtocol: 'text',
     models: function (connection, config) {
       return http.requestJson(http.joinUrl(config.baseUrl, '/connections/' + connection.id + '/models'), { method: 'GET' })
         .then(function (data) { return http.normalizeModels(data.models || data.data || []) })

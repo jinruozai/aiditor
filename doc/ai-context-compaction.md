@@ -91,7 +91,7 @@ The request builder always preserves:
 
 - runtime guide, active skills, permission state, and current workspace metadata;
 - the current user input;
-- queued guidance and interruption metadata;
+- queued interruption metadata;
 - pending approvals and unresolved tool calls;
 - the latest raw tail of the conversation;
 - active inbox continuation events;
@@ -316,10 +316,11 @@ Current code already has useful pieces:
 - `src/ai/request.js` truncates large strings, tool args, and context payloads.
 - `src/ai/request.js` groups assistant tool-call messages with their matching
   tool results so provider history is not split by budgeting.
-- `src/ai/store.js` persists recoverable AI runtime state. Its local storage
-  compaction is a quota safety layer defined in
-  [ai-persistence.md](./ai-persistence.md), not model-facing semantic
-  compaction.
+- `src/ai/store.js` owns the complete in-memory transcript and publishes a
+  JSON-safe snapshot plus mutation version.
+- `src/ai/persistence.js` stores that complete snapshot in IndexedDB. It does
+  not reuse model-facing compaction or trim the transcript to satisfy a storage
+  budget; see [ai-persistence.md](./ai-persistence.md).
 - `src/ai/store.js` keeps messages, queue, inbox, quests, and runtime status in
   the agent record.
 - `src/ai/memory.js` provides conservative durable memory updates from explicit

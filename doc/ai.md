@@ -233,10 +233,11 @@ failed
 
 ## Persistence
 
-AI runtime persistence belongs to the optional AI Host. It stores bounded
-recoverable agent state so a reload can restore agents, recent messages, active
-agent selection, queues, quests, attachments, and compact tool-call history.
+AI runtime persistence belongs to the optional AI Host. IndexedDB stores the
+complete JSON-safe Agent transcript and runtime records; `localStorage` stores
+only a small synchronous Agent bootstrap manifest. It does not store project
+truth, workspace files, or editor history.
 
-It does not store project truth, workspace files, editor history, or full
-transcript archives in `localStorage`. The bounded local persistence contract is
-defined in [ai-persistence.md](./ai-persistence.md).
+Model context compaction is a separate request-assembly concern and never
+removes transcript rows shown in the UI. The persistence contract is defined in
+[ai-persistence.md](./ai-persistence.md).

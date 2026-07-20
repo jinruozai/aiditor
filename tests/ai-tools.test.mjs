@@ -17,6 +17,8 @@ for (const file of [
   'src/ai/provider-auth.js',
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
+  'src/ai/schema.js',
+  'src/ai/trace.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/request.js',
@@ -73,10 +75,16 @@ function latestCall(agentId) {
   return message.toolCalls[message.toolCalls.length - 1]
 }
 
+ai.registerTransport('tool-test', {
+  toolProtocol: 'native',
+  send: function () { return { role: 'assistant', content: 'done' } },
+})
+ai.registerConnection('tool-test', { auth: { type: 'none' }, transport: { type: 'tool-test' }, configDefaults: {} })
+
 const agent = ai.createAgent({
   name: 'Tool Runner',
   path: 'tools/root',
-  connection: 'mock',
+  connection: 'tool-test',
   toolRefs: ['edit-record'],
 })
 
@@ -86,7 +94,15 @@ let applyCtx = null
 ai.tools.register('edit-record', {
   title: 'Edit Record',
   description: 'Preview, run, and apply a record edit.',
-  schema: { type: 'object', required: ['id'] },
+  schema: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string' },
+      before: {},
+      after: {},
+    },
+  },
   permissions: ['tool.call', 'tool.apply'],
   preview: function (args, ctx) {
     previewCtx = ctx
@@ -105,7 +121,7 @@ ai.tools.register('edit-record', {
 const defaultToolAgent = ai.createAgent({
   name: 'Default Tool Agent',
   path: 'tools/default',
-  connection: 'mock',
+  connection: 'tool-test',
 })
 const defaultToolRequest = ai.makeRequest(defaultToolAgent, null, 'run_default_tools', 'user', 0)
 assert.deepEqual(defaultToolRequest.tools, [])
@@ -129,31 +145,43 @@ ai.tools.register('ctx-visible', {
 })
 ai.skills.register('filtered-tools', {
   title: 'Filtered Tools',
+  systemPrompt: 'Use only the filtered tool surface.',
   tools: ['hidden-by-default', 'currently-unavailable', 'ctx-visible'],
-})
+}, { owner: 'test:filtered', layer: 'app', source: 'test-suite' })
 const filteredToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Filtered Tool Agent',
   path: 'tools/filtered',
-  connection: 'mock',
+  connection: 'tool-test',
   skillRefs: ['filtered-tools'],
 }), null, 'run_filtered_tools', 'user', 0)
 assert.equal(filteredToolRequest.tools.includes('hidden-by-default'), true)
 assert.equal(filteredToolRequest.tools.includes('currently-unavailable'), false)
 assert.equal(filteredToolRequest.tools.includes('ctx-visible'), true)
+assert.equal(filteredToolRequest.skillActivations.length, 1)
+assert.equal(filteredToolRequest.skillActivations[0].reason, 'configured')
+assert.equal(filteredToolRequest.skillActivations[0].owner, 'test:filtered')
+assert.equal(filteredToolRequest.skillActivations[0].source, 'test-suite')
+assert.equal(filteredToolRequest.skillActivations[0].promptChars > 0, true)
+assert.deepEqual(filteredToolRequest.skillActivations[0].toolRefs, ['hidden-by-default', 'currently-unavailable', 'ctx-visible'])
+const filteredActivationTrace = ai.trace.list('run_filtered_tools').find(function (event) { return event.type === 'skill_activated' })
+assert.equal(filteredActivationTrace.entry, 'filtered-tools')
+assert.equal(filteredActivationTrace.meta.reason, 'configured')
+assert.equal(filteredActivationTrace.meta.owner, 'test:filtered')
+assert.equal(ai.trace.list('run_filtered_tools').find(function (event) { return event.type === 'request_built' }).meta.skillPromptChars > 0, true)
 assert.equal(availableCtx.actor, 'user')
 ai.context.register('tool-surface', {
   capture: function () { return { title: 'Current surface', tools: ['ctx-visible'] } },
 })
 const contextToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Context Tool Agent',
-  connection: 'mock',
+  connection: 'tool-test',
 }), null, 'run_context_tools', 'user', 0)
 assert.deepEqual(contextToolRequest.tools, ['ctx-visible'])
 ai.context.unregister('tool-surface')
 const explicitToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Explicit Tool Agent',
   path: 'tools/explicit',
-  connection: 'mock',
+  connection: 'tool-test',
   toolRefs: ['hidden-by-default', 'currently-unavailable', 'edit-record'],
 }), null, 'run_explicit_tools', 'user', 0)
 assert.deepEqual(explicitToolRequest.tools, ['hidden-by-default', 'edit-record'])
@@ -275,6 +303,7 @@ assert.equal(asyncFailed.status, 'failed')
 assert.equal(asyncFailed.error, 'async apply failed')
 
 ai.registerTransport('generated-tool-calls', {
+  toolProtocol: 'native',
   send: function () {
     return {
       role: 'assistant',
@@ -361,6 +390,7 @@ ai.tools.register('read-number', {
   },
 })
 ai.registerTransport('tool-loop', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     loopRequests.push(request)
     if (loopRequests.length === 1) {
@@ -400,9 +430,17 @@ ai.skills.register('auto.once', {
 const autoSkillRequest = ai.makeRequest(loopAgent, null, 'run_auto_skill', 'user', 0)
 assert.deepEqual(autoSkillRequest.skills.filter(function (id) { return id === 'auto.once' }), ['auto.once'])
 assert.equal(autoSkillRequest.skillSpecs.some(function (skill) { return skill.id === 'auto.once' }), true)
+assert.equal(autoSkillRequest.skillActivations.find(function (item) { return item.id === 'auto.once' }).reason, 'auto')
 assert.match(autoSkillRequest.messages[0].content, /Auto once rule/)
 assert.equal(autoSkillCalls, 1)
 ai.skills.unregister('auto.once')
+
+ai.skills.register('removed.skill', { title: 'Removed', rules: ['Never exposed'] })
+const staleSkillAgent = ai.createAgent({ name: 'Stale Skill Agent', connection: 'tool-test', skillRefs: ['removed.skill'] })
+ai.skills.unregister('removed.skill')
+const staleSkillRequest = ai.makeRequest(staleSkillAgent, null, 'run_stale_skill', 'user', 0)
+assert.deepEqual(staleSkillRequest.skills, [])
+assert.deepEqual(staleSkillRequest.skillActivations, [])
 
 ai.bundles.register('bundle.case', {
   connections: [{ id: 'bundle.connection', auth: { type: 'none' }, transport: { type: 'mock' }, configDefaults: {} }],

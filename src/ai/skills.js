@@ -4,6 +4,7 @@
 
   const ai = aiditor.ai = aiditor.ai || {}
   if (!ai.skills || !ai.skills.register) return
+  const BUILTIN_META = { owner: 'aiditor.skills', layer: 'builtin', source: 'builtin' }
 
   const COMMON_RULES = [
     'Write AIditor UI as plain .js scripts. Do not create .tsx, .jsx, TypeScript annotations, import/export statements, React hooks, or framework-specific component syntax in zero-build AIditor code.',
@@ -38,11 +39,11 @@
     whenToUse: 'Use when the agent is running inside an AIditor host and the user asks for UI to appear in current docks.',
     whenNotToUse: 'Do not use for standalone repository or host-app implementation work outside the live editor runtime.',
     relatedApis: ['aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel', 'aiditor.registerComponent', 'aiditor.runtime.loadScript'],
-    tools: ['workspace.fileSummary', 'workspace.searchFiles', 'workspace.readTextRange', 'workspace.writeText', 'workspace.editText', 'code.map', 'verify.run', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
+    tools: ['workspace.fileSummary', 'workspace.searchFiles', 'workspace.readTextRange', 'workspace.writeText', 'workspace.editText', 'code.map', 'verify.run', 'aiditor.searchReferences', 'aiditor.readReference', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
     docPath: 'doc/skill/aiditor-runtime-authoring/SKILL.md',
     systemPrompt: 'You are running inside an AIditor host. Create durable UI by writing plain JavaScript workspace component files, then mount or replace registered components in live docks through AIditor tools.',
     rules: RUNTIME_RULES,
-  })
+  }, BUILTIN_META)
 
   ai.skills.register('aiditor.library-authoring', {
     title: 'AIditor Library Authoring',
@@ -50,11 +51,11 @@
     whenToUse: 'Use when coding an AIditor-based project, host app, demo, layout, or component library outside the live editor agent runtime.',
     whenNotToUse: 'Do not use when the task is to place UI into the currently running editor dock; use aiditor.runtime-authoring instead.',
     relatedApis: ['aiditor.registerComponent', 'aiditor.ui.propertyForm', 'aiditor.inspector.registerProvider', 'aiditor.runtime.loadScript'],
-    tools: ['workspace.fileSummary', 'workspace.searchFiles', 'workspace.readTextRange', 'workspace.editText', 'workspace.writeText', 'code.map', 'verify.run'],
+    tools: ['workspace.fileSummary', 'workspace.searchFiles', 'workspace.readTextRange', 'workspace.editText', 'workspace.writeText', 'code.map', 'verify.run', 'aiditor.searchReferences', 'aiditor.readReference'],
     docPath: 'doc/skill/aiditor-library-authoring/SKILL.md',
     systemPrompt: 'Use AIditor as a zero-build, plain JavaScript editor UI library in a repository or host app. Author registered components and host integration code without React, TSX, JSX, import/export, or bundled-module assumptions.',
     rules: LIBRARY_RULES,
-  })
+  }, BUILTIN_META)
 
   ai.skills.register('aiditor.authoring', {
     title: 'AIditor Authoring',
@@ -69,5 +70,5 @@
       'Choose aiditor.runtime-authoring for live editor workspace edits and dock mounting.',
       'Choose aiditor.library-authoring for repository or host-app code that uses AIditor as a library.',
     ].concat(COMMON_RULES),
-  })
+  }, BUILTIN_META)
 })(window.aiditor = window.aiditor || {})

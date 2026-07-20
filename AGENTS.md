@@ -160,10 +160,13 @@ aiditor/
       ui-base.css / ui-form.css / ui-editor.css / ui-container.css / ui-data.css / ui-overlay.css / ui-ai.css
     ai/
       permission.js                # 统一 permission resolver + audit + path rules
-      store.js                     # agents/messages/quests/attachments/persistence 状态核心
+      store.js                     # agents/messages/quests/attachments 完整内存状态
+      persistence.js               # IndexedDB 完整转录持久化 + localStorage 启动清单
+      schema.js                    # tool/output 共用 JSON schema normalize/validate
       registries.js                # tools/skills/context/templates/bundles registry
       context.js                   # tool-call lifecycle + run context helpers
       request.js / runtime.js      # request assembly + scheduler/run/resume/tool approval
+      checkpoints.js / evals.js    # 可选恢复检查点 + 基于 trace 的轻量确定性评估
       reference.js / change-set.js # references/operations + grouped review/apply
       target.js / rich-prompt.js   # add-to-chat targets + inline references
       provider*.js / adapter.js    # provider/connection/auth/transport/message tool protocol
@@ -237,9 +240,12 @@ aiditor/
 - `src/ai/permission.js` 是统一 permission resolver / audit / path rule owner。Tools、operations、ChangeSet apply、workspace writes、extension install、host adapter 调用都走同一套 actor/target/scope 判断。
 - `src/ai/registries.js` 统一管理 tools、skills、context providers、agent templates、bundles。Dotted name 是公开命名和筛选形状;extension 生命周期用 owner 精确清理。
 - `src/ai/context.js` 只负责 tool-call lifecycle 和 run context helper,不再承担 registry。
+- `src/ai/persistence.js` 将完整 JSON-safe 聊天转录异步保存到 IndexedDB;`localStorage` 只保存轻量 Agent 启动清单。模型上下文压缩只影响 provider request projection,不得删除 UI transcript。
 - `src/ai/request.js` 负责请求组装:先解析 active skills/context,再只暴露 `agent.toolRefs + skill.tools + runtimeContext.tools` 的有效工具集;空引用不回退全量工具。Runtime kernel 保持最小,workspace/task/skill catalog 按需注入。
+- Skill registry 使用统一 `SkillSpec` 和精确 owner/source/hash 生命周期;`skillRefs`、runtime intent、`auto(ctx)` 在每次请求只解析一次并写入 `skill_activated` trace。`src/ai/skill-packages.js` 可从 bounded workspace 加载标准 `SKILL.md` 并按需读取 `references/`,但绝不执行 package scripts 或绕过 Tool/permission registry。
+- Agent 可声明 provider-neutral `outputSchema`;最终无工具调用的回复统一解析/校验到 `message.output`。Connection 层提供 bounded retry 与 health signal;流开始后不重放。可选 `ai.checkpoints` 只恢复安全排队状态,`ai.evals` 复用现有 trace 做确定性评估,都不引入项目 workflow 语义。
 - `src/ai/runtime.js` 负责 scheduler/run/resume/tool approval/continuation。Quest 使用统一 `{maxTurns,timeoutMs,maxTokens}` budget,达到边界后以稳定 `stopReason` 停止并通知父 Agent;模型委托另受 `maxDelegationDepth` 限制。
-- `src/ai/orchestration.js` 的 `agent.create` / `agent.delegate` 共用父链解析:Agent 省略 `parentAgentId` 时默认创建自己的子节点,用户省略时创建根节点;Agent 不可逃逸到根级。`agent.read({})` 就是权限过滤后的列表入口。
+- `src/ai/orchestration.js` 的 `agent.create` / `agent.delegate` 共用父链解析:Agent 省略 `parentAgentId` 时默认创建自己的子节点,用户省略时创建根节点;Agent 不可逃逸到根级。`agent.read` 只返回有界 profile/树级摘要,`agent.configure` 只允许用户或父级修改后代的稳定配置,不能改自身或运行状态。Quest 用 `read/result/cancel` 形成精确任务闭环;`agent.stop` 只是当前 run 的紧急停止。模型控制工具用稳定 `outcome` 区分成功、无活动 run 和已终态 Quest,不存在/无权限仍然是错误。
 - `src/ai/message-markdown.js` + `message-renderers.js` 负责安全 Markdown 文本渲染、主流 provider content block 归一化、结构化 message part renderer registry 和一致的复制文本;不执行 raw HTML,不把任意 JSON 猜成 UI。
 - `src/ai/reference.js` 提供 references + operations 协议;`src/ai/change-set.js` 提供 grouped review/apply。
 - Rich prompt token 存 `refId`,不是 `resourceId`;chat attachments 是 runtime state,不是新的 model-facing registry。
@@ -887,7 +893,7 @@ npm.cmd run check:dist
 git diff --check
 ```
 
-当前 `npm.cmd run check` 覆盖语法检查、signal/tree/theme/history/i18n/settings/commands/workspace、UI scope/edit session、project runtime、ChangeSet、AI provider/stream/tools/workdir/orchestration/quest/persistence/compaction/target/reference/resource permission、Extension Runtime、rich prompt 等测试。
+当前 `npm.cmd run check` 覆盖语法检查、signal/tree/theme/history/i18n/settings/commands/workspace、UI scope/edit session、project runtime、ChangeSet、AI provider/retry/stream/tools/workdir/orchestration/quest/structured output/checkpoint/eval/persistence/compaction/target/reference/resource permission、Extension Runtime、rich prompt 等测试。
 
 `git diff --check` 在 Windows 上可能打印 LF/CRLF 替换 warning;只要没有 whitespace error 即可。
 

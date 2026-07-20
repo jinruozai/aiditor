@@ -99,39 +99,77 @@
     list.push(id)
   }
 
-  function effectiveSkillRefs(agent, input, ctx) {
-    const refs = []
+  function skillPromptLines(skill) {
+    const lines = []
+    if (skill.systemPrompt) lines.push(skill.title + ': ' + skill.systemPrompt)
+    const rules = skill.rules || []
+    for (let i = 0; i < rules.length; i++) lines.push('- ' + rules[i])
+    return lines
+  }
+
+  function addSkillActivation(list, seen, id, reason) {
+    if (!id || seen[id]) return
+    const skill = ai.skills && ai.skills.get ? ai.skills.get(id) : null
+    if (!skill) return
+    seen[id] = true
+    const meta = ai.skills.meta ? ai.skills.meta(id) : {}
+    list.push({
+      id: id,
+      reason: reason,
+      spec: skill,
+      owner: meta.owner || null,
+      layer: meta.layer || null,
+      source: meta.source || null,
+      hash: meta.hash || null,
+      promptChars: skillPromptLines(skill).join('\n').length,
+      toolRefs: (skill.tools || []).slice(),
+    })
+  }
+
+  function resolveSkillActivations(agent, input, ctx) {
+    const activations = []
     const seen = {}
-    const explicit = agent.skillRefs || []
-    for (let i = 0; i < explicit.length; i++) addUnique(refs, seen, explicit[i])
+    const configured = agent.skillRefs || []
+    for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured')
     const needsRuntimeAuthoring = uiAuthoringIntent(input)
     if (ai.skills && ai.skills.get && needsRuntimeAuthoring) {
-      if (ai.skills.get('aiditor.runtime-authoring')) addUnique(refs, seen, 'aiditor.runtime-authoring')
-      else if (ai.skills.get('aiditor.authoring')) addUnique(refs, seen, 'aiditor.authoring')
+      addSkillActivation(activations, seen, 'aiditor.runtime-authoring', 'runtime')
     }
     if (ai.skills && ai.skills.list && ai.skills.get) {
       const names = ai.skills.list()
       for (let j = 0; j < names.length; j++) {
         const id = names[j]
-        if (id === 'aiditor.authoring' || id === 'aiditor.runtime-authoring' || seen[id]) continue
+        if (seen[id]) continue
         const skill = ai.skills.get(id)
-        if (skill && typeof skill.auto === 'function' && skill.auto(ctx || {})) addUnique(refs, seen, id)
+        if (!skill || typeof skill.auto !== 'function') continue
+        const matched = aiditor.safeCall
+          ? aiditor.safeCall({ scope: 'ai.skill', skill: id, phase: 'auto' }, function () { return skill.auto(ctx || {}) })
+          : skill.auto(ctx || {})
+        if (matched) addSkillActivation(activations, seen, id, 'auto')
       }
     }
-    return refs
+    return activations
   }
 
-  function resolveSkills(agent, input, ctx) {
-    return resolveSkillSpecs(effectiveSkillRefs(agent, input, ctx))
+  function activationDetails(activations) {
+    return activations.map(function (activation) {
+      return {
+        id: activation.id,
+        reason: activation.reason,
+        owner: activation.owner,
+        layer: activation.layer,
+        source: activation.source,
+        hash: activation.hash,
+        promptChars: activation.promptChars,
+        toolRefs: activation.toolRefs.slice(),
+      }
+    })
   }
 
-  function resolveSkillSpecs(refs) {
-    const out = []
-    for (let i = 0; i < refs.length; i++) {
-      const skill = ai.skills.get(refs[i])
-      if (skill) out.push(Object.assign({ id: refs[i] }, skill))
-    }
-    return out
+  function resolveSkillSpecs(activations) {
+    return activations.map(function (activation) {
+      return Object.assign({ id: activation.id }, activation.spec)
+    })
   }
 
   function compactJson(value, max) {
@@ -504,7 +542,6 @@
         messageId: item.messageId,
         priority: item.priority || 0,
         interrupt: !!item.interrupt,
-        guidance: item.guidance || null,
         from: message.from || 'user',
         content: messageText(message.content).slice(0, 500),
       })
@@ -514,19 +551,16 @@
       'queue',
       'queue',
       10,
-      'Queued user messages are waiting behind the current work. Do not process them as the current request unless they are marked interrupt/guidance; use them only to avoid conflicting work and to decide whether to finish cleanly.\n' + compactJson(items, 4000),
+      'Queued user messages are waiting behind the current work. Do not process them as the current request; use them only to avoid conflicting work and to decide whether to finish cleanly.\n' + compactJson(items, 4000),
       5000
     )
   }
 
   function skillLines(agent, input, requestCtx) {
-    const specs = requestCtx && requestCtx.skillSpecs || resolveSkills(agent, input, requestCtx)
+    const specs = requestCtx && requestCtx.skillSpecs || resolveSkillSpecs(resolveSkillActivations(agent, input, requestCtx))
     const lines = []
     for (let i = 0; i < specs.length; i++) {
-      const skill = specs[i]
-      if (skill.systemPrompt) lines.push(skill.title + ': ' + skill.systemPrompt)
-      const rules = skill.rules || []
-      for (let j = 0; j < rules.length; j++) lines.push('- ' + rules[j])
+      lines.push.apply(lines, skillPromptLines(specs[i]))
     }
     return lines
   }
@@ -558,6 +592,7 @@
       'Current runtime state and available tools override older transcript claims about capabilities.',
       'Stop with a clear result when complete, or report the exact blocker when required state, permission, or user input is missing.',
       'Do not retry an equivalent failed tool call under guessed names.',
+      'Invoke tools only through the provider tool-calling interface. Never print or imitate XML tool-call markup such as <invoke> in assistant text.',
       'CURRENT_AGENT_ID: ' + (agent.id || ''),
       'CURRENT_AGENT_NAME: ' + (agent.name || ''),
       'CURRENT_PARENT_AGENT_ID: ' + (agent.parentAgentId || ''),
@@ -566,6 +601,9 @@
       lines.push('CURRENT_REQUEST_BLOCKED: Workspace-backed UI authoring requires the user to open or select a workspace.')
     }
     if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
+    if (!requestCtx || !(requestCtx.toolRefs || []).length) {
+      lines.push('AVAILABLE_TOOLS: none. Report that the required capability is unavailable instead of imitating a tool call.')
+    }
     const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
     if (skills.length) lines.push('ACTIVE_SKILLS:\n' + skills.join('\n'))
     return {
@@ -578,6 +616,28 @@
         contextLayer: 'runtime',
         contextCardId: 'runtime',
         contextPriority: 100,
+      },
+    }
+  }
+
+  function outputSchemaMessage(requestCtx) {
+    const schema = requestCtx && requestCtx.outputSchema
+    if (!schema) return null
+    return {
+      id: 'system-output-' + Date.now().toString(36),
+      from: 'system',
+      role: 'system',
+      status: 'done',
+      content: [
+        'FINAL_OUTPUT_CONTRACT:',
+        'When no tool call remains, return exactly one JSON value matching this schema.',
+        'Do not wrap the final JSON in commentary. A single ```json fenced block is accepted but plain JSON is preferred.',
+        JSON.stringify(schema),
+      ].join('\n'),
+      meta: {
+        contextLayer: 'runtime',
+        contextCardId: 'output-schema',
+        contextPriority: 95,
       },
     }
   }
@@ -639,6 +699,7 @@
 
   function prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolRefs) {
     const out = [runtimeGuideMessage(agent, requestCtx)]
+    const output = outputSchemaMessage(requestCtx)
     const workspace = workspaceContextMessage(requestCtx, toolRefs)
     const task = taskStateContextMessage(agent, input, requestCtx, toolRefs)
     const skills = skillCatalogMessage(requestCtx)
@@ -646,6 +707,7 @@
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
     const inbox = inboxContextMessage(agent, input)
     const queued = queuedContextMessage(agent, input)
+    if (output) out.push(output)
     if (workspace) out.push(workspace)
     if (task) out.push(task)
     if (skills) out.push(skills)
@@ -693,11 +755,18 @@
     const contextRefs = effectiveContextRefs(agent, input)
     const resolvedAttachments = allowedAttachments ? resolveAttachments(contextRefs, baseCtx) : []
     const attachmentRefs = allowedAttachments ? describeAttachments(contextRefs, baseCtx) : []
-    const skillRefs = effectiveSkillRefs(agent, input, baseCtx)
-    const skillSpecs = resolveSkillSpecs(skillRefs)
+    const skillActivationRecords = resolveSkillActivations(agent, input, baseCtx)
+    const skillRefs = skillActivationRecords.map(function (activation) { return activation.id })
+    const skillSpecs = resolveSkillSpecs(skillActivationRecords)
+    const skillActivations = activationDetails(skillActivationRecords)
+    const connectionName = agent.connection || ai.defaultConnection || 'mock'
+    const connectionCapabilities = ai.connectionCapabilities ? ai.connectionCapabilities(connectionName) : {}
     baseCtx.skillRefs = skillRefs
     baseCtx.skillSpecs = skillSpecs
-    const initialTools = resolveToolRefs(agent, baseCtx, skillSpecs, [])
+    baseCtx.skillActivations = skillActivations
+    baseCtx.connectionCapabilities = connectionCapabilities
+    baseCtx.outputSchema = agent.outputSchema || null
+    const initialTools = connectionCapabilities.toolCalling ? resolveToolRefs(agent, baseCtx, skillSpecs, []) : []
     const requestShell = {
       runId: runId,
       agent: agent,
@@ -709,12 +778,28 @@
       toolSpecs: resolveTools(agent, baseCtx, initialTools),
     }
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
-    const tools = resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext)
+    const tools = connectionCapabilities.toolCalling ? resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext) : []
     baseCtx.toolRefs = tools
     const toolSpecs = resolveTools(agent, baseCtx, tools)
     const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
+      for (let i = 0; i < skillActivations.length; i++) {
+        const activation = skillActivations[i]
+        ai.trace.append({
+          type: 'skill_activated',
+          runId: runId,
+          traceId: runId,
+          agentId: agent.id,
+          messageId: input && input.id || null,
+          questId: input && input.questId || null,
+          phase: 'request',
+          entry: activation.id,
+          status: 'active',
+          summary: activation.reason + ' skill: ' + activation.id,
+          meta: activation,
+        })
+      }
       ai.trace.append({
         type: 'request_built',
         runId: runId,
@@ -730,6 +815,8 @@
           toolCount: tools.length,
           toolRefs: tools.slice(),
           skillRefs: skillRefs.slice(),
+          skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
+          toolProtocol: connectionCapabilities.toolProtocol || 'none',
           contextItems: contextPack ? contextPack.items.length : 0,
           contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
         },
@@ -739,9 +826,9 @@
       runId: runId,
       agent: agent,
       actor: who,
-      connectionName: agent.connection || ai.defaultConnection || 'mock',
-      connection: agent.connection || ai.defaultConnection || 'mock',
-      connectionCapabilities: ai.connectionCapabilities ? ai.connectionCapabilities(agent.connection || ai.defaultConnection || 'mock') : {},
+      connectionName: connectionName,
+      connection: connectionName,
+      connectionCapabilities: connectionCapabilities,
       model: agent.model || '',
       input: input || null,
       messages: messages,
@@ -755,7 +842,8 @@
       toolSpecs: toolSpecs,
       skills: skillRefs,
       skillSpecs: skillSpecs,
-      responseFormat: agent.responseFormat || null,
+      skillActivations: skillActivations,
+      outputSchema: agent.outputSchema || null,
       stream: !!agent.stream,
       target: agent,
       event: input && input.event ? input.event : null,

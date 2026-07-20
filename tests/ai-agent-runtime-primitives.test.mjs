@@ -20,6 +20,7 @@ for (const file of [
   'src/ai/provider-auth.js',
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/orchestration.js',
@@ -37,6 +38,7 @@ async function flush(count = 1) {
 }
 
 ai.registerTransport('agent-primitives', {
+  toolProtocol: 'native',
   send: function () {
     return replies.shift() || { role: 'assistant', content: 'done' }
   },
@@ -104,6 +106,7 @@ await flush()
 
 const capabilityRequest = ai.makeRequest(ai.findAgent(agent.id), null, 'run_capability_test', agent.id, 0)
 assert.equal(capabilityRequest.connectionCapabilities.stream, true)
+assert.equal(capabilityRequest.connectionCapabilities.toolProtocol, 'native')
 assert.equal(capabilityRequest.connectionCapabilities.toolCalling, true)
 assert.equal(capabilityRequest.toolSpecs.some(function (tool) {
   return tool.id === 'trace-edit' && tool.capabilities && tool.capabilities.apply && tool.capabilities.write
@@ -115,5 +118,53 @@ assert.equal(events.some(function (event) { return event.type === 'provider_requ
 assert.equal(events.some(function (event) { return event.type === 'tool_preview_started' }), true)
 assert.equal(events.some(function (event) { return event.type === 'tool_apply_completed' && event.status === 'applied' }), true)
 assert.equal(events.some(function (event) { return event.type === 'run_completed' }), true)
+
+const protocolAgent = ai.createAgent({
+  name: 'Protocol Agent',
+  connection: 'agent-primitives',
+  toolRefs: ['agent.create'],
+  select: false,
+})
+replies.push({
+  role: 'assistant',
+  content: '<create_agent><name>worker</name></create_agent>',
+  finishReason: 'stop',
+})
+const protocolRun = ai.message.send(protocolAgent.id, { content: 'edit through a tool' })
+await protocolRun.promise
+const protocolMessage = ai.findAgent(protocolAgent.id).messages.at(-1)
+assert.equal(protocolMessage.status, 'error')
+assert.equal(protocolMessage.meta.errorCode, 'TOOL_PROTOCOL_INVALID')
+assert.match(protocolMessage.content, /<create_agent>/)
+
+const interruptedAgent = ai.createAgent({
+  name: 'Interrupted Agent',
+  connection: 'agent-primitives',
+  select: false,
+})
+replies.push({ role: 'assistant', content: 'partial', finishReason: 'insufficient_system_resource' })
+const interruptedRun = ai.message.send(interruptedAgent.id, { content: 'answer' })
+await interruptedRun.promise
+const interruptedMessage = ai.findAgent(interruptedAgent.id).messages.at(-1)
+assert.equal(interruptedMessage.meta.finishReason, 'insufficient_system_resource')
+assert.equal(interruptedMessage.content, 'partial')
+
+ai.registerTransport('no-tools', {
+  toolProtocol: 'none',
+  send: function () { return { role: 'assistant', content: 'no tools' } },
+})
+ai.registerConnection('no-tools', { auth: { type: 'none' }, transport: { type: 'no-tools' }, configDefaults: {} })
+const noToolAgent = ai.createAgent({
+  name: 'No Tool Agent',
+  connection: 'no-tools',
+  toolRefs: ['trace-edit'],
+  select: false,
+})
+const noToolRequest = ai.makeRequest(noToolAgent, null, 'no_tool_request', noToolAgent.id, 0)
+assert.deepEqual(noToolRequest.tools, [])
+assert.equal(noToolRequest.connectionCapabilities.toolProtocol, 'none')
+assert.equal(noToolRequest.messages.some(function (message) {
+  return message.role === 'system' && String(message.content).indexOf('AVAILABLE_TOOLS: none') >= 0
+}), true)
 
 console.log('ai agent runtime primitive tests passed')

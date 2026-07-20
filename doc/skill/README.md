@@ -10,6 +10,12 @@ through `agent.skillRefs`.
 Use the document form when an external AI system, a host app, or a project
 workspace needs the same guidance outside the bundled runtime.
 
+An AIditor host can also load one of these folders into the runtime through
+`aiditor.ai.skills.loadPackage({ workspace, root }, meta)`. The loader reads
+`SKILL.md`, indexes `references/`, `assets/`, and `scripts/`, and exposes only
+reference text for on-demand reads. Scripts are never executed by the Skill
+system; executable behavior remains a registered Tool.
+
 Skills teach workflow and taste. Exact API signatures are generated from
 structured source comments into `doc/api`, `dist/aiditor-api.json`, and runtime
 AI references. Agents should search/read those references when an API detail

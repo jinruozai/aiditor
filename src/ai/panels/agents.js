@@ -36,24 +36,6 @@
     return 'agent:' + id
   }
 
-  function makeAgentLabel(node) {
-    const wrap = ui.h('span', 'aiditor-ai-agent-label')
-    const tip = 'Status: ' + statusLabel(node.status)
-    const dot = ui.h('span', 'aiditor-ai-agent-dot aiditor-ai-agent-dot-' + node.statusClass)
-    dot.setAttribute('aria-label', tip)
-    ui.tooltip(dot, { text: tip, side: 'right', delay: 250 })
-    wrap.appendChild(dot)
-    wrap.appendChild(ui.h('span', 'aiditor-ai-agent-name', { text: node.label, title: node.label }))
-    return wrap
-  }
-
-  function makeStatus(node) {
-    const wrap = ui.h('span', 'aiditor-ai-agent-meta')
-    const count = Number(node.queuedCount || 0) + Number(node.unreadInboxCount || 0)
-    if (count) wrap.appendChild(ui.h('span', 'aiditor-ai-group-count', { text: String(count) }))
-    return wrap
-  }
-
   function compareNode(a, b) {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
     return String(a.label).localeCompare(String(b.label))
@@ -64,8 +46,32 @@
     for (let i = 0; i < nodes.length; i++) sortTree(nodes[i].children || [])
   }
 
+  function sameTree(a, b) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      const left = a[i]
+      const right = b[i]
+      if (
+        left.id !== right.id ||
+        left.label !== right.label ||
+        left.parentAgentId !== right.parentAgentId ||
+        left.status !== right.status ||
+        left.queuedCount !== right.queuedCount ||
+        left.unreadInboxCount !== right.unreadInboxCount ||
+        left.sortOrder !== right.sortOrder ||
+        !sameTree(left.children || [], right.children || [])
+      ) return false
+    }
+    return true
+  }
+
+  function sameSet(a, b) {
+    if (a.size !== b.size) return false
+    for (const value of a) if (!b.has(value)) return false
+    return true
+  }
+
   function toTreeItems(agents) {
-    const activeId = read(aiditor.ai.activeAgentId)
     const roots = []
     const byId = {}
     for (let i = 0; i < agents.length; i++) {
@@ -81,7 +87,6 @@
         statusClass: statusClass(status),
         queuedCount: (agent.queue || []).length,
         unreadInboxCount: (agent.inbox || []).filter(function (event) { return !event.consumed }).length,
-        isActive: agent.id === activeId,
         sortOrder: orderOf(agent, i),
         children: [],
       }
@@ -175,6 +180,72 @@
     ui.contextMenu({ x: ev.clientX, y: ev.clientY }, rootMenu())
   }
 
+  function agentRowTemplate() {
+    const root = ui.h('div', 'aiditor-ai-agent-row')
+    const arrow = ui.h('span', 'aiditor-ui-tree-arrow')
+    const label = ui.h('span', 'aiditor-ui-tree-label aiditor-ai-agent-label')
+    const statusTip = aiditor.signal('')
+    const dot = ui.h('span', 'aiditor-ai-agent-dot')
+    const name = ui.h('span', 'aiditor-ai-agent-name')
+    const tail = ui.h('span', 'aiditor-ai-agent-tail')
+    const count = ui.h('span', 'aiditor-ai-group-count')
+    const actions = ui.h('span', 'aiditor-ui-tree-actions aiditor-ai-agent-actions')
+    let currentNode = null
+    let currentCtx = null
+    let dotClass = ''
+
+    actions.setAttribute('data-visibility', 'selected')
+    ui.tooltip(dot, { text: statusTip, side: 'right', delay: 250 })
+    const remove = ui.iconButton({
+      icon: 'trash',
+      title: 'Delete',
+      size: 'sm',
+      kind: 'ghost',
+      onClick: function () { deleteNode(currentNode) },
+    })
+    actions.appendChild(remove)
+    label.appendChild(dot)
+    label.appendChild(name)
+    tail.appendChild(count)
+    tail.appendChild(actions)
+    root.appendChild(arrow)
+    root.appendChild(label)
+    root.appendChild(tail)
+
+    arrow.addEventListener('click', function (ev) {
+      if (!currentCtx || !currentCtx.row.hasKids) return
+      ev.stopPropagation()
+      currentCtx.toggle()
+    })
+    arrow.addEventListener('dblclick', function (ev) {
+      if (currentCtx && currentCtx.row.hasKids) ev.stopPropagation()
+    })
+    actions.addEventListener('pointerdown', function (ev) { ev.stopPropagation() })
+    actions.addEventListener('dblclick', function (ev) { ev.stopPropagation() })
+    actions.addEventListener('click', function (ev) { ev.stopPropagation() })
+
+    return {
+      root: root,
+      update: function (node, row, ctx) {
+        currentNode = node
+        currentCtx = ctx
+        arrow.textContent = row.hasKids ? (row.expanded ? '▾' : '▸') : ''
+        const tip = 'Status: ' + statusLabel(node.status)
+        statusTip.set(tip)
+        dot.setAttribute('aria-label', tip)
+        if (dotClass) dot.classList.remove(dotClass)
+        dotClass = 'aiditor-ai-agent-dot-' + node.statusClass
+        dot.classList.add(dotClass)
+        name.textContent = node.label
+        name.title = node.label
+        const total = Number(node.queuedCount || 0) + Number(node.unreadInboxCount || 0)
+        count.textContent = total ? String(total) : ''
+        count.hidden = !total
+      },
+      dispose: function () { disposeTree(root) },
+    }
+  }
+
   function factory() {
     const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-agents')
     const itemsSig = aiditor.signal([])
@@ -200,22 +271,13 @@
       expanded: expandedSig,
       multi: false,
       rowHeight: 24,
-      showArrow: 'always',
       onRowClick: function () { return 'select' },
       onSelect: function (ids) {
         if (!ids.length) return
         const node = findNode(itemsSig.peek(), ids[0])
         if (node) aiditor.ai.selectAgent(node.agentId)
       },
-      trailingSlot: makeStatus,
-      leadingSlot: function () { return null },
-      labelSlot: makeAgentLabel,
-      actionsVisibility: 'selected',
-      actions: function (node) {
-        return [
-          { icon: 'trash', title: 'Delete', onClick: function () { deleteNode(node) } },
-        ]
-      },
+      renderTemplate: agentRowTemplate,
       contextMenu: function (node) {
         return [
           { label: 'New Child Agent', icon: 'user-plus', onSelect: function () { createAgent(node.agentId) } },
@@ -244,8 +306,10 @@
 
     function syncTree() {
       const agents = readList(aiditor.ai.agents)
-      const items = toTreeItems(agents)
-      itemsSig.set(items)
+      let items = toTreeItems(agents)
+      const currentItems = itemsSig.peek()
+      if (!sameTree(currentItems, items)) itemsSig.set(items)
+      else items = currentItems
       if (!expansionSeeded) {
         expandedSig.set(expandableIds(items, new Set()))
         expansionSeeded = true
@@ -259,7 +323,7 @@
         for (let j = 0; j < path.length - 1; j++) nextExpanded.add(path[j])
       }
       knownAgentIds = nextKnown
-      expandedSig.set(nextExpanded)
+      if (!sameSet(expandedSig.peek(), nextExpanded)) expandedSig.set(nextExpanded)
       const selected = selectedSig.peek()[0]
       const active = activeNodeId() || firstAgentNodeId(items)
       if (selected !== active) selectedSig.set(active ? [active] : [])

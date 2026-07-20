@@ -38,9 +38,15 @@ inbox
 toolRefs
 skillRefs
 contextRefs
+outputSchema
 ```
 
 Parent/child is an agent relationship, not a new runtime layer.
+
+These JavaScript functions are trusted host APIs. In particular,
+`aiditor.ai.updateAgent(id, patch)` is not exposed to the model as an arbitrary
+state mutation tool. Model-driven profile changes use the constrained,
+permission-checked `agent.configure` contract described below.
 
 The tree is the primary agent topology. Child agents are not anonymous helper
 threads; they are addressable runtime nodes with their own transcript, queue,
@@ -84,11 +90,15 @@ for an agent.
 Implemented APIs:
 
 ```js
-aiditor.ai.skills.register(name, skill)
-aiditor.ai.skills.unregister(name)
+aiditor.ai.skills.register(name, skill, meta?)
+aiditor.ai.skills.unregister(name, { owner? }?)
+aiditor.ai.skills.unregisterOwner(owner)
 aiditor.ai.skills.unregisterPrefix(prefix)
 aiditor.ai.skills.get(name)
-aiditor.ai.skills.list(prefix)
+aiditor.ai.skills.list(prefixOrFilter?)
+aiditor.ai.skills.meta(name)
+aiditor.ai.skills.loadPackage(input, meta?)
+aiditor.ai.skills.readResource(skillId, path)
 ```
 
 Agents enable skills by listing skill ids in `agent.skillRefs`. During request
@@ -127,6 +137,13 @@ aiditor://skills/aiditor.library-authoring
 
 Agents use this index to choose the right workflow instead of relying on a
 large always-on prompt.
+
+Skill registrations use the same exact-owner lifecycle as other runtime
+contributions. File-backed `SKILL.md` packages are optional adapters over the
+bounded workspace contract; package scripts are never executed. Request traces
+record each effective skill's activation reason, owner/source/hash, prompt
+characters, and referenced tools. See [ai-skills.md](./ai-skills.md) for the
+complete contract.
 
 Skills are not a fourth AI action registry:
 
@@ -171,6 +188,32 @@ aiditor.ai.agent.messages(agentId, options, actor)
 Messages may contain text, rich prompt content, context refs, attachments, tool
 calls, quest links, and runtime status.
 
+Runtime-owned message metadata separates two identities:
+
+```text
+meta.runId       one provider/runtime execution, used by trace and diagnostics
+meta.responseId  one user-visible response chain, used by transcript grouping
+```
+
+A response may contain several provider turns and may pause across delegated
+quests. Tool continuations, post-delegation continuations, and matching inbox
+continuations retain the originating `responseId`; each provider execution still
+gets its own `runId`. A delegated child starts its own response chain, while its
+quest carries the parent's source response id back in the completion event.
+
+The transcript renders the response footer only on the last assistant message in
+that chain, after no chain message is queued/running and every quest dispatched by
+the chain is terminal. Copy and usage metrics aggregate the complete response.
+Internal run completion must never be presented as user-visible response
+completion.
+
+Footer metrics use one consistent response-tree scope. Duration is wall-clock
+latency from the root input being queued until the last related continuation
+finishes; parallel child durations are not added together. Token, cost, and tool
+counts include the root response plus recursively delegated response chains, with
+each `{agentId, responseId}` counted once. Copy text remains limited to the visible
+root transcript rather than embedding child transcripts.
+
 Transcript display uses the normalized message part pipeline defined in
 [ai-message-rendering.md](./ai-message-rendering.md). Provider-specific content
 blocks normalize into common parts such as text, code, image, file, reference,
@@ -178,6 +221,27 @@ attachment, error, and fallback card. Host projects may register display-only
 renderers for domain card kinds without changing the built-in transcript panel.
 Ordinary text is rendered as safe Markdown; structured provider blocks and host
 cards continue through the renderer registry.
+
+### Structured Output
+
+`outputSchema` is an optional Agent profile field for final machine-readable
+results. It is a JSON-schema subset shared with tool schema validation, not a
+provider request object. It supports scalar/object/array types, required and
+additional properties, enum/const, item and length/range constraints, and
+`anyOf`/`oneOf`/`allOf`/`not` composition.
+
+The final assistant turn is parsed only when it has no tool calls. On success,
+the message keeps both forms:
+
+```text
+message.content    raw provider JSON text
+message.output     parsed and schema-validated value
+```
+
+`quest.result` exposes the parsed value as `output`. Invalid structured output
+is a run failure with the raw provider text retained for diagnosis. This is
+output validation, not UI card inference: arbitrary JSON replies are not
+automatically rendered as domain components.
 
 ## Queue
 
@@ -195,6 +259,12 @@ aiditor.ai.message.send(agentId, spec)
 The queue lets an agent finish current work cleanly while newer messages wait,
 unless a message is marked as an interrupt.
 
+`interrupt: false` appends the new message normally. `interrupt: true` stops the
+target's current quest with `stopReason: "cancelled"`, places the new message at
+the front of the queue, and starts it when the runtime slot is available. The
+message `content` is the complete task instruction; there is no separate
+guidance channel with weaker or ambiguous delivery semantics.
+
 ## Run Scheduler
 
 The runtime owns one clear run loop per agent. It schedules work, streams model
@@ -205,7 +275,7 @@ Implemented abilities:
 
 ```js
 aiditor.ai.scheduleAgent(agentId)
-aiditor.ai.stopAgent(agentId, actor)
+aiditor.ai.stopAgent(agentId)
 aiditor.ai.resumeAgent(agentId, actor)
 aiditor.ai.flushToolResults(agentId)
 aiditor.ai.configureRuntime(options)
@@ -249,6 +319,24 @@ The built-in Agents panel creates user-facing agents with the focused
 `orchestration` skill. Hosts using `aiditor.ai.createAgent()` directly choose
 their own `skillRefs`; no global tool set is injected as a fallback.
 
+Tool availability is resolved per request from the agent, active skills, runtime
+context, permissions, and connection capability. An empty tool set stays empty;
+the runtime never falls back to every registered tool. The request trace records
+`skillRefs`, `toolRefs`, `toolCount`, and `toolProtocol`, which is the source of
+truth when diagnosing why a model did or did not receive a tool.
+
+This is also the discovery contract. The model receives the complete schemas for
+its effective tools, a bounded catalog for inactive skills, and context/reference
+ids captured by the host or attached to the task. A global registry-enumeration
+tool is intentionally absent: it would reveal unavailable capabilities and
+duplicate request-time filtering without making an allowed capability usable.
+
+Model-visible tool names are provider-safe request aliases. Skills and host code
+continue to use public dotted ids such as `agent.delegate`; aliases never enter
+permissions, history, tool records, or project data. Models must invoke tools
+through the provider's declared tool protocol and must not print XML-like tool
+markup into assistant text.
+
 `agent.send` and `agent.delegate` may provide a smaller per-quest `budget` with
 the same three fields. A per-quest value can only tighten the runtime ceiling.
 When a limit is reached the quest becomes `stopped` with stable `stopReason`
@@ -266,6 +354,27 @@ failed      the same operation shape has failed and retrying would be guessing
 ```
 
 Manual `agent.stop` uses the same stop path with `stopReason: "cancelled"`.
+It is an emergency control for the target's current run. When the caller knows
+the delegated task identity, `quest.cancel` is the precise operation and does
+not affect unrelated queued or running work.
+
+The trusted host API `aiditor.ai.stopAgent(agentId)` returns a boolean because
+the host already owns the reactive Agent state. The model-facing `agent.stop`
+tool returns a self-describing result:
+
+```text
+outcome            stopped | not_running
+stopped            boolean
+agentId
+questId            active quest before the operation, or null
+messageId          active message before the operation, or null
+previousStatus
+status              current Agent status
+stopReason          cancelled when stopped, otherwise null
+```
+
+Unknown targets and permission denial are tool errors, not successful outcome
+values. `not_running` means the target exists but has no active run to stop.
 
 ## Quests
 
@@ -280,6 +389,7 @@ aiditor.ai.updateQuest(agentId, questId, patch)
 aiditor.ai.updateQuestPlan(agentId, questId, plan)
 aiditor.ai.updateQuestStep(agentId, questId, stepId, patch)
 aiditor.ai.agent.send(toAgentId, spec)
+aiditor.ai.quest.cancel(agentId, questId, actor)
 ```
 
 Built-in orchestration tools include:
@@ -287,6 +397,7 @@ Built-in orchestration tools include:
 ```text
 agent.read
 agent.create
+agent.configure
 agent.delegate
 agent.reparent
 agent.delete
@@ -294,13 +405,43 @@ agent.send
 agent.stop
 quest.read
 quest.result
+quest.cancel
 message.read
 ```
 
 These tools are part of the AI runtime, not product domain tools.
 
-`agent.read({})` lists every agent readable by the caller. Passing `agentId`
-returns the full readable record. There is no separate `agent.list` concept.
+`agent.read` has two bounded modes:
+
+```text
+agentId present        return the readable profile and runtime summary
+agentId omitted        list one readable tree level
+recursive: true        include the readable subtree below parentAgentId
+```
+
+Without arguments an agent sees its direct children and the user sees root
+agents. Exact reads include configuration, status, counts, and recent quest
+summaries. They never return full messages, queue bodies, inbox bodies, memory,
+or arbitrary state. Host code that owns the runtime can use the JavaScript store
+APIs when it genuinely needs those records.
+
+`agent.configure` updates an existing descendant's stable profile:
+
+```text
+name
+connection
+model
+systemPrompt
+outputSchema
+contextRefs
+skillRefs
+toolRefs
+```
+
+It uses preview/apply, rejects unknown connection/skill/tool ids, and cannot
+modify parentage, permissions, status, messages, memory, state, or metadata.
+Agents cannot configure themselves. A configuration change affects requests
+built after apply; an already running request retains its original snapshot.
 
 `agent.delegate` has two exclusive modes:
 
@@ -342,6 +483,40 @@ This is not a project workflow engine. It is a lightweight task-state surface fo
 tree agents so a parent can understand what a child is doing, what completed,
 and what blocked without reading a whole transcript.
 
+`quest.read` reads one exact quest when `questId` is present. Without `questId`
+it returns at most 20 readable quest summaries by default, newest first; callers
+may filter by `status` (`queued`, `running`, `completed`, `failed`, or `stopped`)
+and raise `limit` up to 50. The user may read all quests on a target; an agent may
+read only quests it initiated.
+
+`quest.cancel` is idempotent and task-specific:
+
+```text
+queued quest       remove its request message from the queue and stop the quest
+running quest      abort only when it is the matching active quest
+terminal quest     return the terminal state without changing it
+```
+
+Its result always includes the current Quest record plus:
+
+```text
+outcome            cancelled | already_terminal
+cancelled          boolean
+previousStatus     Quest status before the operation
+```
+
+Cancellation emits the normal `quest.stopped` inbox event to the initiating
+agent. It never clears unrelated queued work. Only the user or the quest's
+initiating agent may cancel it.
+
+The model query surface intentionally remains structural rather than becoming a
+runtime database API. `agent.read` reads an exact Agent, one child level, or an
+explicit subtree; it does not add name/status search or cursor pagination.
+`quest.read` is scoped to one target Agent and does not aggregate an ownership
+subtree. Parents already receive push inbox events and bounded recent Quest
+summaries; trusted host diagnostics can index `aiditor.ai.agents()` when a large
+cross-tree operational view is genuinely needed.
+
 ## Inbox
 
 Agents receive completion events through inbox events. This prevents child-agent
@@ -355,6 +530,17 @@ aiditor.ai.markInboxEventConsumed(agentId, eventId)
 ```
 
 The runtime can enqueue a continuation when actionable inbox events exist.
+Inbox is a push-based internal delivery mechanism, not a model polling API.
+Parents recover task state through bounded `agent.read`, `quest.read`, and exact
+`quest.result` calls instead of consuming the inbox manually.
+
+## Message Records
+
+Messages are append-only runtime facts. `message.read` retrieves one known
+message id, while trusted host code may use `aiditor.ai.agent.messages()` for a
+bounded transcript view. The model tool surface intentionally has no message
+list, edit, or delete operation: rewriting history could invalidate provider
+message order, tool-call/result pairing, compaction records, and audit trails.
 
 ## Active Run State
 
@@ -433,6 +619,11 @@ message-live-strip
 message-virtualizer
 ```
 
+`aiditor.ai.agentVersion(agentId)` is the keyed lifecycle/configuration revision
+selector used by panels that depend on related Agents. It is intentionally
+separate from per-message versions, so descendant streaming tokens do not force
+the parent transcript to recompute response-tree metrics.
+
 Rules:
 
 1. The transcript renders only the visible window plus small overscan.
@@ -485,6 +676,19 @@ permission audit log.
 Trace events are deliberately compact. Large tool results, full files, and
 provider payloads stay in transcript/tool/result storage; trace only records the
 timeline and enough metadata to debug "what happened and why".
+
+Provider completion failures use stable codes:
+
+```text
+PROVIDER_OUTPUT_TRUNCATED
+PROVIDER_CONTENT_BLOCKED
+PROVIDER_INTERRUPTED
+TOOL_PROTOCOL_INVALID
+```
+
+The raw `finishReason` is preserved in message metadata and trace events. The
+runtime does not silently convert these failures into `idle`, and it does not
+execute text that only imitates a tool call.
 
 ## Tool Call Lifecycle
 
@@ -584,16 +788,19 @@ Implemented persistence APIs:
 
 ```js
 aiditor.ai.snapshot()
-aiditor.ai.save()
+await aiditor.ai.save()
 aiditor.ai.restore()
 aiditor.ai.configurePersistence(options)
-aiditor.ai.clearStoredState()
+await aiditor.ai.clearStoredState()
+await aiditor.ai.persistence.ready()
+await aiditor.ai.persistence.flush()
 ```
 
 Persistence belongs to the AI runtime. Domain persistence remains outside
 AIditor Core.
 
-Local browser persistence is a compact recovery snapshot, not a full transcript
-archive. The runtime must write bounded, deterministic snapshots, compact before
-writing when the payload exceeds the configured budget, and avoid repeated quota
-error loops. See [ai-persistence.md](./ai-persistence.md).
+Local browser persistence writes the complete JSON-safe transcript to IndexedDB.
+The small `localStorage` record contains Agent bootstrap metadata only. Model
+context compaction and optional runtime checkpoints remain separate projections;
+neither is the transcript archive. See
+[ai-persistence.md](./ai-persistence.md).

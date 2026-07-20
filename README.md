@@ -86,8 +86,9 @@ specific editor product.
   paint while JS/DOM state is preserved for fast tab switching.
 - **Editor primitives**: commands, menus, shortcuts, settings, history,
   inspector, logs, workspace IO, and reusable UI controls.
-- **Optional AI Host**: agents, providers, tools, context references,
-  operations, permissions, ChangeSet review, and compaction.
+- **Optional AI Host**: tree agents, providers, tools, structured outputs,
+  context references, permissions, ChangeSet review, compaction, recoverable
+  checkpoints, and deterministic eval primitives.
 - **Optional Extension Runtime**: package, review, install, disable, and
   uninstall contributions into the existing registries.
 
@@ -377,21 +378,23 @@ and applyable mutations. ChangeSets group reviewed changes. Permission checks,
 workspace writes, operation apply, extension install, and host-adapter calls all
 go through one resolver.
 
-AI runtime state can be persisted with bounded localStorage snapshots:
+AI transcripts are durably persisted in IndexedDB, independently from the
+bounded context sent to a model:
 
 ```js
 aiditor.ai.configurePersistence({
   namespace: 'my-editor',
-  maxBytes: 2 * 1024 * 1024,
-  maxMessagesPerAgent: 80,
-  toolResultPolicy: 'compact',
 })
+
+await aiditor.ai.persistence.ready()
 ```
 
-Persistence keeps recoverable compact state, not a full transcript archive.
-Separate apps should use separate namespaces; when omitted, AIditor derives one
-from the current location. New agents inherit the last selected connection/model
-when available, then fall back to the active/default connection.
+Persistence keeps the complete JSON-safe transcript, including older messages
+and tool results. `localStorage` contains only a small synchronous Agent
+bootstrap manifest. Separate apps should use separate namespaces; when omitted,
+AIditor derives one from the current location. New agents inherit the last
+selected connection/model when available, then fall back to the active/default
+connection.
 
 `aiditor-ai` and `aiditor-full` also include built-in authoring skills:
 
@@ -403,6 +406,11 @@ when available, then fall back to the active/default connection.
 Generated API and skill references are available to agents through
 `aiditor://api` and `aiditor://skills`.
 
+Hosts can register inline `SkillSpec` profiles or load a standard `SKILL.md`
+folder from the bounded workspace with `aiditor.ai.skills.loadPackage()`.
+Package references are read on demand; package scripts are never executed and
+all executable behavior remains in the permission-checked Tool registry.
+
 ## Extension Runtime
 
 Extensions package contributions into existing registries:
@@ -411,6 +419,7 @@ Extensions package contributions into existing registries:
 components
 dock panels
 tools
+skills
 context providers
 reference providers
 operations
@@ -471,6 +480,7 @@ in `src/`.
 - [Inspector](./doc/inspector.md)
 - [AI Host](./doc/ai.md)
 - [AI persistence](./doc/ai-persistence.md)
+- [AI evals](./doc/ai-evals.md)
 - [Extension Runtime](./doc/extensions.md)
 - [Generated API docs](./doc/api/index.md)
 - [Runtime authoring skill](./doc/skill/aiditor-runtime-authoring/SKILL.md)

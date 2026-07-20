@@ -58,6 +58,7 @@
     m.contributes.components = normalizeComponents(m)
     m.contributes.dockPanels = normalizeDockPanels(m)
     m.contributes.tools = normalizePublicEntries(m, m.contributes.tools)
+    m.contributes.skills = normalizePublicEntries(m, m.contributes.skills)
     m.contributes.context = normalizePublicEntries(m, m.contributes.context)
     m.contributes.references = normalizePublicEntries(m, m.contributes.references)
     m.contributes.operations = normalizePublicEntries(m, m.contributes.operations)
@@ -205,7 +206,7 @@
   }
 
   function validatePublicNames(manifest, errors) {
-    const groups = ['components', 'tools', 'context', 'references', 'operations', 'commands', 'menus']
+    const groups = ['components', 'tools', 'skills', 'context', 'references', 'operations', 'commands', 'menus']
     for (let i = 0; i < groups.length; i++) {
       const name = groups[i]
       const list = manifest.contributes[name] || []

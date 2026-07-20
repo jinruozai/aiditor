@@ -17,6 +17,7 @@ for (const file of [
   'src/ai/provider-auth.js',
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/orchestration.js',
@@ -35,6 +36,7 @@ async function flush(count = 1) {
 }
 
 ai.registerTransport('quest-capture', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     requests.push(request)
     return { role: 'assistant', content: replies.shift() || 'done' }
@@ -82,9 +84,30 @@ assert.equal(ai.findAgent(parent.id).inbox.some(function (event) {
   return event.type === 'quest.completed' && event.questId === quest.questId
 }), true)
 
+ai.registerTransport('quest-failure', {
+  toolProtocol: 'native',
+  send: function () { throw new Error('child provider failed') },
+})
+ai.registerConnection('quest-failure', { auth: { type: 'none' }, transport: { type: 'quest-failure' }, configDefaults: {} })
+const failingChild = ai.createAgent({ name: 'Failing Child', parentAgentId: parent.id, connection: 'quest-failure' })
+const failedQuest = ai.agent.send(failingChild.id, {
+  fromAgentId: parent.id,
+  sourceResponseId: 'response-failure',
+  content: 'fail this task',
+})
+await failedQuest.promise
+await flush(2)
+assert.equal(ai.findQuest(failingChild.id, failedQuest.questId).status, 'failed')
+assert.equal(ai.findAgent(parent.id).inbox.some(function (event) {
+  return event.type === 'quest.failed' &&
+    event.questId === failedQuest.questId &&
+    event.meta.responseId === 'response-failure'
+}), true)
+
 let release
 const held = new Promise(function (resolve) { release = resolve })
 ai.registerTransport('quest-hold', {
+  toolProtocol: 'native',
   send: function () { return held.then(function () { return { role: 'assistant', content: 'released' } }) },
 })
 ai.registerConnection('quest-hold', { auth: { type: 'none' }, transport: { type: 'quest-hold' }, configDefaults: {} })
@@ -94,11 +117,11 @@ assert.equal(ai.findAgent(queued.id).status, 'running')
 const secondQueued = ai.message.send(queued.id, { content: 'after' })
 assert.equal(ai.message.read(queued.id, secondQueued.messageId, 'user').status, 'queued')
 assert.equal(ai.findAgent(queued.id).queue.length, 1)
-const guidedQueued = ai.message.send(queued.id, { content: 'guided after', guidance: 'Prefer this after the held task.' })
+const finalQueued = ai.message.send(queued.id, { content: 'final queued task' })
 assert.equal(ai.findAgent(queued.id).queue.length, 2)
-const guidedRequest = ai.makeRequest(ai.findAgent(queued.id), ai.message.read(queued.id, firstQueued.messageId, 'user'), 'run_guided_queue', queued.id, 1)
-assert.equal(guidedRequest.messages.some(function (message) {
-  return message.role === 'system' && message.content.includes('Queued user messages') && message.content.includes('guided after') && message.content.includes('Prefer this after the held task.')
+const queuedRequest = ai.makeRequest(ai.findAgent(queued.id), ai.message.read(queued.id, firstQueued.messageId, 'user'), 'run_queued_context', queued.id, 1)
+assert.equal(queuedRequest.messages.some(function (message) {
+  return message.role === 'system' && message.content.includes('Queued user messages') && message.content.includes('final queued task')
 }), true)
 release()
 await firstQueued.promise
@@ -108,7 +131,55 @@ assert.equal(ai.findAgent(queued.id).messages.some(function (message) {
 }), true)
 assert.equal(ai.findAgent(queued.id).queue.length, 0)
 
+let releaseQueuedCancel
+const queuedCancelHold = new Promise(function (resolve) { releaseQueuedCancel = resolve })
+ai.registerTransport('quest-cancel-queued', {
+  toolProtocol: 'native',
+  send: function () { return queuedCancelHold.then(function () { return { role: 'assistant', content: 'active complete' } }) },
+})
+ai.registerConnection('quest-cancel-queued', { auth: { type: 'none' }, transport: { type: 'quest-cancel-queued' }, configDefaults: {} })
+const queuedCancelAgent = ai.createAgent({ name: 'Queued Cancel', parentAgentId: parent.id, connection: 'quest-cancel-queued' })
+const activeCancelQuest = ai.agent.send(queuedCancelAgent.id, { fromAgentId: parent.id, content: 'active quest' })
+const queuedCancelQuest = ai.agent.send(queuedCancelAgent.id, { fromAgentId: parent.id, content: 'cancel queued quest' })
+assert.equal(ai.findAgent(queuedCancelAgent.id).activeQuestId, activeCancelQuest.questId)
+assert.equal(ai.findAgent(queuedCancelAgent.id).queue.length, 1)
+const queuedCancellation = ai.quest.cancel(queuedCancelAgent.id, queuedCancelQuest.questId, parent.id)
+assert.equal(queuedCancellation.cancelled, true)
+assert.equal(queuedCancellation.outcome, 'cancelled')
+assert.equal(queuedCancellation.previousStatus, 'queued')
+assert.equal(queuedCancellation.status, 'stopped')
+assert.equal(queuedCancellation.stopReason, 'cancelled')
+assert.equal(ai.findAgent(queuedCancelAgent.id).activeQuestId, activeCancelQuest.questId)
+assert.equal(ai.findAgent(queuedCancelAgent.id).queue.length, 0)
+const repeatedQueuedCancellation = ai.quest.cancel(queuedCancelAgent.id, queuedCancelQuest.questId, parent.id)
+assert.equal(repeatedQueuedCancellation.cancelled, false)
+assert.equal(repeatedQueuedCancellation.outcome, 'already_terminal')
+assert.equal(repeatedQueuedCancellation.previousStatus, 'stopped')
+assert.equal(ai.quest.cancel(queuedCancelAgent.id, activeCancelQuest.questId, sibling.id), null)
+releaseQueuedCancel()
+await flush(2)
+
+let releaseRunningCancel
+const runningCancelHold = new Promise(function (resolve) { releaseRunningCancel = resolve })
+ai.registerTransport('quest-cancel-running', {
+  toolProtocol: 'native',
+  send: function () { return runningCancelHold.then(function () { return { role: 'assistant', content: 'late result' } }) },
+})
+ai.registerConnection('quest-cancel-running', { auth: { type: 'none' }, transport: { type: 'quest-cancel-running' }, configDefaults: {} })
+const runningCancelAgent = ai.createAgent({ name: 'Running Cancel', parentAgentId: parent.id, connection: 'quest-cancel-running' })
+const runningCancelQuest = ai.agent.send(runningCancelAgent.id, { fromAgentId: parent.id, content: 'cancel active quest' })
+const runningCancellation = ai.quest.cancel(runningCancelAgent.id, runningCancelQuest.questId, parent.id)
+assert.equal(runningCancellation.cancelled, true)
+assert.equal(runningCancellation.outcome, 'cancelled')
+assert.equal(runningCancellation.previousStatus, 'running')
+assert.equal(runningCancellation.status, 'stopped')
+assert.equal(runningCancellation.stopReason, 'cancelled')
+assert.equal(ai.findAgent(runningCancelAgent.id).status, 'idle')
+releaseRunningCancel()
+await flush(2)
+
 ai.registerTransport('delegate-parent', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     if (request.messages.some(function (message) { return message.role === 'tool' })) {
       return { role: 'assistant', content: 'delegated' }
@@ -137,6 +208,7 @@ ai.tools.register('approval-edit', {
   apply: function (preview) { return { applied: true, preview: preview } },
 })
 ai.registerTransport('approval-flow', {
+  toolProtocol: 'native',
   send: function () {
     approvalRequests += 1
     if (approvalRequests === 1) {
@@ -172,6 +244,7 @@ ai.tools.register('approval-run-edit', {
   apply: function (preview) { return { applied: true, preview: preview } },
 })
 ai.registerTransport('approval-run-flow', {
+  toolProtocol: 'native',
   send: function () {
     approvalRunRequests += 1
     if (approvalRunRequests === 1) {
@@ -208,6 +281,7 @@ ai.tools.register('full-access-edit', {
   apply: function (preview) { return { applied: true, preview: preview } },
 })
 ai.registerTransport('full-access-flow', {
+  toolProtocol: 'native',
   send: function () {
     fullAccessRequests += 1
     if (fullAccessRequests === 1) {
@@ -239,6 +313,7 @@ ai.tools.register('capped-read', {
   run: function (args) { return { ok: true, id: args.id } },
 })
 ai.registerTransport('capped-tool-flow', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     cappedRequests += 1
     if (cappedRequests === 1) {
@@ -278,6 +353,7 @@ ai.tools.register('budget-read', {
   run: function () { return { ok: true } },
 })
 ai.registerTransport('budget-turns', {
+  toolProtocol: 'native',
   send: function () {
     return {
       role: 'assistant',
@@ -302,6 +378,7 @@ assert.equal(ai.findAgent(parent.id).inbox.some(function (event) {
 }), true)
 
 ai.registerTransport('budget-tokens', {
+  toolProtocol: 'native',
   send: function () {
     return {
       role: 'assistant',
@@ -326,6 +403,7 @@ assert.equal(tokenBudgetQuest.usage.totalTokens, 50)
 
 let budgetApprovalRequests = 0
 ai.registerTransport('budget-approval', {
+  toolProtocol: 'native',
   send: function () {
     budgetApprovalRequests++
     return {
@@ -354,6 +432,7 @@ assert.equal(ai.quest.read(budgetApprovalAgent.id, budgetApprovalSend.questId, p
 let releaseTimeout
 const timeoutHold = new Promise(function (resolve) { releaseTimeout = resolve })
 ai.registerTransport('budget-timeout', {
+  toolProtocol: 'native',
   send: function () { return timeoutHold.then(function () { return { role: 'assistant', content: 'too late' } }) },
 })
 ai.registerConnection('budget-timeout', { auth: { type: 'none' }, transport: { type: 'budget-timeout' }, configDefaults: {} })
@@ -373,6 +452,7 @@ await flush(2)
 let releaseInterrupt
 const interruptedHold = new Promise(function (resolve) { releaseInterrupt = resolve })
 ai.registerTransport('interrupt-hold', {
+  toolProtocol: 'native',
   send: function (connection, request, ctx) {
     const last = request.messages[request.messages.length - 1]
     if (last.content === 'slow') {
@@ -430,6 +510,7 @@ const limitedB = new Promise(function (resolve) { releaseLimitedB = resolve })
 let limitedRunning = 0
 let limitedPeak = 0
 ai.registerTransport('limited-concurrency', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     limitedRunning++
     limitedPeak = Math.max(limitedPeak, limitedRunning)
@@ -463,6 +544,7 @@ const batchA = new Promise(function (resolve) { releaseBatchA = resolve })
 const batchB = new Promise(function (resolve) { releaseBatchB = resolve })
 const batchRequests = []
 ai.registerTransport('batch-child', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     return (request.agent.name === 'Batch A' ? batchA : batchB).then(function (text) {
       return { role: 'assistant', content: text }
@@ -471,6 +553,7 @@ ai.registerTransport('batch-child', {
 })
 ai.registerConnection('batch-child', { auth: { type: 'none' }, transport: { type: 'batch-child' }, configDefaults: {} })
 ai.registerTransport('batch-parent', {
+  toolProtocol: 'native',
   send: function (connection, request) {
     batchRequests.push(request)
     const event = request.input && request.input.meta && request.input.meta.runtimeEvent
@@ -494,9 +577,12 @@ const batchRun = ai.message.send(batchParent.id, { content: 'delegate two and do
 await batchRun.promise
 await flush(3)
 const batchParentMessages = ai.findAgent(batchParent.id).messages
+const batchResponseId = batchRun.message.meta.responseId
+assert.equal(batchResponseId, batchRun.message.id)
 const actionMessage = batchParentMessages.find(function (message) {
   return message.toolCalls && message.toolCalls.length === 2
 })
+assert.equal(actionMessage.meta.responseId, batchResponseId)
 assert.equal(actionMessage.content, '')
 assert.equal(actionMessage.meta.actionNote, 'premature local title')
 assert.equal(batchParentMessages.some(function (message) { return message.content === 'local title' }), true)
@@ -507,6 +593,9 @@ assert.equal(postDelegationRequest.input.meta.delegated.length, 2)
 assert.equal(postDelegationRequest.input.meta.delegated[0].agentId, batchChildA.id)
 assert.equal(postDelegationRequest.input.meta.delegated[0].questId != null, true)
 assert.equal(postDelegationRequest.input.meta.delegated[0].messageId != null, true)
+assert.equal(postDelegationRequest.input.meta.responseId, batchResponseId)
+assert.equal(ai.findAgent(batchParent.id).messages.find(function (message) { return message.content === 'local title' }).meta.responseId, batchResponseId)
+assert.equal(ai.findQuest(batchChildA.id, postDelegationRequest.input.meta.delegated[0].questId).meta.sourceResponseId, batchResponseId)
 releaseBatchA('result a')
 await flush(5)
 const firstInbox = batchRequests.find(function (request) {
@@ -514,6 +603,7 @@ const firstInbox = batchRequests.find(function (request) {
 })
 assert.equal(firstInbox.input.meta.events.length, 1)
 assert.equal(firstInbox.input.meta.pendingQuests.length, 1)
+assert.equal(firstInbox.input.meta.responseId, batchResponseId)
 assert.equal(ai.findAgent(batchParent.id).messages.some(function (message) { return message.content === 'handled 1' }), true)
 releaseBatchB('result b')
 await flush(5)

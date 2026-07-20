@@ -9,6 +9,8 @@
     spec = spec || {}
     return {
       id: spec.id || 'tc_' + Date.now().toString(36) + '_' + nextToolCallId++,
+      providerCallId: spec.providerCallId || null,
+      providerName: spec.providerName || null,
       toolId: spec.toolId || spec.name || spec.tool || '',
       name: spec.name || spec.toolId || spec.tool || '',
       args: spec.args || {},

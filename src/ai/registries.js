@@ -6,6 +6,7 @@
   const tools = {}
   const toolMeta = {}
   const skills = {}
+  const skillMeta = {}
   const contextProviders = {}
   const contextProviderMeta = {}
   const agentTemplates = {}
@@ -14,6 +15,27 @@
   const matchesPrefix = aiditor.names.matchesPrefix
 
   function keys(obj) { return Object.keys(obj) }
+
+  function shorthandSchema(value, path) {
+    if (typeof value !== 'string') return normalizeSchemaNode(value || {}, path)
+    if (value === 'any') return {}
+    if (value === 'array') return { type: 'array' }
+    return { type: value }
+  }
+
+  function normalizeSchemaNode(schema, path) {
+    return ai.schema.normalize(schema, path)
+  }
+
+  function normalizeToolSchema(schema) {
+    if (schema == null) return { type: 'object', properties: {} }
+    if (typeof schema !== 'object' || Array.isArray(schema)) throw new Error('Invalid tool schema at schema')
+    if (!Object.keys(schema).length) return { type: 'object', properties: {} }
+    if (schema.type) return normalizeSchemaNode(schema, 'schema')
+    const properties = {}
+    Object.keys(schema).forEach(function (key) { properties[key] = shorthandSchema(schema[key], 'schema.properties.' + key) })
+    return { type: 'object', properties: properties }
+  }
 
   function normalizeMeta(meta) {
     if (aiditor.runtime && aiditor.runtime.registrationMeta) meta = aiditor.runtime.registrationMeta(meta)
@@ -35,6 +57,7 @@
 
   function registerTool(name, tool, meta) {
     assertFree('ai.tools', tools, name, meta)
+    tool.schema = normalizeToolSchema(tool.schema)
     tools[name] = tool
     toolMeta[name] = normalizeMeta(meta)
     return tool
@@ -120,20 +143,111 @@
     return removed
   }
 
+  function normalizeStringList(value, field) {
+    if (value == null) return []
+    if (!Array.isArray(value)) throw new Error('Invalid skill ' + field + ': expected array')
+    return value.map(function (item) { return String(item) })
+  }
+
+  function normalizeSkillResources(value) {
+    if (value == null) return []
+    if (!Array.isArray(value)) throw new Error('Invalid skill resources: expected array')
+    return value.map(function (item) {
+      if (!item || typeof item !== 'object' || !item.path) throw new Error('Invalid skill resource: path is required')
+      return {
+        path: String(item.path),
+        kind: String(item.kind || 'reference'),
+        size: item.size == null ? null : Number(item.size),
+        hash: item.hash == null ? null : String(item.hash),
+        mime: item.mime == null ? null : String(item.mime),
+      }
+    })
+  }
+
+  function skillFingerprint(name, skill) {
+    const text = JSON.stringify([
+      name,
+      skill.title,
+      skill.description,
+      skill.whenToUse,
+      skill.whenNotToUse,
+      skill.systemPrompt,
+      skill.rules,
+      skill.examples,
+      skill.tools,
+      skill.relatedApis,
+      skill.resources,
+    ])
+    let hash = 2166136261
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i)
+      hash = Math.imul(hash, 16777619) >>> 0
+    }
+    return 'aiditor-fnv1a-' + hash.toString(16)
+  }
+
+  function normalizeSkill(name, skill) {
+    if (!skill || typeof skill !== 'object' || Array.isArray(skill)) throw new Error('Invalid skill "' + name + '"')
+    if (skill.auto != null && typeof skill.auto !== 'function') throw new Error('Invalid skill auto predicate: ' + name)
+    if (skill.readResource != null && typeof skill.readResource !== 'function') throw new Error('Invalid skill resource reader: ' + name)
+    const normalized = Object.assign({}, skill, {
+      id: name,
+      title: String(skill.title || name),
+      description: String(skill.description || ''),
+      whenToUse: String(skill.whenToUse || ''),
+      whenNotToUse: String(skill.whenNotToUse || ''),
+      systemPrompt: String(skill.systemPrompt || ''),
+      rules: normalizeStringList(skill.rules, 'rules'),
+      examples: Array.isArray(skill.examples) ? skill.examples.slice() : [],
+      tools: normalizeStringList(skill.tools, 'tools'),
+      relatedApis: normalizeStringList(skill.relatedApis, 'relatedApis'),
+      resources: normalizeSkillResources(skill.resources),
+      docPath: String(skill.docPath || ''),
+    })
+    return normalized
+  }
+
+  function normalizeSkillMeta(name, skill, meta) {
+    if (aiditor.runtime && aiditor.runtime.registrationMeta) meta = aiditor.runtime.registrationMeta(meta)
+    meta = meta || {}
+    const normalized = normalizeMeta(meta)
+    normalized.source = String(meta.source || normalized.layer || 'runtime')
+    normalized.hash = String(meta.hash || skill.hash || skillFingerprint(name, skill))
+    return normalized
+  }
+
   function registerSkill(name, skill, meta) {
     assertFree('ai.skills', skills, name, meta)
-    skills[name] = skill
-    return skill
+    const normalized = normalizeSkill(name, skill)
+    skills[name] = normalized
+    skillMeta[name] = normalizeSkillMeta(name, normalized, meta)
+    return normalized
   }
 
   function getSkill(name) {
     return skills[name]
   }
 
-  function unregisterSkill(name) {
+  function unregisterSkill(name, meta) {
     if (!skills[name]) return false
+    const existing = skillMeta[name] || {}
+    if (meta && meta.owner != null && existing.owner !== meta.owner)
+      throw new Error('ai.skills.unregister: owner mismatch for "' + name + '"')
     delete skills[name]
+    delete skillMeta[name]
     return true
+  }
+
+  function unregisterSkillOwner(owner) {
+    const removed = []
+    keys(skillMeta).forEach(function (name) {
+      if (skillMeta[name].owner === owner) {
+        delete skills[name]
+        delete skillMeta[name]
+        removed.push(name)
+      }
+    })
+    return removed
   }
 
   function unregisterSkillPrefix(prefix) {
@@ -141,6 +255,7 @@
     keys(skills).forEach(function (name) {
       if (matchesPrefix(name, prefix)) {
         delete skills[name]
+        delete skillMeta[name]
         removed.push(name)
       }
     })
@@ -320,16 +435,27 @@
     capabilities: toolCapabilities,
   }
   ai.toolMeta = function (name) { return Object.assign({}, toolMeta[name] || {}) }
+  ai.normalizeToolSchema = normalizeToolSchema
   ai.collectContext = collectContext
   ai.skills = {
     register: registerSkill,
     unregister: unregisterSkill,
+    unregisterOwner: unregisterSkillOwner,
     unregisterPrefix: unregisterSkillPrefix,
     get: getSkill,
-    list: function (prefix) {
+    list: function (filter) {
       const names = keys(skills)
-      return prefix ? names.filter(function (name) { return matchesPrefix(name, prefix) }) : names
+      if (typeof filter === 'string') return names.filter(function (name) { return matchesPrefix(name, filter) })
+      if (!filter) return names
+      return names.filter(function (name) {
+        const meta = skillMeta[name] || {}
+        if (filter.owner != null && meta.owner !== filter.owner) return false
+        if (filter.layer != null && meta.layer !== filter.layer) return false
+        if (filter.source != null && meta.source !== filter.source) return false
+        return true
+      })
     },
+    meta: function (name) { return Object.assign({}, skillMeta[name] || {}) },
   }
   ai.context = {
     register: registerContextProvider,
@@ -367,6 +493,7 @@
     aiditor.runtime.registerOwnerCleanup(function (owner) {
       return {
         tools: unregisterToolOwner(owner),
+        skills: unregisterSkillOwner(owner),
         context: unregisterContextProviderOwner(owner),
       }
     })

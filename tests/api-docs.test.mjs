@@ -7,6 +7,7 @@ global.window = { aiditor: {} }
 for (const file of [
   'src/core/names.js',
   'src/core/runtime.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/reference.js',
   'src/ai/api-docs.generated.js',

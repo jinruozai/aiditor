@@ -12,6 +12,10 @@
     return ctx.actor || (ctx.toolCall && ctx.toolCall.actor) || 'user'
   }
 
+  function sourceResponseId(ctx) {
+    return ctx && ctx.message && ctx.message.meta && ctx.message.meta.responseId || null
+  }
+
   function requireRead(ctx, agentId) {
     if (!ai.canRead(actor(ctx), agentId, 'agent.full')) throw new Error('Permission denied')
   }
@@ -22,6 +26,11 @@
 
   function requireManage(ctx, agentId) {
     if (!ai.canManage(actor(ctx), agentId)) throw new Error('Permission denied')
+  }
+
+  function requireConfigure(ctx, agentId) {
+    if (actor(ctx) === agentId) throw new Error('Permission denied: agents cannot configure themselves')
+    requireManage(ctx, agentId)
   }
 
   function requireManageOrSelf(ctx, agentId) {
@@ -87,6 +96,7 @@
       connection: args.connection || (inherited && inherited.connection) || ai.defaultConnection || 'mock',
       model: args.model || (inherited && inherited.model) || '',
       systemPrompt: args.systemPrompt || '',
+      outputSchema: args.outputSchema ? ai.schema.normalize(args.outputSchema, 'outputSchema') : null,
       contextRefs: clone(args.contextRefs || []),
       skillRefs: clone(args.skillRefs || []),
       toolRefs: clone(args.toolRefs || []),
@@ -95,7 +105,26 @@
     }
   }
 
-  function agentSummary(agent, full) {
+  function questSummary(agentId, quest) {
+    return {
+      agentId: agentId,
+      questId: quest.id,
+      fromAgentId: quest.fromAgentId || null,
+      status: quest.status,
+      resultId: quest.resultMessageId || null,
+      summary: quest.summary || '',
+      goal: quest.goal || '',
+      currentStepId: quest.currentStepId || null,
+      budget: clone(quest.budget || null),
+      usage: clone(quest.usage || null),
+      stopReason: quest.stopReason || null,
+      createdAt: quest.createdAt,
+      startedAt: quest.startedAt || null,
+      completedAt: quest.completedAt || null,
+    }
+  }
+
+  function agentSummary(agent, profile) {
     const out = {
       id: agent.id,
       name: agent.name,
@@ -110,38 +139,46 @@
       activeQuestId: agent.activeQuestId || null,
       queuedCount: (agent.queue || []).length,
       unreadInboxCount: (agent.inbox || []).filter(function (event) { return !event.consumed }).length,
-      recentQuests: clone((agent.quests || []).slice(-8)),
+      recentQuests: (agent.quests || []).slice(-8).map(function (quest) { return questSummary(agent.id, quest) }),
       contextRefs: clone(agent.contextRefs || []),
       skillRefs: clone(agent.skillRefs || []),
       toolRefs: clone(agent.toolRefs || []),
       permissions: clone(agent.permissions),
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
-      meta: clone(agent.meta || {}),
     }
-    if (full) {
+    if (profile) {
       out.systemPrompt = agent.systemPrompt || ''
-      out.messages = clone(agent.messages || [])
-      out.queue = clone(agent.queue || [])
-      out.inbox = clone(agent.inbox || [])
-      out.memory = clone(agent.memory || {})
-      out.state = clone(agent.state || {})
+      out.outputSchema = clone(agent.outputSchema || null)
     }
     return out
   }
 
   function readAgent(args, ctx) {
     if (args && args.agentId) {
+      if (hasOwn(args, 'parentAgentId') || args.recursive) throw new Error('agentId cannot be combined with parentAgentId or recursive')
       requireRead(ctx, args.agentId)
       const agent = ai.findAgent(args.agentId)
       if (!agent) throw new Error('Agent not found')
       return agentSummary(agent, true)
     }
     const who = actor(ctx)
+    const explicitParent = hasOwn(args, 'parentAgentId')
+    const parentAgentId = explicitParent ? (args.parentAgentId || null) : (who === 'user' ? null : who)
+    if (parentAgentId && !ai.findAgent(parentAgentId)) throw new Error('Agent not found')
+    if (who !== 'user') {
+      if (!parentAgentId) throw new Error('Permission denied: agents cannot inspect root agents')
+      requireRead(ctx, parentAgentId)
+    } else if (parentAgentId) {
+      requireRead(ctx, parentAgentId)
+    }
     const agents = ai.agents.peek()
     const out = []
     for (let i = 0; i < agents.length; i++) {
-      if (ai.canRead(who, agents[i].id, 'agent.summary')) out.push(agentSummary(agents[i], false))
+      const inScope = args.recursive
+        ? (parentAgentId ? ai.isDescendant(parentAgentId, agents[i].id) : true)
+        : (agents[i].parentAgentId || null) === parentAgentId
+      if (inScope && ai.canRead(who, agents[i].id, 'agent.summary')) out.push(agentSummary(agents[i], false))
     }
     return out
   }
@@ -162,11 +199,53 @@
     return Object.assign({ applied: true }, agentSummary(agent, true))
   }
 
+  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs', 'skillRefs', 'toolRefs']
+
+  function validateRegisteredRefs(ids, registry, label) {
+    for (let i = 0; i < ids.length; i++) {
+      if (!registry.get(ids[i])) throw new Error('Unknown ' + label + ': ' + ids[i])
+    }
+  }
+
+  function agentConfigPatch(args) {
+    const patch = {}
+    for (let i = 0; i < AGENT_CONFIG_KEYS.length; i++) {
+      const key = AGENT_CONFIG_KEYS[i]
+      if (hasOwn(args, key)) patch[key] = clone(args[key])
+    }
+    if (!Object.keys(patch).length) throw new Error('No agent configuration changes provided')
+    if (hasOwn(patch, 'name') && !String(patch.name || '').trim()) throw new Error('Agent name cannot be empty')
+    if (hasOwn(patch, 'connection') && !ai.getConnection(patch.connection)) throw new Error('Unknown connection: ' + patch.connection)
+    if (hasOwn(patch, 'outputSchema') && patch.outputSchema) patch.outputSchema = ai.schema.normalize(patch.outputSchema, 'outputSchema')
+    if (patch.skillRefs) validateRegisteredRefs(patch.skillRefs, ai.skills, 'skill')
+    if (patch.toolRefs) validateRegisteredRefs(patch.toolRefs, ai.tools, 'tool')
+    return patch
+  }
+
+  function configureAgentPreview(args, ctx) {
+    const agent = ai.findAgent(args.agentId)
+    if (!agent) throw new Error('Agent not found')
+    requireConfigure(ctx, agent.id)
+    return {
+      action: 'configure',
+      kind: 'agent',
+      agentId: agent.id,
+      before: agentSummary(agent, true),
+      changes: agentConfigPatch(args),
+    }
+  }
+
+  function configureAgentApply(args) {
+    const agent = ai.updateAgent(args.agentId, clone(args.changes))
+    if (!agent) throw new Error('Agent not found')
+    return Object.assign({ applied: true }, agentSummary(agent, true))
+  }
+
   function delegateAgentPreview(args, ctx) {
     const target = args.agentId ? ai.findAgent(args.agentId) : null
     if (args.agentId) {
       if (!target) throw new Error('Agent not found')
-      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'skillRefs', 'toolRefs']
+      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema', 'skillRefs', 'toolRefs']
       for (let i = 0; i < creationKeys.length; i++) {
         if (hasOwn(args, creationKeys[i])) throw new Error('Agent configuration is only valid when delegate creates a new agent')
       }
@@ -180,7 +259,6 @@
         attachments: clone(args.attachments || []),
         meta: clone(args.meta || null),
         interrupt: !!args.interrupt,
-        guidance: args.guidance || null,
         budget: clone(args.budget || null),
       }
     }
@@ -193,7 +271,6 @@
       attachments: clone(args.attachments || []),
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
-      guidance: args.guidance || null,
       budget: clone(args.budget || null),
     }
   }
@@ -203,12 +280,12 @@
     if (!agent) throw new Error('Agent not found')
     const sent = ai.agent.send(agent.id, {
       fromAgentId: actor(ctx) === 'user' ? null : actor(ctx),
+      sourceResponseId: sourceResponseId(ctx),
       content: args.content || '',
       contextRefs: clone(args.contextRefs || []),
       attachments: clone(args.attachments || []),
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
-      guidance: args.guidance || null,
       budget: clone(args.budget || null),
     })
     return {
@@ -265,20 +342,33 @@
     requireSend(ctx, args.agentId)
     return ai.agent.send(args.agentId, {
       fromAgentId: actor(ctx) === 'user' ? null : actor(ctx),
+      sourceResponseId: sourceResponseId(ctx),
       content: args.content || '',
       contextRefs: clone(args.contextRefs || []),
       attachments: clone(args.attachments || []),
       meta: clone(args.meta || null),
       interrupt: !!args.interrupt,
-      guidance: args.guidance || null,
       budget: clone(args.budget || null),
     })
   }
 
   function readQuest(args, ctx) {
-    const result = ai.quest.read(args.agentId, args.questId, actor(ctx))
-    if (!result) throw new Error('Quest not found or permission denied')
-    return result
+    if (args.questId) {
+      const result = ai.quest.read(args.agentId, args.questId, actor(ctx))
+      if (!result) throw new Error('Quest not found or permission denied')
+      return result
+    }
+    const agent = ai.findAgent(args.agentId)
+    if (!agent) throw new Error('Agent not found')
+    requireRead(ctx, agent.id)
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(args.limit) || 20)))
+    const quests = (agent.quests || []).slice().reverse()
+    const out = []
+    for (let i = 0; i < quests.length && out.length < limit; i++) {
+      if (args.status && quests[i].status !== args.status) continue
+      if (ai.quest.read(args.agentId, quests[i].id, actor(ctx))) out.push(questSummary(agent.id, quests[i]))
+    }
+    return out
   }
 
   function readQuestResult(args, ctx) {
@@ -293,9 +383,31 @@
     return result
   }
 
+  function cancelQuest(args, ctx) {
+    const result = ai.quest.cancel(args.agentId, args.questId, actor(ctx))
+    if (!result) throw new Error('Quest not found or permission denied')
+    return result
+  }
+
   function stopAgent(args, ctx) {
     requireManage(ctx, args.agentId)
-    return { stopped: ai.stopAgent(args.agentId) }
+    const before = ai.findAgent(args.agentId)
+    if (!before) throw new Error('Agent not found')
+    const previousStatus = before.status
+    const questId = before.activeQuestId || null
+    const messageId = before.activeMessageId || null
+    const stopped = ai.stopAgent(args.agentId)
+    const current = ai.findAgent(args.agentId)
+    return {
+      outcome: stopped ? 'stopped' : 'not_running',
+      stopped: stopped,
+      agentId: args.agentId,
+      questId: questId,
+      messageId: messageId,
+      previousStatus: previousStatus,
+      status: current.status,
+      stopReason: stopped ? 'cancelled' : null,
+    }
   }
 
   const RUN_BUDGET_SCHEMA = {
@@ -311,8 +423,15 @@
 
   ai.tools.register('agent.read', {
     title: 'Read Agents',
-    description: 'Read one full agent by id. Omit agentId to list every agent readable by the caller, including parentAgentId and runtime status.',
-    schema: { type: 'object', properties: { agentId: { type: 'string', description: 'Agent to read. Omit to list readable agents.' } } },
+    description: 'Read one bounded agent profile by id, or list a tree level. Without arguments, agents see their direct children and the user sees root agents.',
+    schema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Exact agent profile to read.' },
+        parentAgentId: { type: ['string', 'null'], description: 'Parent whose children should be listed.' },
+        recursive: { type: 'boolean', description: 'Include the full readable subtree below parentAgentId.' },
+      },
+    },
     permissions: ['tool.call'],
     run: readAgent,
   })
@@ -328,6 +447,7 @@
         connection: { type: 'string' },
         model: { type: 'string' },
         systemPrompt: { type: 'string' },
+        outputSchema: { type: 'object', description: 'JSON schema for the final assistant output.' },
         contextRefs: STRING_ARRAY_SCHEMA,
         skillRefs: STRING_ARRAY_SCHEMA,
         toolRefs: STRING_ARRAY_SCHEMA,
@@ -336,6 +456,29 @@
     permissions: ['tool.call', 'tool.apply'],
     preview: createAgentPreview,
     apply: createAgentApply,
+  })
+
+  ai.tools.register('agent.configure', {
+    title: 'Configure Agent',
+    description: 'Update the stable configuration of a descendant agent after preview approval. Changes affect future model requests, not an already running request.',
+    schema: {
+      type: 'object',
+      required: ['agentId'],
+      properties: {
+        agentId: { type: 'string' },
+        name: { type: 'string' },
+        connection: { type: 'string' },
+        model: { type: 'string' },
+        systemPrompt: { type: 'string' },
+        outputSchema: { type: ['object', 'null'], description: 'JSON schema for the final assistant output, or null to clear it.' },
+        contextRefs: STRING_ARRAY_SCHEMA,
+        skillRefs: STRING_ARRAY_SCHEMA,
+        toolRefs: STRING_ARRAY_SCHEMA,
+      },
+    },
+    permissions: ['tool.call', 'tool.apply'],
+    preview: configureAgentPreview,
+    apply: configureAgentApply,
   })
 
   ai.tools.register('agent.delegate', {
@@ -351,13 +494,13 @@
         connection: { type: 'string' },
         model: { type: 'string' },
         systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
+        outputSchema: { type: 'object', description: 'JSON schema for the newly created agent final outputs.' },
         skillRefs: STRING_ARRAY_SCHEMA,
         toolRefs: STRING_ARRAY_SCHEMA,
         content: { type: 'string' },
         contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },
-        interrupt: { type: 'boolean' },
-        guidance: { type: 'string' },
+        interrupt: { type: 'boolean', description: 'Stop the target agent current quest and run this new quest first. False queues normally.' },
         budget: RUN_BUDGET_SCHEMA,
       },
     },
@@ -375,7 +518,7 @@
       properties: {
         agentId: { type: 'string' },
         parentAgentId: { type: ['string', 'null'] },
-        order: { type: 'number' },
+        order: { type: 'number', description: 'Stable display order among siblings.' },
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -386,7 +529,7 @@
   ai.tools.register('agent.delete', {
     title: 'Delete Agent',
     description: 'Delete an agent and its descendants after preview approval.',
-    schema: { type: 'object', required: ['agentId'] },
+    schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call', 'tool.apply'],
     preview: deleteAgentPreview,
     apply: deleteAgentApply,
@@ -403,8 +546,7 @@
         content: { type: 'string' },
         contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },
-        interrupt: { type: 'boolean' },
-        guidance: { type: 'string' },
+        interrupt: { type: 'boolean', description: 'Stop the target agent current quest and run this new quest first. False queues normally.' },
         budget: RUN_BUDGET_SCHEMA,
       },
     },
@@ -413,9 +555,18 @@
   })
 
   ai.tools.register('quest.read', {
-    title: 'Read Quest',
-    description: 'Read the status and result message id for a cross-agent quest.',
-    schema: { type: 'object', required: ['agentId', 'questId'] },
+    title: 'Read Quests',
+    description: 'Read one quest by id, or omit questId to list a bounded set of readable quests for an agent.',
+    schema: {
+      type: 'object',
+      required: ['agentId'],
+      properties: {
+        agentId: { type: 'string' },
+        questId: { type: 'string' },
+        status: { type: 'string', enum: ['queued', 'running', 'completed', 'failed', 'stopped'] },
+        limit: { type: 'number', description: 'Maximum results when listing. Defaults to 20 and is capped at 50.' },
+      },
+    },
     permissions: ['tool.call'],
     run: readQuest,
   })
@@ -423,23 +574,52 @@
   ai.tools.register('quest.result', {
     title: 'Read Quest Result',
     description: 'Read a quest and, when completed, return its result message content in one call.',
-    schema: { type: 'object', required: ['agentId', 'questId'] },
+    schema: {
+      type: 'object',
+      required: ['agentId', 'questId'],
+      properties: {
+        agentId: { type: 'string' },
+        questId: { type: 'string' },
+      },
+    },
     permissions: ['tool.call'],
     run: readQuestResult,
+  })
+
+  ai.tools.register('quest.cancel', {
+    title: 'Cancel Quest',
+    description: 'Cancel one exact queued or running quest without stopping unrelated work. Returns outcome cancelled or already_terminal.',
+    schema: {
+      type: 'object',
+      required: ['agentId', 'questId'],
+      properties: {
+        agentId: { type: 'string' },
+        questId: { type: 'string' },
+      },
+    },
+    permissions: ['tool.call'],
+    run: cancelQuest,
   })
 
   ai.tools.register('message.read', {
     title: 'Read Message',
     description: 'Read one exact message by agent id and message id.',
-    schema: { type: 'object', required: ['agentId', 'messageId'] },
+    schema: {
+      type: 'object',
+      required: ['agentId', 'messageId'],
+      properties: {
+        agentId: { type: 'string' },
+        messageId: { type: 'string' },
+      },
+    },
     permissions: ['tool.call'],
     run: readMessage,
   })
 
   ai.tools.register('agent.stop', {
     title: 'Stop Agent',
-    description: 'Stop a running agent.',
-    schema: { type: 'object', required: ['agentId'] },
+    description: 'Emergency-stop the agent current run. Returns outcome stopped or not_running; use quest.cancel when a specific delegated quest is known.',
+    schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call'],
     run: stopAgent,
   })
@@ -447,7 +627,7 @@
   ai.skills.register('orchestration', {
     id: 'orchestration',
     title: 'Agent Orchestration',
-    version: '2.0.0',
+    version: '3.0.0',
     description: 'Create, read, message, stop, delete, and reorganize aiditor.ai agents within permission boundaries.',
     systemPrompt: 'Use agent.* and quest.* tools to coordinate aiditor.ai agents. Complete delegated tasks end-to-end when possible. Prefer agent.delegate for create/reuse + send. Delegation is parallel: continue useful local work, then use quest.result for completed inbox event batches.',
     rules: [
@@ -455,23 +635,27 @@
       'Omitting parentAgentId creates under the calling agent; user-created agents may be roots. Agents cannot escape their ownership subtree.',
       'Use agent.delegate when the user asks an agent to do work; it is the stable one-step delegation workflow.',
       'agent.delegate accepts systemPrompt, model, skillRefs, and toolRefs only when creating a new child. When agentId is present it only sends work to that existing agent.',
+      'Use agent.configure to change a persistent child profile. Agents cannot configure themselves, and changes affect future requests only.',
       'If agent.create is used separately for delegated work, follow it with agent.send unless the user only asked to create an agent.',
       'Use a task budget to tighten maxTurns, timeoutMs, or maxTokens when delegated work needs a smaller execution bound.',
       'After agent.delegate or agent.send, do not immediately poll quest.result. Continue useful work or stop; child completions arrive later as inbox notifications.',
       'When processing an inbox event batch, use quest.result for completed events in that batch and do not wait for pending sibling quests.',
+      'Use quest.cancel to cancel one known queued or running quest. agent.stop is an emergency stop for the target agent current run.',
       'A response that delegates or sends work is an action turn; continue user-visible synthesis after the runtime delivers child completion events.',
     ],
     tools: [
       'agent.read',
       'agent.create',
+      'agent.configure',
       'agent.delegate',
       'agent.reparent',
       'agent.delete',
       'agent.send',
       'quest.read',
       'quest.result',
+      'quest.cancel',
       'message.read',
       'agent.stop',
     ],
-  })
+  }, { owner: 'aiditor.skills', layer: 'builtin', source: 'builtin' })
 })(window.aiditor = window.aiditor || {})

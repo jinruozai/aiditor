@@ -417,15 +417,19 @@
 
   function finishStreamingMessage(agentId, messageId, state, result, request) {
     const message = normalizeProviderMessage(result || {}, request)
+    const storedMessage = ai.readMessage(agentId, messageId)
     let content = message.content != null && (message.content !== '' || !state.content) ? message.content : state.content
     const reasoning = message.reasoning_content != null ? message.reasoning_content : (message.reasoningContent != null ? message.reasoningContent : state.reasoning_content)
     const toolCalls = normalizeToolCalls(message.toolCalls || state.toolCalls, request)
+    const output = structuredOutput(content, toolCalls, request)
     const actionNote = content && hasActionBoundary(toolCalls) ? content : null
     if (actionNote) content = ''
     if (!state.previewTail && content) pushPreviewTail(state, content)
     if (!state.modelTail) pushModelTail(state, (content || '') + toolCallFullText(toolCalls))
     const completedAt = Date.now()
     const usage = message.usage || (result && result.usage) || state.usage || null
+    const finishReason = resultFinishReason(message) || resultFinishReason(result) || state.finishReason || null
+    const finishCategory = classifyFinishReason(finishReason)
     const cost = ai.estimateUsageCost ? ai.estimateUsageCost(request.connectionName, message.model || state.model || request.agent.model, usage) : null
     state.usage = usage
     recordRunUsage(agentId, request, usage)
@@ -454,10 +458,44 @@
         cost: cost,
       },
     })
-    if (actionNote) patch.meta = Object.assign({}, message.meta || {}, { runId: request.runId, actionNote: actionNote })
+    if (request.outputSchema && !toolCalls.length) patch.output = output
+    const messageMeta = Object.assign({}, storedMessage && storedMessage.meta || {}, message.meta || {}, {
+      runId: request.runId,
+      responseId: storedMessage && storedMessage.meta && storedMessage.meta.responseId ||
+        (request.input && request.input.meta && request.input.meta.responseId) ||
+        (request.input && request.input.id) || request.runId,
+    })
+    if (finishReason) {
+      messageMeta.finishReason = finishReason
+      messageMeta.finishCategory = finishCategory
+    }
+    if (actionNote) {
+      messageMeta.actionNote = actionNote
+    }
+    if (Object.keys(messageMeta).length) patch.meta = messageMeta
     const updated = ai.updateMessage(agentId, messageId, patch)
     publishRunState(agentId, state, request, toolCalls.length ? 'tool' : 'idle', true)
     return updated
+  }
+
+  function structuredOutput(content, toolCalls, request) {
+    if (!request.outputSchema || toolCalls.length) return null
+    try {
+      const output = ai.schema.parse(content, request.outputSchema)
+      trace({
+        type: 'output_validated',
+        runId: request.runId,
+        traceId: request.runId,
+        agentId: request.agent && request.agent.id || null,
+        phase: 'output',
+        status: 'completed',
+        summary: 'structured output validated',
+      })
+      return output
+    } catch (err) {
+      err.providerContent = content || ''
+      throw err
+    }
   }
 
   function resultFinishReason(result) {
@@ -469,15 +507,108 @@
     )
   }
 
-  function isOutputLimitReason(reason) {
+  function classifyFinishReason(reason) {
     const r = String(reason || '').toLowerCase()
-    return r === 'length' || r === 'max_tokens' || r === 'max_output_tokens' || r === 'content_filter_length'
+    if (!r || r === 'stop' || r === 'end_turn' || r === 'stop_sequence' || r === 'complete' || r === 'completed') return 'complete'
+    if (r === 'tool_calls' || r === 'tool_use' || r === 'function_call') return 'tool'
+    if (r === 'length' || r === 'max_tokens' || r === 'max_output_tokens' || r === 'max_completion_tokens') return 'truncated'
+    if (r === 'content_filter' || r === 'content_filter_length' || r === 'blocked' || r === 'safety') return 'blocked'
+    if (r === 'insufficient_system_resource' || r === 'interrupted' || r === 'cancelled' || r === 'canceled' || r === 'provider_error') return 'interrupted'
+    return 'unknown'
   }
 
-  function assertProviderCompleted(state, result) {
+  function providerCompletionError(code, reason, message, content) {
+    const err = new Error(message)
+    err.code = code
+    err.reason = reason || null
+    err.providerContent = content || ''
+    return err
+  }
+
+  function providerToolCalls(state, result) {
+    const message = result && result.message || result || {}
+    return message.toolCalls || message.tool_calls || state.toolCalls || []
+  }
+
+  function providerContent(state, result) {
+    const message = result && result.message || result || {}
+    const content = message.content != null ? message.content : state.content
+    return ai.messageText ? ai.messageText(content) : String(content || '')
+  }
+
+  function hasToolInvocationMarkup(text, request) {
+    const source = String(text || '')
+    if (/<invoke\b[^>]*\bname\s*=/i.test(source) || /<\/?(?:tool_call|function_call)\b/i.test(source)) return true
+    const tags = source.match(/<\/?([a-zA-Z][a-zA-Z0-9_.-]*)\b/g) || []
+    if (!tags.length) return false
+    const names = {}
+    const specs = request && request.toolSpecs || []
+    const aliases = ai.toolAliasMap ? ai.toolAliasMap(request).byId : {}
+    for (let i = 0; i < specs.length; i++) {
+      const id = String(specs[i].id || '')
+      const parts = id.split('.')
+      names[id.replace(/[^a-zA-Z0-9_-]/g, '_')] = true
+      names[parts.slice().reverse().join('_')] = true
+      if (aliases[id]) names[aliases[id]] = true
+    }
+    for (let j = 0; j < tags.length; j++) {
+      const name = tags[j].replace(/^<\/?/, '').split(/\s|>/)[0]
+      if (names[name]) return true
+    }
+    return false
+  }
+
+  function completedStreamResult(state, result, request) {
+    const message = result && result.message || result || {}
+    const completed = Object.assign({}, message, {
+      role: message.role || 'assistant',
+      content: state.content,
+      reasoning_content: state.reasoning_content || message.reasoning_content || null,
+      toolCalls: state.toolCalls && state.toolCalls.length ? state.toolCalls : (message.toolCalls || []),
+      usage: state.usage || message.usage || result && result.usage || null,
+      finishReason: state.finishReason || resultFinishReason(message) || resultFinishReason(result) || null,
+    })
+    delete completed.deltas
+    delete completed.message
+    const protocol = request.connectionCapabilities && request.connectionCapabilities.toolProtocol || 'none'
+    return protocol === 'text' && ai.decodeTextToolResponse ? ai.decodeTextToolResponse(completed) : completed
+  }
+
+  function assertProviderCompleted(state, result, request) {
     const reason = resultFinishReason(result) || state.finishReason || ''
-    if (!isOutputLimitReason(reason)) return
-    throw new Error('Provider stopped because the output token limit was reached. The partial response was not executed; retry with a smaller change or patch the file in smaller pieces.')
+    const category = classifyFinishReason(reason)
+    const calls = providerToolCalls(state, result)
+    const content = providerContent(state, result)
+    if (category === 'tool' && !calls.length) {
+      throw providerCompletionError('TOOL_PROTOCOL_INVALID', reason, 'Provider reported a tool-call stop without returning structured tool calls.', content)
+    }
+    if (category === 'truncated') {
+      throw providerCompletionError('PROVIDER_OUTPUT_TRUNCATED', reason, 'Provider stopped because the output token limit was reached. The partial response was not executed; retry with a smaller change or patch the file in smaller pieces.', content)
+    }
+    if (category === 'blocked') {
+      throw providerCompletionError('PROVIDER_CONTENT_BLOCKED', reason, 'Provider blocked the response before it completed.', content)
+    }
+    if (category === 'interrupted') {
+      throw providerCompletionError('PROVIDER_INTERRUPTED', reason, 'Provider stopped before the response completed: ' + reason, content)
+    }
+    const protocol = request && request.connectionCapabilities && request.connectionCapabilities.toolProtocol || 'none'
+    if (protocol !== 'none' && !calls.length && hasToolInvocationMarkup(content, request)) {
+      throw providerCompletionError('TOOL_PROTOCOL_INVALID', reason, 'The model printed tool-call markup as text instead of returning a structured tool call. No tool was executed.', content)
+    }
+    if (category === 'unknown' && reason) {
+      trace({
+        type: 'provider_finish_unknown',
+        runId: request.runId,
+        traceId: request.runId,
+        agentId: request.agent && request.agent.id || null,
+        messageId: state.messageId || null,
+        phase: 'provider',
+        status: 'unknown',
+        summary: reason,
+        meta: { finishReason: reason },
+      })
+    }
+    return { category: category, reason: reason || null }
   }
 
   function consumeDeltas(agentId, messageId, state, source, request, controller) {
@@ -676,7 +807,8 @@
     for (let i = 0; i < calls.length; i++) {
       const id = calls[i] && (calls[i].toolId || calls[i].name)
       if (id === 'agent.delegate' || id === 'agent.send') return true
-      if (id === 'agent.create' || id === 'agent.reparent' || id === 'agent.delete' || id === 'agent.stop') return true
+      if (id === 'agent.create' || id === 'agent.configure' || id === 'agent.reparent' || id === 'agent.delete' || id === 'agent.stop') return true
+      if (id === 'quest.cancel') return true
     }
     return false
   }
@@ -781,6 +913,7 @@
 
   function runChatTurn(agentId, provider, request, ctx, controller, actor) {
     const inputMessage = request.input && request.input.id ? request.input : null
+    const responseId = inputMessage && inputMessage.meta && inputMessage.meta.responseId || (inputMessage && inputMessage.id) || request.runId
     const assistant = ai.appendMessage(agentId, {
       from: 'agent:' + agentId,
       role: 'assistant',
@@ -790,7 +923,7 @@
       status: 'running',
       resultForQuestId: inputMessage && inputMessage.questId || null,
       contextRefs: [],
-      meta: { runId: request.runId },
+      meta: { runId: request.runId, responseId: responseId },
     })
     if (runs[agentId]) runs[agentId].messageId = assistant.id
     const state = {
@@ -820,11 +953,15 @@
     function failTurn(err) {
       if (controller.signal.aborted) return null
       const completedAt = Date.now()
+      const currentMessage = ai.readMessage(agentId, assistant.id) || assistant
       ai.updateMessage(agentId, assistant.id, {
+        content: err && err.providerContent || currentMessage.content || '',
         status: 'error',
-        meta: {
+        meta: Object.assign({}, currentMessage.meta || {}, {
           error: String(err && err.message ? err.message : err),
-        },
+          errorCode: err && err.code || null,
+          finishReason: err && err.reason || state.finishReason || null,
+        }),
         stats: {
           runId: request.runId,
           startTime: state.startTime,
@@ -835,7 +972,7 @@
       state.completedAt = completedAt
       state.error = String(err && err.message ? err.message : err)
       publishRunState(agentId, state, request, 'error', true)
-      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error })
+      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error, meta: { code: err && err.code || null, finishReason: err && err.reason || state.finishReason || null } })
       throw err
     }
     return Promise.resolve().then(function () {
@@ -854,6 +991,7 @@
         meta: {
           messageCount: request.messages ? request.messages.length : 0,
           toolCount: request.tools ? request.tools.length : 0,
+          toolProtocol: request.connectionCapabilities && request.connectionCapabilities.toolProtocol || 'none',
         },
       })
       return provider.stream ? provider.stream(request, ctx) : provider.send(request, ctx)
@@ -862,20 +1000,22 @@
       if (isIterable(result)) {
         return consumeDeltas(agentId, assistant.id, state, result, request, controller).then(function () {
           if (controller.signal.aborted) return null
-          assertProviderCompleted(state, { content: state.content, toolCalls: state.toolCalls })
-          const done = finishStreamingMessage(agentId, assistant.id, state, { content: state.content, toolCalls: state.toolCalls }, request)
+          const completed = completedStreamResult(state, null, request)
+          assertProviderCompleted(state, completed, request)
+          const done = finishStreamingMessage(agentId, assistant.id, state, completed, request)
           return continueAfterTools(agentId, provider, done, done, request, controller, actor)
         })
       }
       if (result && result.deltas && isIterable(result.deltas)) {
         return consumeDeltas(agentId, assistant.id, state, result.deltas, request, controller).then(function () {
           if (controller.signal.aborted) return null
-          assertProviderCompleted(state, result.message || result)
-          const done = finishStreamingMessage(agentId, assistant.id, state, result.message || result, request)
+          const completed = completedStreamResult(state, result, request)
+          assertProviderCompleted(state, completed, request)
+          const done = finishStreamingMessage(agentId, assistant.id, state, completed, request)
           return continueAfterTools(agentId, provider, done, result, request, controller, actor)
         })
       }
-      assertProviderCompleted(state, result)
+      assertProviderCompleted(state, result, request)
       const done = finishStreamingMessage(agentId, assistant.id, state, result, request)
       return continueAfterTools(agentId, provider, done, result, request, controller, actor)
     }).catch(failTurn)
@@ -989,7 +1129,10 @@
         fromAgentId: agentId,
         questId: quest.id,
         summary: quest.summary,
-        meta: { stopReason: quest.stopReason },
+        meta: {
+          stopReason: quest.stopReason,
+          responseId: quest.meta && quest.meta.sourceResponseId || null,
+        },
       })
       scheduleAgent(quest.fromAgentId)
     }
@@ -1014,7 +1157,23 @@
     const input = request.input
     const stopped = controller.signal.aborted
     if (input && input.id) ai.updateMessage(agentId, input.id, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now() })
-    if (input && input.questId && !stopped) ai.updateQuest(agentId, input.questId, { status: 'failed', completedAt: Date.now(), summary: String(err && err.message ? err.message : err) })
+    if (input && input.questId && !stopped) {
+      const quest = ai.updateQuest(agentId, input.questId, {
+        status: 'failed',
+        completedAt: Date.now(),
+        summary: String(err && err.message ? err.message : err),
+      })
+      if (quest && quest.fromAgentId) {
+        ai.appendInboxEvent(quest.fromAgentId, {
+          type: 'quest.failed',
+          fromAgentId: agentId,
+          questId: quest.id,
+          summary: quest.summary,
+          meta: { responseId: quest.meta && quest.meta.sourceResponseId || null },
+        })
+        scheduleAgent(quest.fromAgentId)
+      }
+    }
     ai.setAgentStatus(agentId, stopped ? 'idle' : 'failed')
     if (!stopped && aiditor.reportError) aiditor.reportError({ scope: 'ai', connection: request.connectionName }, err)
     scheduleQueuedAgents()
@@ -1097,6 +1256,7 @@
         questId: quest.id,
         resultMessageId: quest.resultMessageId || null,
         summary: quest.summary || '',
+        meta: { responseId: quest.meta && quest.meta.sourceResponseId || null },
       })
       scheduleAgent(quest.fromAgentId)
     }
@@ -1175,7 +1335,12 @@
       from: 'system',
       role: 'user',
       content: content,
-      meta: { runtimeEvent: 'post-delegation.continuation', sourceMessageId: message && message.id || null, delegated: delegated },
+      meta: {
+        runtimeEvent: 'post-delegation.continuation',
+        sourceMessageId: message && message.id || null,
+        responseId: message && message.meta && message.meta.responseId || null,
+        delegated: delegated,
+      },
       priority: 10,
       schedule: false,
     })
@@ -1197,11 +1362,20 @@
         summary: event.summary,
       }
     })) + '\nPending related quests, if any, are non-blocking background:\n' + JSON.stringify(pending)
+    let responseId = null
+    for (let i = 0; i < selected.length; i++) {
+      const eventResponseId = selected[i].meta && selected[i].meta.responseId || null
+      if (!eventResponseId || (responseId && responseId !== eventResponseId)) {
+        responseId = null
+        break
+      }
+      responseId = eventResponseId
+    }
     return queueMessage(agent.id, {
       from: 'system',
       role: 'user',
       content: content,
-      meta: { runtimeEvent: 'inbox.continuation', events: selected, pendingQuests: pending },
+      meta: { runtimeEvent: 'inbox.continuation', responseId: responseId, events: selected, pendingQuests: pending },
       schedule: false,
     })
   }
@@ -1331,6 +1505,58 @@
     return stopped
   }
 
+  function terminalQuest(quest) {
+    return quest.status === 'completed' || quest.status === 'failed' || quest.status === 'stopped'
+  }
+
+  function cancelQuest(agentId, questId, actor) {
+    const agent = ai.findAgent(agentId)
+    const quest = agent && ai.findQuest(agentId, questId)
+    const who = actor || 'user'
+    if (!quest || !ai.canCancelQuest(who, agentId, questId)) return null
+    const previousStatus = quest.status
+    if (terminalQuest(quest)) {
+      return Object.assign({ outcome: 'already_terminal', cancelled: false, previousStatus: previousStatus }, ai.quest.read(agentId, questId, who))
+    }
+
+    const run = runs[agentId]
+    const waiting = waitingRuns[agentId]
+    const activeInput = run && run.request && run.request.input
+    const waitingInput = waiting && waiting.request && waiting.request.input
+    const active = (activeInput && activeInput.questId === questId) || (waitingInput && waitingInput.questId === questId)
+    if (active) {
+      stopRun(agentId, 'idle', 'cancelled')
+    } else {
+      const messageId = quest.requestMessageId || quest.id
+      ai.dequeueMessage(agentId, messageId)
+      if (messageId) ai.updateMessage(agentId, messageId, { status: 'stopped', completedAt: Date.now() })
+      stopQuestExecution(agentId, { questId: questId }, 'cancelled', quest.usage)
+    }
+
+    const current = ai.findAgent(agentId)
+    if (!runs[agentId] && !waitingRuns[agentId]) {
+      if (current && current.queue && current.queue.length) {
+        ai.setAgentStatus(agentId, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
+      } else {
+        ai.setAgentStatus(agentId, { status: 'idle', statusText: '', activeMessageId: null, activeQuestId: null })
+      }
+      scheduleAgent(agentId)
+    }
+    const activeRun = run || waiting
+    trace({
+      type: 'quest_cancelled',
+      runId: activeRun && activeRun.runId || null,
+      traceId: activeRun && activeRun.runId || null,
+      agentId: agentId,
+      questId: questId,
+      phase: 'quest',
+      status: 'stopped',
+      summary: 'Quest cancelled',
+    })
+    scheduleQueuedAgents()
+    return Object.assign({ outcome: 'cancelled', cancelled: true, previousStatus: previousStatus }, ai.quest.read(agentId, questId, who))
+  }
+
   function scheduleAgent(agentId) {
     let agent = agentId ? ai.findAgent(agentId) : ai.getActiveAgent()
     if (!agent) return null
@@ -1366,7 +1592,8 @@
     const agent = agentId ? ai.findAgent(agentId) : ai.getActiveAgent()
     if (!agent) return null
     const spec = content && typeof content === 'object' ? content : { content: content }
-    const message = ai.appendMessage(agent.id, {
+    const messageMeta = Object.assign({}, meta || spec.meta || {})
+    let message = ai.appendMessage(agent.id, {
       from: spec.from || from || 'user',
       role: spec.role || 'user',
       content: spec.content,
@@ -1377,12 +1604,15 @@
       questId: spec.questId || null,
       resultForQuestId: spec.resultForQuestId || null,
       status: 'queued',
-      meta: meta || spec.meta || null,
+      meta: messageMeta,
     })
+    if (!messageMeta.responseId) {
+      messageMeta.responseId = message.id
+      message = ai.updateMessage(agent.id, message.id, { meta: messageMeta })
+    }
     ai.enqueueMessage(agent.id, message.id, {
       interrupt: !!spec.interrupt,
       priority: spec.priority || 0,
-      guidance: spec.guidance || null,
     })
     ai.setActiveRunState(agent.id, {
       runId: null,
@@ -1408,6 +1638,7 @@
     spec = spec || {}
     const target = ai.findAgent(toAgentId)
     if (!target) return null
+    const messageMeta = Object.assign({}, spec.meta || {})
     let message = ai.appendMessage(target.id, {
       from: spec.fromAgentId ? ('agent:' + spec.fromAgentId) : (spec.from || 'user'),
       role: 'user',
@@ -1417,9 +1648,10 @@
       contextRefs: spec.contextRefs || [],
       attachments: spec.attachments || [],
       status: 'queued',
-      meta: spec.meta || null,
+      meta: messageMeta,
     })
-    message = ai.updateMessage(target.id, message.id, { questId: message.id })
+    if (!messageMeta.responseId) messageMeta.responseId = message.id
+    message = ai.updateMessage(target.id, message.id, { questId: message.id, meta: messageMeta })
     const quest = ai.createQuest(target.id, {
       id: message.id,
       fromAgentId: spec.fromAgentId || null,
@@ -1427,11 +1659,11 @@
       goal: String(spec.content || '').slice(0, 1000),
       status: 'queued',
       budget: effectiveRunBudget(spec.budget),
+      meta: { sourceResponseId: spec.sourceResponseId || null },
     })
     ai.enqueueMessage(target.id, message.id, {
       interrupt: !!spec.interrupt,
       priority: spec.priority || 0,
-      guidance: spec.guidance || null,
     })
     if (spec.interrupt) stopRun(target.id, 'queued')
     const run = scheduleAgent(target.id)
@@ -1462,6 +1694,8 @@
   }
   ai.message = ai.message || {}
   ai.agent = ai.agent || {}
+  ai.quest = ai.quest || {}
   ai.message.send = function (agentId, spec) { return queueMessage(agentId, spec || {}, (spec && spec.from) || 'user') }
   ai.agent.send = sendAgentQuest
+  ai.quest.cancel = cancelQuest
 })(window.aiditor = window.aiditor || {})

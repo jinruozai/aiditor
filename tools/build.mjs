@@ -50,10 +50,12 @@ const JS_ORDER = [
   // Layer 2.5 - AI session/agent runtime (no UI dependency)
   'ai/name-generator.js',
   'ai/serialize.js',
+  'ai/schema.js',
   'ai/trace.js',
   'ai/context-pack.js',
   'ai/permission.js',
   'ai/store.js',
+  'ai/persistence.js',
   'ai/memory.js',
   'ai/compaction.js',
   'ai/connection.js',
@@ -66,6 +68,7 @@ const JS_ORDER = [
   'ai/context.js',
   'ai/skills.js',
   'ai/workdir.js',
+  'ai/skill-packages.js',
   'ai/code.js',
   'ai/git.js',
   'ai/verify.js',
@@ -87,6 +90,8 @@ const JS_ORDER = [
   'ai/orchestration.js',
   'ai/request.js',
   'ai/runtime.js',
+  'ai/checkpoints.js',
+  'ai/evals.js',
 
   // Layer 3 - dock runtime
   'dock/runtime.js',

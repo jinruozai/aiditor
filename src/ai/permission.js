@@ -70,6 +70,10 @@
       const quest = access.findQuest(ctx.targetAgentId, ctx.questId)
       return !!(quest && quest.fromAgentId === actorAgent.id)
     }
+    if (ctx.scope === 'quest.cancel') {
+      const quest = access.findQuest(ctx.targetAgentId, ctx.questId)
+      return !!(quest && quest.fromAgentId === actorAgent.id)
+    }
     return access.isDescendant(actorAgent.id, target.id)
   }
 
@@ -170,6 +174,9 @@
   ai.canRead = function (actorId, targetId, scope) { return allowed(actorId, targetId, scope || 'agent.full') }
   ai.canSend = function (actorId, targetId) { return allowed(actorId, targetId, 'messages.send') }
   ai.canManage = function (actorId, targetId) { return allowed(actorId, targetId, 'agent.manage') }
+  ai.canCancelQuest = function (actorId, targetId, questId) {
+    return allowed(actorId, targetId, 'quest.cancel', { questId: questId })
+  }
   ai.canUseTool = function (actorId, targetId, toolId, phase, details) {
     return allowed(actorId, targetId, phase === 'apply' ? 'tool.apply' : 'tool.call', Object.assign({
       toolId: toolId,

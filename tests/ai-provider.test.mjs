@@ -12,6 +12,8 @@ vm.runInThisContext(readFileSync('src/ai/provider.js', 'utf8'), { filename: 'ai/
 vm.runInThisContext(readFileSync('src/ai/provider-auth.js', 'utf8'), { filename: 'ai/provider-auth.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { filename: 'ai/provider-transports.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
+vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
+vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
 
 const aiditor = window.aiditor
 const ai = aiditor.ai
@@ -90,6 +92,14 @@ global.fetch = function (url, opts) {
     }))
   }
   if (String(url).endsWith('/v1/messages')) {
+    const body = JSON.parse((opts && opts.body) || '{}')
+    const last = body.messages && body.messages[body.messages.length - 1]
+    if (last && last.content === 'anthropic tool') {
+      return Promise.resolve(response({
+        content: [{ type: 'tool_use', id: 'call_claude', name: 'agent__create', input: { name: 'worker' } }],
+        stop_reason: 'tool_use',
+      }))
+    }
     return Promise.resolve(response({
       content: [{ type: 'text', text: 'anthropic reply' }],
     }))
@@ -152,6 +162,16 @@ assert.equal(ai.getConnectionConfig('deepseek').baseUrl, 'https://api.deepseek.c
 assert.equal(ai.getConnectionConfig('ollama').baseUrl, 'http://127.0.0.1:11434/v1')
 assert.equal(ai.getConnectionConfig('openai-codex').defaultModel, 'gpt-5.5')
 assert.deepEqual(ai.modelHints('openai-codex').slice(0, 2), ['gpt-5.5', 'gpt-5.5-pro'])
+assert.equal(ai.connectionCapabilities('deepseek').toolProtocol, 'native')
+assert.equal(ai.connectionCapabilities('deepseek').toolCalling, true)
+assert.equal(ai.connectionCapabilities('openai-codex').toolProtocol, 'text')
+assert.equal(ai.connectionCapabilities('mock').toolProtocol, 'none')
+assert.equal(ai.connectionCapabilities('openai-api').outputProtocol, 'native')
+assert.equal(ai.connectionCapabilities('deepseek').outputProtocol, 'text')
+ai.registerTransport('invalid-protocol', { toolProtocol: 'xml' })
+assert.throws(function () {
+  ai.registerConnection('invalid-protocol', { transport: { type: 'invalid-protocol' }, configDefaults: {} })
+}, /Unknown AI tool protocol/)
 
 let reactiveDeepSeekKey = ''
 const disposeConfigWatch = aiditor.effect(function () {
@@ -188,6 +208,17 @@ const openAiBody = JSON.parse(calls.at(-1).opts.body)
 assert.equal(openAiBody.model, 'model-a')
 assert.equal(openAiBody.stream, true)
 assert.deepEqual(openAiBody.messages, [{ role: 'user', content: 'hello' }])
+
+await ai.sendViaConnection('openai-api', {
+  model: '',
+  stream: false,
+  messages: [{ role: 'user', content: 'structured' }],
+  toolSpecs: [],
+  outputSchema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } },
+}, { signal: null })
+const openAiStructuredBody = JSON.parse(calls.at(-1).opts.body)
+assert.equal(openAiStructuredBody.response_format.type, 'json_schema')
+assert.equal(openAiStructuredBody.response_format.json_schema.schema.properties.ok.type, 'boolean')
 
 const imageDataUrl = 'data:image/png;base64,aGVsbG8='
 await ai.sendViaConnection('openai-api', {
@@ -321,6 +352,19 @@ assert.equal(anthropicCall.opts.headers['anthropic-version'], '2023-06-01')
 assert.equal(anthropicBody.model, 'claude-test')
 assert.equal(anthropicBody.system, 'be brief')
 assert.deepEqual(anthropicBody.messages, [{ role: 'user', content: 'hello' }])
+
+const anthropicToolReply = await ai.sendViaConnection('anthropic-api', {
+  model: '',
+  stream: false,
+  messages: [{ role: 'user', content: 'anthropic tool' }],
+  toolSpecs: [{ id: 'agent.create', description: 'Create an agent', schema: { name: 'string' } }],
+}, { signal: null })
+const anthropicToolBody = JSON.parse(calls.at(-1).opts.body)
+assert.equal(anthropicToolBody.tools[0].name, 'agent__create')
+assert.equal(anthropicToolBody.tools[0].input_schema.properties.name.type, 'string')
+assert.equal(anthropicToolReply.toolCalls[0].toolId, 'agent.create')
+assert.equal(anthropicToolReply.toolCalls[0].args.name, 'worker')
+assert.equal(anthropicToolReply.finishReason, 'tool_use')
 
 await ai.sendViaConnection('anthropic-api', {
   model: '',

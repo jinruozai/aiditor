@@ -15,6 +15,7 @@ vm.runInThisContext(readFileSync('src/ai/provider.js', 'utf8'), { filename: 'ai/
 vm.runInThisContext(readFileSync('src/ai/provider-auth.js', 'utf8'), { filename: 'ai/provider-auth.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { filename: 'ai/provider-transports.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
+vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
 vm.runInThisContext(readFileSync('src/ai/context.js', 'utf8'), { filename: 'ai/context.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
@@ -350,6 +351,7 @@ async function assertSendRunStatusAndRequest(agentId, resourceCheck) {
   let ctxSeen = null
   let callCount = 0
   ai.registerTransport('capture', {
+    toolProtocol: 'native',
     send: function (connection, request, ctx) {
       callCount += 1
       requestSeen = request
@@ -394,6 +396,7 @@ async function assertStopAgent(agentId) {
   let releaseRun
   const held = new Promise(function (resolve) { releaseRun = resolve })
   ai.registerTransport('hold', {
+    toolProtocol: 'native',
     send: function () { return held.then(function () { return 'late' }) },
   })
   ai.registerConnection('hold', { auth: { type: 'none' }, transport: { type: 'hold' }, configDefaults: {} })
@@ -543,6 +546,22 @@ function collectText(el) {
   return out
 }
 
+function countClass(el, className) {
+  if (!el) return 0
+  const own = String(el.className || '').split(/\s+/).indexOf(className) >= 0 ? 1 : 0
+  return own + (el.children || []).reduce(function (total, child) {
+    return total + countClass(child, className)
+  }, 0)
+}
+
+function elementsWithClass(el, className, out) {
+  out = out || []
+  if (!el) return out
+  if (String(el.className || '').split(/\s+/).indexOf(className) >= 0) out.push(el)
+  ;(el.children || []).forEach(function (child) { elementsWithClass(child, className, out) })
+  return out
+}
+
 async function assertGdePatchPreviewRendering() {
   const components = {}
   global.document = {
@@ -669,6 +688,132 @@ async function assertGdePatchPreviewRendering() {
   assert.equal(streamingRoot.querySelector('[data-message-payload]'), payload)
   assert.equal(streamingRoot.querySelector('.aiditor-ai-message-text'), firstTextPart)
   assert.match(collectText(streamingRoot), /world/)
+
+  const responseAgent = ai.createAgent({
+    name: 'Response Boundary',
+    messages: [
+      { id: 'response-input', role: 'user', status: 'done', content: 'work', meta: { responseId: 'response-input' } },
+      { id: 'response-first', role: 'assistant', status: 'done', content: 'first part', meta: { runId: 'run-first', responseId: 'response-input' } },
+      {
+        id: 'response-continuation',
+        role: 'user',
+        status: 'queued',
+        content: 'continue',
+        meta: { runtimeEvent: 'post-delegation.continuation', responseId: 'response-input' },
+      },
+    ],
+  })
+  ai.activeAgentId.set(responseAgent.id)
+  const responseRoot = components['ai-messages'].factory(null, {})
+  assert.equal(countClass(responseRoot, 'aiditor-ai-message-footer'), 1)
+
+  ai.updateMessage(responseAgent.id, 'response-continuation', { status: 'done' })
+  ai.appendMessage(responseAgent.id, {
+    id: 'response-final',
+    role: 'assistant',
+    status: 'done',
+    content: 'final part',
+    meta: { runId: 'run-final', responseId: 'response-input' },
+  })
+  await new Promise(function (resolve) { setTimeout(resolve, 140) })
+
+  assert.equal(countClass(responseRoot, 'aiditor-ai-message-footer'), 2)
+  const responseFooters = elementsWithClass(responseRoot, 'aiditor-ai-message-footer')
+  const responseFooter = responseFooters[responseFooters.length - 1]
+  assert.match(responseFooter.querySelector('.aiditor-ui-copy-btn').__copyText, /first part/)
+  assert.match(responseFooter.querySelector('.aiditor-ui-copy-btn').__copyText, /final part/)
+
+  const pendingChild = ai.createAgent({
+    name: 'Pending Child',
+    quests: [{ id: 'pending-quest', requestMessageId: 'pending-quest', status: 'running' }],
+  })
+  const delegatedAgent = ai.createAgent({
+    name: 'Delegated Response Boundary',
+    messages: [
+      { id: 'delegated-input', role: 'user', status: 'done', content: 'delegate', meta: { responseId: 'delegated-input' } },
+      {
+        id: 'delegated-output',
+        role: 'assistant',
+        status: 'done',
+        content: '',
+        meta: { runId: 'run-delegated', responseId: 'delegated-input' },
+        toolCalls: [{ toolId: 'agent.delegate', status: 'applied', applyResult: { agentId: pendingChild.id, questId: 'pending-quest' } }],
+      },
+    ],
+  })
+  ai.activeAgentId.set(delegatedAgent.id)
+  const delegatedRoot = components['ai-messages'].factory(null, {})
+  assert.equal(countClass(delegatedRoot, 'aiditor-ai-message-footer'), 1)
+  ai.appendMessage(pendingChild.id, {
+    id: 'pending-result',
+    role: 'assistant',
+    status: 'done',
+    content: 'pending child done',
+    usage: { total_tokens: 25, output_tokens: 10 },
+    meta: { runId: 'run-pending-child', responseId: 'pending-quest' },
+  })
+  ai.updateQuest(pendingChild.id, 'pending-quest', { status: 'completed', completedAt: Date.now() })
+  ai.setAgentStatus(pendingChild.id, 'idle')
+  await new Promise(function (resolve) { setTimeout(resolve, 140) })
+  assert.equal(countClass(delegatedRoot, 'aiditor-ai-message-footer'), 2)
+
+  const measuredChild = ai.createAgent({
+    name: 'Measured Child',
+    messages: [
+      { id: 'measured-quest', role: 'user', status: 'done', content: 'child work', createdAt: 1500, completedAt: 1500, meta: { responseId: 'measured-quest' } },
+      {
+        id: 'measured-child-output',
+        role: 'assistant',
+        status: 'done',
+        content: 'child result',
+        createdAt: 1600,
+        completedAt: 3000,
+        usage: { total_tokens: 50, output_tokens: 20 },
+        stats: { completedAt: 3000, cost: { amount: 0.002 } },
+        meta: { runId: 'run-child', responseId: 'measured-quest' },
+        toolCalls: [{ toolId: 'child.read', status: 'completed', result: { ok: true } }],
+      },
+    ],
+    quests: [{ id: 'measured-quest', requestMessageId: 'measured-quest', status: 'completed', completedAt: 3000 }],
+  })
+  const measuredParent = ai.createAgent({
+    name: 'Measured Parent',
+    messages: [
+      { id: 'measured-input', role: 'user', status: 'done', content: 'measure all work', createdAt: 1000, completedAt: 1000, meta: { responseId: 'measured-input' } },
+      {
+        id: 'measured-parent-first',
+        role: 'assistant',
+        status: 'done',
+        content: '',
+        createdAt: 1100,
+        completedAt: 2000,
+        usage: { total_tokens: 100, output_tokens: 40 },
+        stats: { completedAt: 2000, cost: { amount: 0.001 } },
+        meta: { runId: 'run-parent-first', responseId: 'measured-input' },
+        toolCalls: [{ toolId: 'agent.delegate', status: 'applied', applyResult: { agentId: measuredChild.id, questId: 'measured-quest' } }],
+      },
+      {
+        id: 'measured-parent-final',
+        role: 'assistant',
+        status: 'done',
+        content: 'all done',
+        createdAt: 3100,
+        completedAt: 4000,
+        usage: { total_tokens: 70, output_tokens: 30 },
+        stats: { completedAt: 4000, cost: { amount: 0.003 } },
+        meta: { runId: 'run-parent-final', responseId: 'measured-input' },
+      },
+    ],
+  })
+  ai.activeAgentId.set(measuredParent.id)
+  const measuredRoot = components['ai-messages'].factory(null, {})
+  const measuredFooters = elementsWithClass(measuredRoot, 'aiditor-ai-message-footer')
+  const measuredText = collectText(measuredFooters[measuredFooters.length - 1])
+  assert.match(measuredText, /2 tool calls/)
+  assert.match(measuredText, /3 s/)
+  assert.match(measuredText, /220 tok/)
+  assert.match(measuredText, /30 tok\/s/)
+  assert.match(measuredText, /\$0\.006/)
 
   const emptyAgent = ai.createAgent({ name: 'Empty Transcript', messages: [] })
   ai.activeAgentId.set(emptyAgent.id)

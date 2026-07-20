@@ -118,6 +118,36 @@
     }
   }
 
+  function registerSkills(manifest, rollback) {
+    const ai = aiditor.ai
+    if (!ai || !ai.skills) return
+    const owner = ownerFor(manifest.id)
+    const toolIds = {}
+    const tools = manifest.contributes.tools
+    for (let i = 0; i < tools.length; i++) toolIds[tools[i].id] = tools[i].publicId
+    const list = manifest.contributes.skills
+    for (let j = 0; j < list.length; j++) {
+      const item = list[j]
+      const spec = {
+        title: item.title || item.label || item.id,
+        description: item.description || '',
+        whenToUse: item.whenToUse || '',
+        whenNotToUse: item.whenNotToUse || '',
+        systemPrompt: item.systemPrompt || '',
+        rules: clone(item.rules || []),
+        examples: clone(item.examples || []),
+        tools: (item.tools || []).map(function (name) { return toolIds[name] || name }),
+        relatedApis: clone(item.relatedApis || []),
+        resources: clone(item.resources || []),
+        docPath: item.docPath || '',
+      }
+      ai.skills.register(item.publicId, spec, { owner: owner, layer: manifest.layer, source: owner })
+      rollback.push(function (name) {
+        return function () { ai.skills.unregister(name, { owner: owner }) }
+      }(item.publicId))
+    }
+  }
+
   function registerContextProviders(manifest, rollback, adapters) {
     const ai = aiditor.ai
     if (!ai || !ai.context) return
@@ -246,6 +276,7 @@
   function registerAll(manifest, rollback, adapters) {
     registerComponents(manifest, rollback)
     registerTools(manifest, rollback, adapters)
+    registerSkills(manifest, rollback)
     registerContextProviders(manifest, rollback, adapters)
     registerReferences(manifest, rollback, adapters)
     registerOperations(manifest, rollback, adapters)

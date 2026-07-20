@@ -29,12 +29,51 @@
     return headers
   }
 
+  function providerError(res, data) {
+    const status = Number(res && res.status || 0) || null
+    const message = (data && (data.error && (data.error.message || data.error))) || (res && res.statusText) || 'Provider request failed'
+    const err = new Error(String(message))
+    err.name = 'ProviderError'
+    err.status = status
+    err.code = status === 429 ? 'PROVIDER_RATE_LIMITED'
+      : status === 408 ? 'PROVIDER_REQUEST_TIMEOUT'
+        : status && status >= 500 ? 'PROVIDER_UNAVAILABLE'
+          : 'PROVIDER_HTTP_ERROR'
+    err.retryable = status === 408 || status === 429 || !!(status && status >= 500)
+    err.retryAfterMs = retryAfterMs(res && res.headers)
+    err.providerBody = data || null
+    return err
+  }
+
+  function retryAfterMs(headers) {
+    const value = headers && headers.get ? headers.get('retry-after') : null
+    if (!value) return null
+    const seconds = Number(value)
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+    const time = Date.parse(value)
+    return Number.isFinite(time) ? Math.max(0, time - Date.now()) : null
+  }
+
+  function requestFetch(url, opts) {
+    return fetch(url, opts).catch(function (cause) {
+      if (cause && cause.name === 'AbortError') throw cause
+      const err = new Error(cause && cause.message ? cause.message : 'Provider network request failed')
+      err.name = 'ProviderError'
+      err.code = 'PROVIDER_NETWORK_ERROR'
+      err.status = null
+      err.retryable = true
+      err.retryAfterMs = null
+      err.cause = cause
+      throw err
+    })
+  }
+
   function requestBody(url, opts) {
-    return fetch(url, opts).then(function (res) {
+    return requestFetch(url, opts).then(function (res) {
       return res.text().then(function (text) {
         let data = null
         try { data = text ? JSON.parse(text) : null } catch (_) {}
-        if (!res.ok) throw new Error((data && (data.error && (data.error.message || data.error))) || res.statusText || 'Provider request failed')
+        if (!res.ok) throw providerError(res, data)
         return {
           text: text,
           contentType: res.headers && res.headers.get ? (res.headers.get('content-type') || '') : '',
@@ -50,7 +89,7 @@
   }
 
   function requestMaybeStream(url, opts, extractDelta) {
-    return fetch(url, opts).then(function (res) {
+    return requestFetch(url, opts).then(function (res) {
       const contentType = res.headers && res.headers.get ? (res.headers.get('content-type') || '') : ''
       if (res.ok && contentType.indexOf('text/event-stream') >= 0 && res.body) {
         return { streamed: true, deltas: streamSse(res.body, extractDelta) }
@@ -58,7 +97,7 @@
       return res.text().then(function (text) {
         let data = null
         try { data = text ? JSON.parse(text) : null } catch (_) {}
-        if (!res.ok) throw new Error((data && (data.error && (data.error.message || data.error))) || res.statusText || 'Provider request failed')
+        if (!res.ok) throw providerError(res, data)
         if (contentType.indexOf('text/event-stream') >= 0 || text.indexOf('data:') === 0) {
           const parsed = parseSse(text, extractDelta)
           return Object.assign({ streamed: true }, parsed)
@@ -193,6 +232,7 @@
     authHeaders: authHeaders,
     requestJson: requestJson,
     requestMaybeStream: requestMaybeStream,
+    providerError: providerError,
   }
   ai.estimateUsageCost = estimateUsageCost
 })(window.aiditor = window.aiditor || {})

@@ -13,19 +13,42 @@
     return ai.skills.get ? ai.skills.get(id) : null
   }
 
-  function skillIdFromUri(uri) {
+  function parseSkillUri(uri) {
     const text = String(uri || '')
-    if (text === 'aiditor://skills') return ''
-    if (text.indexOf('aiditor://skills/') === 0) return decodeURIComponent(text.slice('aiditor://skills/'.length))
-    return ''
+    if (text === 'aiditor://skills') return { id: '', resource: '' }
+    if (text.indexOf('aiditor://skills/') !== 0) return null
+    const tail = text.slice('aiditor://skills/'.length)
+    const marker = '/resources/'
+    const index = tail.indexOf(marker)
+    if (index < 0) return { id: decodeURIComponent(tail), resource: '' }
+    return {
+      id: decodeURIComponent(tail.slice(0, index)),
+      resource: decodeURIComponent(tail.slice(index + marker.length)),
+    }
   }
 
   function uriFor(id) {
     return 'aiditor://skills/' + encodeURIComponent(id)
   }
 
+  function resourceUri(id, path) {
+    return uriFor(id) + '/resources/' + encodeURIComponent(path)
+  }
+
+  function compactResources(id, skill) {
+    const readable = typeof skill.readResource === 'function'
+    return (skill.resources || []).map(function (resource) {
+      const canRead = readable && resource.kind === 'reference'
+      return Object.assign({}, resource, {
+        uri: canRead ? resourceUri(id, resource.path) : null,
+        readable: canRead,
+      })
+    })
+  }
+
   function compactSkill(id, skill) {
     skill = skill || {}
+    const meta = ai.skills.meta ? ai.skills.meta(id) : {}
     return {
       id: id,
       uri: uriFor(id),
@@ -36,6 +59,10 @@
       relatedApis: skill.relatedApis || [],
       tools: skill.tools || [],
       docPath: skill.docPath || '',
+      resourceCount: (skill.resources || []).length,
+      source: meta.source || '',
+      layer: meta.layer || '',
+      hash: meta.hash || '',
     }
   }
 
@@ -45,6 +72,7 @@
       systemPrompt: skill.systemPrompt || '',
       rules: skill.rules || [],
       examples: skill.examples || [],
+      resources: compactResources(id, skill),
     })
   }
 
@@ -74,8 +102,8 @@
   }
 
   function read(ref) {
-    const id = skillIdFromUri(ref && ref.uri)
-    if (!id) {
+    const parsed = parseSkillUri(ref && ref.uri)
+    if (!parsed || !parsed.id) {
       return {
         uri: 'aiditor://skills',
         id: 'aiditor.skills.index',
@@ -85,8 +113,19 @@
         entries: skillNames().map(function (name) { return compactSkill(name, getSkill(name)) }),
       }
     }
-    const skill = getSkill(id)
-    return skill ? fullSkill(id, skill) : null
+    const skill = getSkill(parsed.id)
+    if (!skill) return null
+    if (!parsed.resource) return fullSkill(parsed.id, skill)
+    const resource = (skill.resources || []).find(function (item) { return item.path === parsed.resource && item.kind === 'reference' })
+    if (!resource || typeof skill.readResource !== 'function' || !ai.skills.readResource) return null
+    return ai.skills.readResource(parsed.id, parsed.resource).then(function (value) {
+      return Object.assign({
+        uri: resourceUri(parsed.id, parsed.resource),
+        id: parsed.id + ':' + parsed.resource,
+        skillId: parsed.id,
+        title: parsed.resource,
+      }, value)
+    })
   }
 
   function searchText(id, skill) {
@@ -101,6 +140,7 @@
       (skill.relatedApis || []).join(' '),
       (skill.tools || []).join(' '),
       (skill.rules || []).join(' '),
+      (skill.resources || []).map(function (resource) { return resource.path }).join(' '),
     ].join(' ').toLowerCase()
   }
 
@@ -138,6 +178,11 @@
         relatedApis: { type: 'array' },
         tools: { type: 'array' },
         docPath: { type: 'string' },
+        resourceCount: { type: 'number' },
+        resources: { type: 'array' },
+        source: { type: 'string' },
+        layer: { type: 'string' },
+        hash: { type: 'string' },
         systemPrompt: { type: 'string' },
         rules: { type: 'array' },
       },
@@ -145,8 +190,15 @@
   }
 
   function capabilities(ref) {
-    const id = skillIdFromUri(ref && ref.uri)
-    return (!id || getSkill(id)) ? ['read'] : []
+    const parsed = parseSkillUri(ref && ref.uri)
+    if (!parsed || !parsed.id) return parsed ? ['read'] : []
+    const skill = getSkill(parsed.id)
+    if (!skill) return []
+    if (!parsed.resource) return ['read']
+    if (typeof skill.readResource !== 'function') return []
+    return (skill.resources || []).some(function (item) {
+      return item.path === parsed.resource && item.kind === 'reference'
+    }) ? ['read'] : []
   }
 
   ai.references.register('skills', {

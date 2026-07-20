@@ -40,28 +40,52 @@
     return out
   }
 
-  function jsonSchema(schema) {
-    if (!schema) return { type: 'object', properties: {} }
-    if (schema.type) return schema
-    const props = {}
-    Object.keys(schema || {}).forEach(function (key) {
-      const value = schema[key]
-      if (typeof value === 'string') props[key] = value === 'any' ? {} : { type: value === 'array' ? 'array' : value }
-      else props[key] = value || {}
-    })
-    return { type: 'object', properties: props }
-  }
-
-  function toolName(id) {
+  function toolNameBase(id) {
     return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '__').slice(0, 64)
   }
 
-  function toolIdFromName(name, request) {
-    const specs = request.toolSpecs || []
-    for (let i = 0; i < specs.length; i++) {
-      if (toolName(specs[i].id) === name || specs[i].id === name) return specs[i].id
+  function hashText(text) {
+    let hash = 2166136261
+    const value = String(text || '')
+    for (let i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i)
+      hash = Math.imul(hash, 16777619)
     }
-    return name
+    return (hash >>> 0).toString(36)
+  }
+
+  function toolAliasMap(request) {
+    const specs = request && request.toolSpecs || []
+    const byId = {}
+    const byName = {}
+    for (let i = 0; i < specs.length; i++) {
+      const id = String(specs[i].id || '')
+      let name = toolNameBase(id)
+      if (!name) throw new Error('Tool id cannot produce a provider alias')
+      if (byName[name] && byName[name] !== id) {
+        const suffix = '__' + hashText(id)
+        name = name.slice(0, 64 - suffix.length) + suffix
+      }
+      if (byName[name] && byName[name] !== id) throw new Error('Provider tool alias collision: ' + id + ' and ' + byName[name])
+      byId[id] = name
+      byName[name] = id
+    }
+    return { byId: byId, byName: byName }
+  }
+
+  function toolName(id, request) {
+    const map = toolAliasMap(request || {})
+    return map.byId[id] || toolNameBase(id)
+  }
+
+  function toolIdFromName(name, request) {
+    const map = toolAliasMap(request || {})
+    return map.byName[name] || name
+  }
+
+  function toolDescription(tool) {
+    const description = tool.description || tool.title || ''
+    return 'Public tool id: ' + tool.id + (description ? '. ' + description : '')
   }
 
   function openAiTools(request) {
@@ -70,9 +94,9 @@
       return {
         type: 'function',
         function: {
-          name: toolName(tool.id),
-          description: tool.description || tool.title || tool.id,
-          parameters: jsonSchema(tool.schema),
+          name: toolName(tool.id, request),
+          description: toolDescription(tool),
+          parameters: ai.normalizeToolSchema(tool.schema),
         },
       }
     })
@@ -85,11 +109,13 @@
   function normalizeOpenAiToolCalls(calls, request) {
     return (calls || []).map(function (call) {
       const fn = call.function || {}
-      const id = toolIdFromName(fn.name || call.name || call.toolId || call.id, request)
+      const providerName = fn.name || call.providerName || call.name || call.toolId || call.id
+      const id = toolIdFromName(providerName, request)
       return {
         id: call.id || null,
         toolId: id,
         name: id,
+        providerName: providerName,
         args: call.args || parseJsonArg(fn.arguments || call.arguments || ''),
       }
     })
@@ -156,7 +182,7 @@
             id: call.providerCallId || call.id,
             type: 'function',
             function: {
-              name: toolName(call.toolId || call.name),
+              name: call.providerName || toolName(call.toolId || call.name, request),
               arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(call.args || {}) : JSON.stringify(call.args || {}),
             },
           }
@@ -192,8 +218,38 @@
     for (let i = 0; i < (messages || []).length; i++) {
       const m = messages[i]
       if (m.role === 'system') continue
+      if (m.role === 'tool') {
+        const block = {
+          type: 'tool_result',
+          tool_use_id: toolResponseId(m),
+          content: messageText(m.content),
+        }
+        const previous = out[out.length - 1]
+        if (previous && previous.role === 'user' && Array.isArray(previous.content) && previous.content.length && previous.content[0].type === 'tool_result') {
+          previous.content.push(block)
+        } else {
+          out.push({ role: 'user', content: [block] })
+        }
+        continue
+      }
       const role = m.role === 'assistant' ? 'assistant' : 'user'
       let content = messageText(m.content)
+      const calls = m.toolCalls || []
+      if (role === 'assistant' && calls.length) {
+        const blocks = []
+        if (content) blocks.push({ type: 'text', text: content })
+        for (let j = 0; j < calls.length; j++) {
+          const call = calls[j]
+          blocks.push({
+            type: 'tool_use',
+            id: toolCallId(call),
+            name: call.providerName || toolName(call.toolId || call.name, request),
+            input: call.args || {},
+          })
+        }
+        out.push({ role: role, content: blocks })
+        continue
+      }
       if (role === 'user' && images.length && !imagesAttached) {
         const blocks = []
         if (content) blocks.push({ type: 'text', text: content })
@@ -217,6 +273,37 @@
       })
     }
     return out
+  }
+
+  function anthropicTools(request) {
+    const specs = request.toolSpecs || []
+    return specs.map(function (tool) {
+      return {
+        name: toolName(tool.id, request),
+        description: toolDescription(tool),
+        input_schema: ai.normalizeToolSchema(tool.schema),
+      }
+    })
+  }
+
+  function normalizeAnthropicContent(content, request) {
+    const chunks = Array.isArray(content) ? content : []
+    const text = []
+    const toolCalls = []
+    for (let i = 0; i < chunks.length; i++) {
+      const item = chunks[i] || {}
+      if (item.type === 'text' && item.text) text.push(item.text)
+      if (item.type !== 'tool_use') continue
+      const id = toolIdFromName(item.name || '', request)
+      toolCalls.push({
+        id: item.id || null,
+        toolId: id,
+        name: id,
+        providerName: item.name || '',
+        args: item.input || {},
+      })
+    }
+    return { content: text.join(''), toolCalls: toolCalls }
   }
 
   function anthropicSystem(messages) {
@@ -348,10 +435,13 @@
   }
 
   ai.messageText = ai.messageText || messageText
+  ai.toolAliasMap = toolAliasMap
   ai.openAiTools = openAiTools
   ai.openAiMessages = openAiMessages
   ai.normalizeOpenAiToolCalls = normalizeOpenAiToolCalls
   ai.anthropicPayloadMessages = anthropicPayloadMessages
+  ai.anthropicTools = anthropicTools
+  ai.normalizeAnthropicContent = normalizeAnthropicContent
   ai.anthropicSystem = anthropicSystem
   ai.encodeTextToolRequest = encodeTextToolRequest
   ai.decodeTextToolResponse = decodeTextToolResponse

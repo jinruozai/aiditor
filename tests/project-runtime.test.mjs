@@ -45,6 +45,8 @@ for (const file of [
   'src/ai/name-generator.js',
   'src/ai/permission.js',
   'src/ai/store.js',
+  'src/ai/connection.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/workdir.js',
@@ -57,6 +59,9 @@ for (const file of [
 }
 
 const aiditor = window.aiditor
+aiditor.ai.registerTransport('project-test', { toolProtocol: 'native' })
+aiditor.ai.registerConnection('project-test', { auth: { type: 'none' }, transport: { type: 'project-test' }, configDefaults: {} })
+aiditor.ai.setActiveConnection('project-test')
 
 const closedProjectAgent = aiditor.ai.createAgent({
   name: 'Closed Project Agent',

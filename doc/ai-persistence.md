@@ -1,338 +1,208 @@
 # AI Persistence
 
-This document defines how the optional AI Host persists recoverable runtime state
-without turning browser `localStorage` into a full transcript database.
+AIditor persists the complete AI transcript independently from the working
+context sent to a model. Persistence is a framework responsibility because
+agents, messages, tool calls, quests, attachments, and active selection are AI
+Host runtime records. It is not project truth or editor history.
 
-AI persistence is a framework responsibility because agents, messages, queues,
-tool calls, attachments, and active agent state all live in `src/ai/store.js`.
-Host projects still own their own project files, domain records, editor history,
-and durable product data.
+## Invariants
 
-## Boundary
+1. The in-memory Store is the live source of truth.
+2. Durable persistence preserves every JSON-safe transcript message. It does
+   not truncate message content, reasoning, tool calls, or older rows to meet a
+   model context budget.
+3. Context compaction only derives a bounded provider request from the complete
+   transcript. It never deletes UI history.
+4. Reload restoration may normalize interrupted runtime states, but it does not
+   silently remove completed history.
+5. Persistence failure leaves the in-memory Store intact and reports one
+   structured warning. It must not replace a newer transcript with a stale
+   compact snapshot.
 
-Local persistence has one job:
+This is the same separation used by mature agent runtimes: durable messages are
+stored as session records, while compaction produces a model-facing projection.
+
+## Storage Layers
+
+The browser implementation uses two deliberately different stores:
 
 ```text
-restore a usable AI runtime session after reload
+IndexedDB     complete durable runtime snapshot; persistence source of truth
+localStorage  small synchronous bootstrap manifest; never transcript content
 ```
 
-It is not:
+IndexedDB is the default because it is asynchronous, transactional, supports
+structured records, and is intended for substantially larger browser data than
+Web Storage. It requires no server and works with AIditor's zero-dependency
+runtime.
 
-- a complete transcript archive;
-- a provider request compaction strategy;
-- project or workspace persistence;
-- editor history;
-- a place to store blobs, screenshots, full tool logs, file contents, or host
-  domain state.
-
-`localStorage` stores only compact, recoverable state. A storage backend with a
-larger quota may preserve full transcripts, but that is a different backend
-contract. The default browser storage path must stay conservative and bounded.
+The bootstrap manifest exists only so classic scripts and panels can discover
+the Agent tree and active Agent before the asynchronous durable load finishes.
+It contains stable Agent identity/configuration, active Agent id, and last model
+preference. Message arrays, tool results, quests, inbox events, memory, and
+compaction records are never written to localStorage.
 
 ## Public API
-
-`aiditor.ai.configurePersistence(options)` owns all local AI runtime persistence
-settings:
 
 ```js
 aiditor.ai.configurePersistence({
   enabled: true,
   namespace: 'my-editor',
-  key: null,
+  adapter: aiditor.ai.persistence.indexedDbAdapter(),
+  debounceMs: 500,
   load: true,
-  maxBytes: 2 * 1024 * 1024,
-  maxMessagesPerAgent: 80,
-  toolResultPolicy: 'compact',
 })
+
+await aiditor.ai.persistence.ready()
+await aiditor.ai.persistence.flush()
+await aiditor.ai.clearStoredState()
 ```
 
 Options:
 
 | Option | Meaning |
 | --- | --- |
-| `enabled` | Enables or disables AI runtime persistence. Disabling does not clear existing storage. |
-| `namespace` | App or workspace identity used to derive the storage key. |
-| `key` | Advanced exact storage-key override. When omitted, the key is derived from `namespace`. |
-| `load` | When not `false`, reads stored state immediately after configuration. |
-| `maxBytes` | Conservative serialized storage budget for the localStorage payload. |
-| `maxMessagesPerAgent` | Maximum latest messages retained per agent in compact persistent state. |
-| `toolResultPolicy` | `compact`, `metadata-only`, or `none`. Controls persisted tool result detail. |
+| `enabled` | Enables durable AI persistence without clearing stored state. |
+| `namespace` | App/workspace identity used to derive the durable key. |
+| `key` | Exact advanced identity override. |
+| `adapter` | Async durable adapter. IndexedDB is the browser default. |
+| `debounceMs` | Coalesces streaming updates before a durable write. |
+| `load` | When not `false`, restores the selected durable identity. |
 
-The base key is always:
+The identity base is `aiditor.ai`. A namespace produces
+`aiditor.ai.<namespace>`. When omitted, AIditor derives a namespace from the app
+location so different editor apps on the same origin do not share Agents.
+Format versions remain inside stored records, never inside the storage key.
 
-```text
-aiditor.ai
-```
-
-With a namespace, the effective key is:
+`persistence.status` is a signal with these stable states:
 
 ```text
-aiditor.ai.<namespace>
+loading | ready | saving | error | disabled | unavailable
 ```
 
-If the host does not provide a namespace, the framework derives one from the
-current app location. This makes separate AIditor apps on the same origin use
-separate AI runtime state by default. If no location is available, the base key
-`aiditor.ai` is used.
+Hosts that synchronously create a default Agent should wait for
+`persistence.ready()` first. Panels may mount immediately; Store signals update
+them when durable state is hydrated.
 
-The storage key is identity, not schema. Do not put the snapshot format version
-into the key. Format versioning belongs inside the stored snapshot's `version`
-field so the runtime can parse or migrate stored data without changing app
-identity.
+## Adapter Contract
 
-The default `maxBytes` should be well below common per-origin storage limits.
-The budget is for the single AI state key, not the whole origin. Other AIditor
-systems, host code, and browser data may share the same quota.
+```text
+load(key)          -> Promise<envelope | null>
+save(key, envelope)-> Promise<void>
+remove(key)        -> Promise<void>
+```
 
-`aiditor.ai.clearStoredState()` removes only the configured AI persistence key.
-It must not clear project data, workspace snapshots, settings, or extension
-state.
-
-Changing `namespace` or `key` changes the AI runtime identity. The store clears
-the current in-memory AI runtime and then restores from the new key. This avoids
-leaking agents or transcript rows from one app/workspace identity into another.
-
-## Snapshot Shape
-
-Persistent snapshots keep the existing versioned state envelope:
+Envelope:
 
 ```js
 {
-  version: 2,
-  agents: [],
-  attachments: [],
-  activeAgentId: null,
+  version: 1,
+  savedAt: 0,
+  state: {
+    version: 2,
+    agents: [],
+    attachments: [],
+    preferences: {},
+    activeAgentId: null,
+  },
 }
 ```
 
-The persisted state must preserve:
+The snapshot is JSON-safe at the framework boundary. DOM nodes, functions,
+cycles, and other runtime-only values are normalized by `aiditor.ai.serialize`;
+normal text and structured tool/message data are not shortened.
 
-- agent identity, parent/child order, model/connection choices, permission mode,
-  skills, tools, memory, compaction records, quests, inbox summaries, and active
-  agent id;
-- enough latest messages to continue the conversation after reload;
-- tool call identity, name, status, timestamps, permission actor, error summary,
-  and compact argument/result metadata;
-- lightweight attachment and context reference metadata.
+Desktop hosts may provide a SQLite or filesystem-backed adapter with the same
+contract. The framework does not expose real filesystem paths or require a
+server.
 
-The persisted state must not preserve:
+## Save And Restore
 
-- full large message bodies beyond the configured budget;
-- full tool result payloads, previews, apply results, or large argument objects;
-- binary data;
-- provider streaming buffers that are only useful for the current run;
-- host-specific project truth.
+Store changes update the small bootstrap manifest immediately and debounce the
+asynchronous durable write. Writes are serialized so an older save cannot land
+after a newer one. If Store state changes while a write is in flight, another
+write is scheduled.
 
-Restore normalizes transient runtime state. Running, queued, waiting, stopped,
-and failed activity must return to an idle or stopped state that the UI can
-display safely after reload.
+`visibilitychange`, `pagehide`, and `beforeunload` start an immediate flush of
+pending state. Browser teardown cannot make an asynchronous transaction
+mathematically synchronous, so stable mutation points also schedule durable
+writes rather than relying only on unload.
 
-Stored data is an external persistence boundary even when AIditor originally
-wrote it. Invalid typed fields are normalized without preventing the rest of a
-recoverable snapshot from loading. For example, a malformed quest `plan`
-becomes an empty plan while the agent and its messages remain available.
-
-## Save Algorithm
-
-Saving follows one deterministic path:
+Restore order:
 
 ```text
-runtime state
-  -> full recoverable snapshot
-  -> serialize once
-  -> estimate storage bytes
-  -> write if within budget
-  -> compact if over budget
-  -> emergency compact if setItem still reports quota
-  -> disable persistence for this runtime session if storage still fails
+read bootstrap manifest synchronously
+  -> load durable envelope asynchronously
+  -> restore complete transcript
+  -> normalize interrupted runs/tool calls
+  -> publish ready status
 ```
 
-Rules:
+If local Store mutations occur while durable state is loading, restoration
+merges records by stable Agent/message id and keeps the newer in-memory record.
+This prevents hydration from discarding a message submitted during startup.
 
-1. Serialization happens before `setItem`. The runtime checks the estimated
-   byte size against `maxBytes` and does not knowingly attempt an oversized
-   write.
-2. Size estimation must be conservative for browser storage. UTF-16 character
-   count times two is acceptable for `localStorage`.
-3. Compaction is deterministic. The same runtime state and persistence options
-   produce the same compact snapshot.
-4. Typed runtime records keep their protocol shape during compaction. Quest
-   plans remain arrays of quest-step records; only bounded text and open
-   metadata payloads may be summarized. Compaction must never replace a typed
-   collection with a serialized string.
-5. `setItem` quota failures trigger one emergency compaction attempt.
-6. If emergency compaction still cannot be written, persistence is disabled for
-   the current runtime session and the framework emits one throttled warning.
-7. Reactive save ticks must not report the same quota failure repeatedly.
+An existing version-2 localStorage snapshot is read once as a migration source
+when no durable IndexedDB record exists. After the first successful durable
+save, localStorage is rewritten as a bootstrap-only manifest. Migration cannot
+recover rows that an older lossy snapshot already removed.
 
-Quota failure is a storage degradation, not a project data failure. The user can
-continue working with the in-memory AI runtime; only reload recovery is degraded
-for that session.
+## Context Compaction
 
-## Compaction Policy
-
-Persistence compaction is separate from model request compaction. It is a local
-storage safety mechanism, not semantic memory.
-
-### Agents
-
-Compacted snapshots keep all agents, not only the active one. Agent metadata is
-small and necessary for tree restoration. Per-agent message lists are reduced to
-the latest `maxMessagesPerAgent` messages.
-
-If old messages are omitted, the agent should retain a compact marker so UI and
-debug tools can explain that the restored transcript is partial. This marker is
-diagnostic metadata, not model context.
-
-### Messages
-
-Message content is truncated much more aggressively for persistence than for
-in-memory transcript rendering. Recent messages are useful after reload, but
-they must still fit the storage budget.
-
-Recommended persistent message caps:
+`aiditor.ai.compaction` owns model context pressure:
 
 ```text
-content            small text summary window
-reasoning_content  very small diagnostic excerpt
-meta/stats/usage    keep scalar summaries, drop large nested payloads
-contextRefs         normalize to lightweight refs
-attachments         keep ids and light metadata only
+complete durable transcript
+  -> compaction records + recent raw tail
+  -> bounded provider request
 ```
 
-The in-memory transcript stays unchanged. Only the serialized persistence
-snapshot is compacted.
+Compaction records cite source message ids and remain auditable. The transcript
+panel always reads `agent.messages`, not the compact request projection. Storage
+quotas and model token limits are unrelated policies.
 
-### Tool Calls
+## Runtime Checkpoints
 
-Tool calls keep identity and lifecycle information:
+`aiditor.ai.checkpoints` is a separate optional recovery primitive. It captures
+queued work and execution state for host-controlled recovery. Transcript
+persistence is always-on durable chat history; checkpoints are explicit run
+recovery. They share the same small adapter shape but not lifecycle or policy.
+
+## Errors
+
+Persistence failures use stable codes:
 
 ```text
-id
-providerCallId
-toolId / name
-status
-actor
-createdAt / updatedAt
-error summary
-args summary
-preview/result/applyResult according to toolResultPolicy
+AI_PERSISTENCE_UNAVAILABLE
+AI_PERSISTENCE_LOAD_FAILED
+AI_PERSISTENCE_SAVE_FAILED
+AI_PERSISTENCE_REMOVE_FAILED
+AI_PERSISTENCE_BOOTSTRAP_FAILED
 ```
 
-`toolResultPolicy` meanings:
+Only one warning per operation/key is reported during a runtime session.
+An automatic save failure suspends further debounced writes for the current
+configuration; an explicit `flush()` retries, and reconfiguration clears the
+suspension. Failures never clear the active Store and never trigger lossy
+transcript compaction.
 
-| Policy | Persisted tool detail |
-| --- | --- |
-| `compact` | Keep bounded structured summaries of args, preview, result, and applyResult. |
-| `metadata-only` | Keep identity, status, tool name, timestamps, error summary, and a short args summary; drop result bodies. |
-| `none` | Keep only tool identity/lifecycle metadata needed to render a historical row. |
+## Required Tests
 
-No policy may persist raw blobs or unbounded strings.
-
-### Attachments And Context Refs
-
-Attachments and context refs are stored as normalized lightweight references:
-
-```text
-id
-kind / resolver
-uri
-title
-summary
-createdAt / updatedAt
-small scalar meta
-```
-
-They should not embed the referenced content. Exact content is resolved again
-through registered context/reference providers when needed.
-
-## Error Reporting
-
-The persistence layer reports structured storage warnings through
-`aiditor.reportError` or the log system with enough context for UI display. The
-report source is:
-
-```js
-{
-  scope: 'ai',
-  storage: 'aiditor.ai.my-editor',
-  op: 'save',
-  reason: 'quota_exceeded',
-}
-```
-
-The reported `Error` carries stable diagnostic fields:
-
-```js
-{
-  reason: 'quota_exceeded',
-  code: 'ai_persistence_quota_exceeded',
-  storageKey: 'aiditor.ai.my-editor',
-  maxBytes: 2097152,
-  bytes: 180012,
-  cause: originalStorageError
-}
-```
-
-Stable reasons:
-
-```text
-quota_exceeded
-size_exceeded
-storage_error
-serialization_failed
-```
-
-Repeated quota errors for the same key and runtime session are coalesced. The
-runtime may expose state for diagnostics, but hosts should not need to poll or
-special-case quota failures.
-
-Reactive changes are written through a short debounce so streaming updates do
-not block the UI. The runtime flushes a pending debounced save on
-`beforeunload`, `pagehide`, and `visibilitychange` when the document becomes
-hidden. Hosts should not add their own unload persistence path for AI chat
-state.
-
-## Read Algorithm
-
-Reading persisted state is also bounded:
-
-1. If storage is unavailable, return no snapshot.
-2. Parse a versioned snapshot before applying the read budget. A valid
-   oversized snapshot is treated as an older/unbounded persistence payload.
-3. If the stored string is above the configured read budget, compact it through
-   the same deterministic persistence compaction path used by save, attempt to
-   write the compacted snapshot back, and restore the compacted data.
-4. If compacted rewrite fails, still restore the compacted in-memory snapshot
-   for this load rather than dropping all chat history.
-5. If parsing fails, remove the key only when the failure is clearly caused by
-   this AI persistence payload.
-6. Restore versioned snapshots through the normal `makeAgent`, `makeMessage`,
-   and runtime normalization path.
-
-Compacted snapshots are valid snapshots. Restore must not require host projects
-to understand compaction markers.
-
-## Tests
-
-Required coverage:
-
-- an oversized message compacts before storage is written;
-- many large tool calls compact below `maxBytes`;
-- `QuotaExceededError` triggers emergency compaction and does not spam
-  `reportError`;
-- persistence disables itself for the current runtime session if storage still
-  fails after emergency compaction;
-- restored compacted messages and tool calls remain renderable and readable;
-- `clearStoredState()` removes the configured key;
-- valid stored snapshots above the read budget compact and restore on load;
-- pending debounced saves flush before page unload / page hide.
+- complete old and new messages survive repeated save/reload cycles;
+- large message and tool-call content is restored without truncation;
+- model context compaction does not alter persisted transcript rows;
+- bootstrap localStorage contains no message bodies;
+- a mutation during async load is merged rather than overwritten;
+- serialized writes cannot land out of order;
+- pending writes flush on lifecycle events;
+- storage errors are structured and warning-coalesced;
+- clearing removes both durable state and the bootstrap manifest;
+- separate namespaces remain isolated.
 
 ## Non-Goals
 
-- No project-specific persistence policy.
-- No workspace file storage.
-- No editor history or undo journal.
-- No model-facing context compaction change.
-- No hidden server requirement.
-- No full transcript guarantee in `localStorage`.
+- No project/workspace file persistence.
+- No server requirement.
+- No automatic transcript retention or deletion policy.
+- No use of model context limits as storage limits.
+- No resumable provider socket claim after page teardown.

@@ -16,22 +16,9 @@
   const messageListVersionSigs = {}
   const messageVersionSigs = {}
   const activeRunStateSigs = {}
+  const storeVersionSig = aiditor.signal(0)
+  let suppressStoreVersion = false
   let lastModelSelection = { connection: null, model: null }
-  const PERSISTENCE_BASE_KEY = 'aiditor.ai'
-  let persistenceNamespace = defaultPersistenceNamespace()
-  let persistenceKey = persistenceKeyFor(persistenceNamespace)
-  let persistenceEnabled = true
-  let persistenceDisabledForSession = false
-  let persistenceWarningReported = false
-  let persistenceMaxBytes = 2 * 1024 * 1024
-  let persistenceMaxMessagesPerAgent = 80
-  let persistenceToolResultPolicy = 'compact'
-  let saveTimer = null
-  const MAX_SNAPSHOT_CONTENT_CHARS = 1000000
-  const MAX_SNAPSHOT_REASONING_CHARS = 65536
-  const MAX_STORED_STATE_CHARS = 5000000
-  const MAX_SNAPSHOT_TOOL_STRING_CHARS = 12000
-  const PERSISTENCE_TOOL_POLICIES = { compact: true, 'metadata-only': true, none: true }
 
   function now() { return Date.now() }
 
@@ -97,6 +84,7 @@
       activeMessageId: spec.activeMessageId || null,
       activeQuestId: spec.activeQuestId || null,
       systemPrompt: spec.systemPrompt || '',
+      outputSchema: spec.outputSchema ? ai.schema.normalize(spec.outputSchema, 'outputSchema') : null,
       messages: (spec.messages || []).map(makeMessage),
       compactions: (spec.compactions || []).map(makeCompaction),
       queue: (spec.queue || []).map(makeQueueItem),
@@ -112,6 +100,22 @@
       updatedAt: spec.updatedAt || now(),
       meta: spec.meta || {},
     }
+  }
+
+  function normalizeRuntimeEvents(value) {
+    if (Array.isArray(value)) return value
+    if (typeof value !== 'string') return []
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (_) {
+      return []
+    }
+  }
+
+  function normalizeMessageMeta(meta) {
+    if (!meta || meta.runtimeEvent !== 'inbox.continuation') return meta || null
+    return Object.assign({}, meta, { events: normalizeRuntimeEvents(meta.events) })
   }
 
   function makeMessage(spec) {
@@ -135,9 +139,10 @@
       toolCalls: spec.toolCalls ? spec.toolCalls.slice() : [],
       questId: spec.questId || null,
       resultForQuestId: spec.resultForQuestId || null,
-      meta: spec.meta || null,
+      meta: normalizeMessageMeta(spec.meta),
       usage: spec.usage || null,
       stats: spec.stats || null,
+      output: Object.prototype.hasOwnProperty.call(spec, 'output') ? spec.output : null,
     }
   }
 
@@ -147,7 +152,6 @@
       messageId: spec.messageId || null,
       priority: cleanOrder(spec.priority, 0),
       interrupt: !!spec.interrupt,
-      guidance: spec.guidance || null,
       createdAt: spec.createdAt || now(),
     }
   }
@@ -268,6 +272,10 @@
     sig.set(sig.peek() + 1)
   }
 
+  function touchStore() {
+    if (!suppressStoreVersion) bump(storeVersionSig)
+  }
+
   function bumpMessageList(agentId) {
     bump(versionSig(messageListVersionSigs, agentId))
   }
@@ -322,6 +330,7 @@
       out = fn(agents.slice())
       return out
     })
+    touchStore()
     return out
   }
 
@@ -341,9 +350,12 @@
     if (agent.parentAgentId && (!findAgent(agent.parentAgentId) || isDescendant(agent.id, agent.parentAgentId))) {
       agent.parentAgentId = null
     }
-    agentsSig.update(function (agents) { return agents.concat([agent]) })
+    updateAgents(function (agents) { return agents.concat([agent]) })
     bumpAgent(agent.id)
-    if (!spec || spec.select !== false) activeAgentIdSig.set(agent.id)
+    if (!spec || spec.select !== false) {
+      activeAgentIdSig.set(agent.id)
+      touchStore()
+    }
     return agent
   }
 
@@ -355,6 +367,9 @@
         out = Object.assign({}, agent, patch || {}, { updatedAt: now() })
         if (patch && patch.parentAgentId && (!findAgent(patch.parentAgentId) || isDescendant(id, patch.parentAgentId))) out.parentAgentId = agent.parentAgentId || null
         if (patch && patch.permissions) out.permissions = normalizePermissionList(patch.permissions)
+        if (patch && Object.prototype.hasOwnProperty.call(patch, 'outputSchema')) {
+          out.outputSchema = patch.outputSchema ? ai.schema.normalize(patch.outputSchema, 'outputSchema') : null
+        }
         delete out.workingDirectory
         delete out.workdir
         delete out.path
@@ -407,17 +422,20 @@
     const removed = findAgent(id)
     if (!removed) return null
     const removeIds = new Set([id].concat(descendantIdsOf(id)))
-    agentsSig.update(function (agents) { return agents.filter(function (agent) { return !removeIds.has(agent.id) }) })
+    updateAgents(function (agents) { return agents.filter(function (agent) { return !removeIds.has(agent.id) }) })
     removeIds.forEach(function (agentId) { deleteAgentSignals(agentId) })
     if (removeIds.has(activeAgentIdSig.peek())) {
       const rest = agentsSig.peek()
       activeAgentIdSig.set(rest.length ? rest[0].id : null)
+      touchStore()
     }
     return removed
   }
 
   function selectAgent(id) {
+    if (activeAgentIdSig.peek() === id) return findAgent(id)
     activeAgentIdSig.set(id)
+    touchStore()
     return findAgent(id)
   }
 
@@ -499,7 +517,7 @@
     updateAgents(function (agents) {
       return agents.map(function (agent) {
         if (agent.id !== agentId) return agent
-        out = makeQueueItem({ messageId: messageId, priority: opts.priority, interrupt: opts.interrupt, guidance: opts.guidance })
+        out = makeQueueItem({ messageId: messageId, priority: opts.priority, interrupt: opts.interrupt })
         const queue = opts.interrupt ? [out].concat(agent.queue || []) : (agent.queue || []).concat([out])
         return Object.assign({}, agent, {
           queue: queue,
@@ -619,6 +637,7 @@
   function addAttachment(spec) {
     const attachment = makeAttachment(spec)
     attachmentsSig.update(function (items) { return items.concat([attachment]) })
+    touchStore()
     return attachment
   }
 
@@ -637,25 +656,8 @@
         })
       })
     })
+    touchStore()
     return removed
-  }
-
-  function storage() {
-    try { return window.localStorage || null } catch (_) { return null }
-  }
-
-  function normalizeNamespace(value) {
-    return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '')
-  }
-
-  function defaultPersistenceNamespace() {
-    if (!window.location) return ''
-    return normalizeNamespace(String(window.location.origin || '') + String(window.location.pathname || ''))
-  }
-
-  function persistenceKeyFor(namespace) {
-    const ns = normalizeNamespace(namespace)
-    return ns ? PERSISTENCE_BASE_KEY + '.' + ns : PERSISTENCE_BASE_KEY
   }
 
   function clearMap(map) {
@@ -663,8 +665,7 @@
   }
 
   function resetRuntimeState() {
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = null
+    suppressStoreVersion = true
     nextAgentId = 1
     nextMessageId = 1
     nextAttachmentId = 1
@@ -677,17 +678,19 @@
     attachmentsSig.set([])
     activeAgentIdSig.set(null)
     lastModelSelection = { connection: null, model: null }
-  }
-
-  function resetPersistenceFailureState() {
-    persistenceDisabledForSession = false
-    persistenceWarningReported = false
+    suppressStoreVersion = false
+    touchStore()
   }
 
   function snapshot() {
-    return {
+    const data = {
       version: 2,
-      agents: agentsSig.peek().map(snapshotAgent),
+      agents: agentsSig.peek().map(function (agent) {
+        const out = Object.assign({}, agent)
+        delete out.path
+        delete out.groupId
+        return out
+      }),
       attachments: attachmentsSig.peek(),
       preferences: {
         lastConnection: lastModelSelection.connection,
@@ -695,349 +698,17 @@
       },
       activeAgentId: activeAgentIdSig.peek(),
     }
+    return ai.serialize && ai.serialize.clone ? ai.serialize.clone(data) : JSON.parse(JSON.stringify(data))
   }
 
-  function snapshotAgent(agent) {
-    const out = Object.assign({}, agent, {
-      contextRefs: [],
-      messages: (agent.messages || []).map(snapshotMessage),
-    })
-    delete out.path
-    delete out.groupId
-    return out
-  }
-
-  function limitString(value, max) {
-    if (typeof value !== 'string' || value.length <= max) return value
-    return value.slice(0, max) + '\n\n[truncated for persistence]'
-  }
-
-  function snapshotMessage(message) {
-    const out = Object.assign({}, message)
-    out.content = limitString(out.content, MAX_SNAPSHOT_CONTENT_CHARS)
-    out.reasoning_content = limitString(out.reasoning_content, MAX_SNAPSHOT_REASONING_CHARS)
-    if (out.toolCalls && out.toolCalls.length) out.toolCalls = out.toolCalls.map(snapshotToolCall)
-    return out
-  }
-
-  function stringifySnapshotValue(value) {
-    try { return ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(value) : JSON.stringify(value) } catch (err) {
-      return JSON.stringify({ error: 'Value is not JSON serializable', message: String(err && err.message || err) })
-    }
-  }
-
-  function compactSnapshotValue(value, depth, seen) {
-    if (value == null) return value
-    if (typeof value === 'string') return limitString(value, MAX_SNAPSHOT_TOOL_STRING_CHARS)
-    if (typeof value === 'number' || typeof value === 'boolean') return value
-    if (typeof value === 'bigint') return String(value)
-    if (typeof value === 'function') return '[Function]'
-    if (typeof value !== 'object') return String(value)
-    if (value.nodeType === 1 || value.nodeType === 9 || value.nodeType === 11) {
-      return ai.serialize && ai.serialize.stringify ? JSON.parse(ai.serialize.stringify(value)) : '[DOM node]'
-    }
-    seen = seen || []
-    for (let s = 0; s < seen.length; s++) if (seen[s] === value) return '[Circular]'
-    if (depth <= 0) return limitString(stringifySnapshotValue(value), MAX_SNAPSHOT_TOOL_STRING_CHARS)
-    seen.push(value)
-    if (Array.isArray(value)) {
-      const out = []
-      const n = Math.min(value.length, 32)
-      for (let i = 0; i < n; i++) out.push(compactSnapshotValue(value[i], depth - 1, seen))
-      if (value.length > n) out.push('[+' + (value.length - n) + ' items truncated]')
-      seen.pop()
-      return out
-    }
-    const out = {}
-    const keys = Object.keys(value)
-    const n = Math.min(keys.length, 48)
-    for (let i = 0; i < n; i++) out[keys[i]] = compactSnapshotValue(value[keys[i]], depth - 1, seen)
-    if (keys.length > n) out.__truncatedKeys = keys.length - n
-    seen.pop()
-    return out
-  }
-
-  function snapshotToolCall(call) {
-    return {
-      id: call.id,
-      providerCallId: call.providerCallId,
-      toolId: call.toolId,
-      name: call.name,
-      args: compactSnapshotValue(call.args || {}, 4),
-      status: call.status,
-      actor: call.actor,
-      createdAt: call.createdAt,
-      updatedAt: call.updatedAt,
-      error: limitString(call.error, 4000),
-      preview: compactSnapshotValue(call.preview, 3),
-      result: compactSnapshotValue(call.result, 3),
-      applyResult: compactSnapshotValue(call.applyResult, 3),
-    }
-  }
-
-  function storageBytes(text) {
-    return String(text || '').length * 2
-  }
-
-  function serializeSnapshot(data) {
-    return JSON.stringify(data)
-  }
-
-  function boundedNumber(value, fallback, min) {
-    const n = Math.floor(Number(value))
-    return isFinite(n) && n >= min ? n : fallback
-  }
-
-  function compactString(value, max) {
-    if (typeof value !== 'string' || value.length <= max) return value
-    return value.slice(0, max) + '\n\n[truncated for persistence]'
-  }
-
-  function compactPersistenceValue(value, depth, stringMax, arrayMax, objectMax, seen) {
-    if (value == null) return value
-    if (typeof value === 'string') return compactString(value, stringMax)
-    if (typeof value === 'number' || typeof value === 'boolean') return value
-    if (typeof value === 'bigint') return String(value)
-    if (typeof value === 'function') return '[Function]'
-    if (typeof value !== 'object') return String(value)
-    seen = seen || []
-    for (let i = 0; i < seen.length; i++) if (seen[i] === value) return '[Circular]'
-    if (depth <= 0) return compactString(stringifySnapshotValue(value), stringMax)
-    seen.push(value)
-    if (Array.isArray(value)) {
-      const out = []
-      const n = Math.min(value.length, arrayMax)
-      for (let j = 0; j < n; j++) out.push(compactPersistenceValue(value[j], depth - 1, stringMax, arrayMax, objectMax, seen))
-      if (value.length > n) out.push('[+' + (value.length - n) + ' items truncated]')
-      seen.pop()
-      return out
-    }
-    const out = {}
-    const keys = Object.keys(value).sort()
-    const n = Math.min(keys.length, objectMax)
-    for (let k = 0; k < n; k++) out[keys[k]] = compactPersistenceValue(value[keys[k]], depth - 1, stringMax, arrayMax, objectMax, seen)
-    if (keys.length > n) out.__truncatedKeys = keys.length - n
-    seen.pop()
-    return out
-  }
-
-  function compactRefs(list, emergency) {
-    const out = []
-    const input = Array.isArray(list) ? list : []
-    const max = emergency ? 16 : 64
-    for (let i = 0; i < input.length && i < max; i++) {
-      const item = input[i]
-      if (typeof item === 'string') out.push(item)
-      else if (item && typeof item === 'object') {
-        out.push({
-          id: item.id || item.refId || null,
-          refId: item.refId || item.id || null,
-          kind: item.kind || item.type || null,
-          uri: compactString(item.uri || item.url || '', emergency ? 160 : 512),
-          title: compactString(item.title || item.label || '', emergency ? 80 : 240),
-        })
-      }
-    }
-    if (input.length > max) out.push({ omitted: input.length - max })
-    return out
-  }
-
-  function compactAttachment(item, emergency) {
-    return {
-      id: item.id,
-      kind: item.kind,
-      uri: compactString(item.uri, emergency ? 240 : 1024),
-      title: compactString(item.title, emergency ? 120 : 512),
-      summary: compactString(item.summary, emergency ? 240 : 1024),
-      resolver: item.resolver,
-      meta: compactPersistenceValue(item.meta || {}, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 24, emergency ? 12 : 32),
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    }
-  }
-
-  function compactMessage(message, emergency) {
-    const out = Object.assign({}, message)
-    out.content = compactString(out.content, emergency ? 1200 : 12000)
-    out.reasoning_content = compactString(out.reasoning_content, emergency ? 400 : 2000)
-    out.contextRefs = compactRefs(out.contextRefs, emergency)
-    out.attachments = compactRefs(out.attachments, emergency)
-    out.meta = compactPersistenceValue(out.meta, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32)
-    out.usage = compactPersistenceValue(out.usage, 1, 200, 8, 16)
-    out.stats = compactPersistenceValue(out.stats, 1, 200, 8, 16)
-    if (out.toolCalls && out.toolCalls.length) out.toolCalls = out.toolCalls.map(function (call) { return compactPersistenceToolCall(call, emergency) })
-    return out
-  }
-
-  function compactPersistenceToolCall(call, emergency) {
-    const out = {
-      id: call.id,
-      providerCallId: call.providerCallId,
-      toolId: call.toolId,
-      name: call.name,
-      status: call.status,
-      actor: call.actor,
-      createdAt: call.createdAt,
-      updatedAt: call.updatedAt,
-      error: compactString(call.error, emergency ? 500 : 2000),
-    }
-    if (persistenceToolResultPolicy !== 'none') {
-      out.args = compactPersistenceValue(call.args || {}, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
-    }
-    if (persistenceToolResultPolicy === 'compact') {
-      out.preview = compactPersistenceValue(call.preview, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
-      out.result = compactPersistenceValue(call.result, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
-      out.applyResult = compactPersistenceValue(call.applyResult, emergency ? 1 : 2, emergency ? 240 : 1200, emergency ? 8 : 24, emergency ? 12 : 32)
-    }
-    return out
-  }
-
-  function compactQuestStep(step, emergency) {
-    return {
-      id: compactString(step.id, emergency ? 80 : 240),
-      title: compactString(step.title, emergency ? 160 : 512),
-      status: step.status,
-      kind: step.kind,
-      summary: compactString(step.summary, emergency ? 240 : 1000),
-      result: compactPersistenceValue(step.result, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
-      meta: compactPersistenceValue(step.meta || {}, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
-    }
-  }
-
-  function compactQuest(quest, emergency) {
-    const plan = Array.isArray(quest.plan) ? quest.plan : []
-    const maxSteps = emergency ? 32 : 128
-    const meta = compactPersistenceValue(quest.meta || {}, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24) || {}
-    if (plan.length > maxSteps) {
-      meta.persistence = Object.assign({}, meta.persistence && typeof meta.persistence === 'object' ? meta.persistence : {}, {
-        compacted: true,
-        omittedPlanSteps: plan.length - maxSteps,
-      })
-    }
-    return {
-      id: quest.id,
-      fromAgentId: quest.fromAgentId,
-      toAgentId: quest.toAgentId,
-      requestMessageId: quest.requestMessageId,
-      goal: compactString(quest.goal, emergency ? 240 : 1000),
-      status: quest.status,
-      resultMessageId: quest.resultMessageId,
-      summary: compactString(quest.summary, emergency ? 240 : 1000),
-      plan: plan.slice(0, maxSteps).map(function (step) { return compactQuestStep(step, emergency) }),
-      currentStepId: quest.currentStepId,
-      budget: compactPersistenceValue(quest.budget, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
-      usage: compactPersistenceValue(quest.usage, 1, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24),
-      stopReason: quest.stopReason || null,
-      createdAt: quest.createdAt,
-      startedAt: quest.startedAt,
-      completedAt: quest.completedAt,
-      meta: meta,
-    }
-  }
-
-  function compactAgent(agent, emergency) {
-    const messages = agent.messages || []
-    const maxMessages = Math.max(1, emergency ? Math.min(persistenceMaxMessagesPerAgent, 12) : persistenceMaxMessagesPerAgent)
-    const omittedMessages = Math.max(0, messages.length - maxMessages)
-    const meta = compactPersistenceValue(agent.meta || {}, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32) || {}
-    if (omittedMessages) {
-      meta.persistence = Object.assign({}, meta.persistence || {}, {
-        compacted: true,
-        omittedMessages: omittedMessages,
-      })
-    }
-    return Object.assign({}, agent, {
-      systemPrompt: compactString(agent.systemPrompt, emergency ? 2000 : 16000),
-      statusText: compactString(agent.statusText, emergency ? 200 : 800),
-      messages: messages.slice(Math.max(0, messages.length - maxMessages)).map(function (message) { return compactMessage(message, emergency) }),
-      compactions: (agent.compactions || []).slice(emergency ? -4 : -16).map(function (item) {
-        return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32)
-      }),
-      inbox: (agent.inbox || []).slice(emergency ? -8 : -32).map(function (item) {
-        return compactPersistenceValue(item, emergency ? 1 : 2, emergency ? 160 : 512, emergency ? 8 : 16, emergency ? 12 : 24)
-      }),
-      quests: (agent.quests || []).slice(emergency ? -8 : -32).map(function (item) {
-        return compactQuest(item, emergency)
-      }),
-      queue: (agent.queue || []).slice(emergency ? -4 : -16).map(function (item) {
-        return compactPersistenceValue(item, 1, 160, 8, 16)
-      }),
-      contextRefs: compactRefs(agent.contextRefs, emergency),
-      memory: compactPersistenceValue(agent.memory || {}, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32),
-      state: compactPersistenceValue(agent.state || {}, emergency ? 1 : 2, emergency ? 240 : 1000, emergency ? 8 : 24, emergency ? 12 : 32),
-      meta: meta,
-    })
-  }
-
-  function compactPersistenceSnapshot(data, emergency) {
-    return {
-      version: 2,
-      agents: (data.agents || []).map(function (agent) { return compactAgent(agent, emergency) }),
-      attachments: (data.attachments || []).map(function (item) { return compactAttachment(item, emergency) }),
-      preferences: data.preferences || {},
-      activeAgentId: data.activeAgentId || null,
-      persistence: { compacted: true, emergency: !!emergency },
-    }
-  }
-
-  function preparePersistenceSnapshot(data, emergency) {
-    let out = emergency ? compactPersistenceSnapshot(data, true) : data
-    let usedEmergency = !!emergency
-    let text = null
-    try {
-      text = serializeSnapshot(out)
-    } catch (err) {
-      if (emergency) throw err
-      out = compactPersistenceSnapshot(data, true)
-      usedEmergency = true
-      text = serializeSnapshot(out)
-    }
-    if (!usedEmergency && storageBytes(text) > persistenceMaxBytes) {
-      out = compactPersistenceSnapshot(data, false)
-      text = serializeSnapshot(out)
-    }
-    if (!usedEmergency && storageBytes(text) > persistenceMaxBytes) {
-      out = compactPersistenceSnapshot(data, true)
-      usedEmergency = true
-      text = serializeSnapshot(out)
-    }
-    return { data: out, text: text, bytes: storageBytes(text), fits: storageBytes(text) <= persistenceMaxBytes }
-  }
-
-  function isQuotaError(err) {
-    const name = err && err.name || ''
-    const message = String(err && err.message || '')
-    return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-      err && (err.code === 22 || err.code === 1014) || /quota/i.test(message)
-  }
-
-  function reportPersistenceFailure(reason, err, info) {
-    if (persistenceWarningReported) return
-    persistenceWarningReported = true
-    if (!aiditor.reportError) return
-    const e = new Error('AI persistence disabled for this session: ' + reason)
-    e.reason = reason
-    e.code = 'ai_persistence_' + reason
-    e.storageKey = persistenceKey
-    e.maxBytes = persistenceMaxBytes
-    e.bytes = info && info.bytes || null
-    e.cause = err || null
-    aiditor.reportError({ scope: 'ai', storage: persistenceKey, op: 'save', reason: reason }, e)
-  }
-
-  function disablePersistenceForSession(reason, err, info) {
-    persistenceDisabledForSession = true
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = null
-    reportPersistenceFailure(reason, err, info)
+  function checkpointSnapshot() {
+    return snapshot()
   }
 
   function normalizeRestoredRuntime(agent) {
     const transient = { running: true, queued: true, waiting_approval: true, stopped: true, failed: true }
     const messages = (agent.messages || []).map(function (message) {
-      return (message.status === 'running' || message.status === 'queued')
-        ? Object.assign({}, message, { status: 'stopped', completedAt: message.completedAt || now() })
-        : message
+      return normalizeRestoredMessage(message, false)
     })
     const quests = (agent.quests || []).map(function (quest) {
       return (quest.status === 'running' || quest.status === 'queued' || quest.status === 'waiting_approval')
@@ -1055,70 +726,53 @@
     })
   }
 
-  function save() {
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = null
-    const s = storage()
-    const data = snapshot()
-    if (!s || !persistenceEnabled || persistenceDisabledForSession) return data
-    let prepared = null
-    try {
-      prepared = preparePersistenceSnapshot(data, false)
-    } catch (err) {
-      disablePersistenceForSession('serialization_failed', err, null)
-      return data
-    }
-    if (!prepared.fits) {
-      disablePersistenceForSession('size_exceeded', null, prepared)
-      return prepared.data
-    }
-    try {
-      s.setItem(persistenceKey, prepared.text)
-      return prepared.data
-    } catch (err) {
-      let emergency = null
-      try {
-        emergency = preparePersistenceSnapshot(data, true)
-      } catch (serializeErr) {
-        disablePersistenceForSession('serialization_failed', serializeErr, prepared)
-        return prepared.data
-      }
-      if (isQuotaError(err) && emergency.fits) {
-        try {
-          s.setItem(persistenceKey, emergency.text)
-          return emergency.data
-        } catch (secondErr) {
-          disablePersistenceForSession(isQuotaError(secondErr) ? 'quota_exceeded' : 'storage_error', secondErr, emergency)
-          return emergency.data
-        }
-      }
-      disablePersistenceForSession(isQuotaError(err) ? 'quota_exceeded' : 'storage_error', err, prepared)
-    }
-    return data
+  function normalizeCheckpointRuntime(agent) {
+    const messages = (agent.messages || []).map(function (message) {
+      return normalizeRestoredMessage(message, true)
+    })
+    const messageById = {}
+    for (let i = 0; i < messages.length; i++) messageById[messages[i].id] = messages[i]
+    const queue = (agent.queue || []).filter(function (item) {
+      return !!(messageById[item.messageId] && messageById[item.messageId].status === 'queued')
+    })
+    const quests = (agent.quests || []).map(function (quest) {
+      return (quest.status === 'running' || quest.status === 'waiting_approval')
+        ? Object.assign({}, quest, { status: 'stopped', stopReason: 'reload', completedAt: quest.completedAt || now(), summary: quest.summary || 'Stopped by reload' })
+        : quest
+    })
+    return Object.assign({}, agent, {
+      status: queue.length ? 'queued' : 'idle',
+      statusText: '',
+      activeMessageId: null,
+      activeQuestId: null,
+      queue: queue,
+      messages: messages,
+      quests: quests,
+    })
   }
 
-  function scheduleSave() {
-    if (!persistenceEnabled || persistenceDisabledForSession) return
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(save, 800)
-  }
-
-  function flushPendingSave() {
-    if (saveTimer) save()
-  }
-
-  function installPersistenceFlushHandlers() {
-    if (!window.addEventListener) return
-    window.addEventListener('beforeunload', flushPendingSave)
-    window.addEventListener('pagehide', flushPendingSave)
-    window.addEventListener('visibilitychange', function () {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushPendingSave()
+  function normalizeRestoredMessage(message, preserveQueued) {
+    const transientMessage = message.status === 'running' || (!preserveQueued && message.status === 'queued')
+    const calls = (message.toolCalls || []).map(function (call) {
+      if (call.status === 'applied' || call.status === 'completed' || call.status === 'rejected' || call.status === 'failed') return call
+      return Object.assign({}, call, {
+        status: 'failed',
+        error: call.error || 'Tool call was interrupted by reload.',
+        updatedAt: now(),
+      })
+    })
+    if (!transientMessage && calls.length === (message.toolCalls || []).length && calls.every(function (call, index) { return call === message.toolCalls[index] })) return message
+    return Object.assign({}, message, {
+      status: transientMessage ? 'stopped' : message.status,
+      completedAt: transientMessage ? (message.completedAt || now()) : message.completedAt,
+      toolCalls: calls,
     })
   }
 
   function restore(data) {
-    const next = data || readStored()
+    const next = data || null
     if (!next || next.version !== 2) return null
+    suppressStoreVersion = true
     lastModelSelection = {
       connection: next.preferences && next.preferences.lastConnection || null,
       model: next.preferences && next.preferences.lastModel || null,
@@ -1128,72 +782,28 @@
     activeAgentIdSig.set(next.activeAgentId || (agentsSig.peek()[0] && agentsSig.peek()[0].id) || null)
     const agents = agentsSig.peek()
     for (let i = 0; i < agents.length; i++) touchMessages(agents[i].id, agents[i].messages)
+    suppressStoreVersion = false
+    touchStore()
     return snapshot()
   }
 
-  function readStored() {
-    const s = storage()
-    if (!s) return null
-    try {
-      const text = s.getItem(persistenceKey)
-      if (!text) return null
-      const parsed = JSON.parse(text)
-      if (!parsed || parsed.version !== 2) return parsed
-      if (text.length > MAX_STORED_STATE_CHARS || storageBytes(text) > persistenceMaxBytes) {
-        return migrateStoredSnapshot(s, parsed, text)
-      }
-      return parsed
-    } catch (_) {
-      return null
+  function restoreCheckpoint(data) {
+    const next = data || null
+    if (!next || next.version !== 2) return null
+    suppressStoreVersion = true
+    lastModelSelection = {
+      connection: next.preferences && next.preferences.lastConnection || null,
+      model: next.preferences && next.preferences.lastModel || null,
     }
-  }
-
-  function migrateStoredSnapshot(s, data, text) {
-    let prepared = null
-    try {
-      prepared = preparePersistenceSnapshot(data, false)
-    } catch (_) {
-      return null
-    }
-    if (prepared.fits) {
-      try { s.setItem(persistenceKey, prepared.text) } catch (_) {}
-      return prepared.data
-    }
-    return prepared.data
-  }
-
-  function configurePersistence(opts) {
-    opts = opts || {}
-    const previousKey = persistenceKey
-    const previousEnabled = persistenceEnabled
-    const previousMaxBytes = persistenceMaxBytes
-    const previousMaxMessages = persistenceMaxMessagesPerAgent
-    const previousPolicy = persistenceToolResultPolicy
-    if (Object.prototype.hasOwnProperty.call(opts, 'key') && opts.key) {
-      persistenceKey = String(opts.key)
-    } else if (Object.prototype.hasOwnProperty.call(opts, 'namespace')) {
-      persistenceNamespace = normalizeNamespace(opts.namespace)
-      persistenceKey = persistenceKeyFor(persistenceNamespace)
-    }
-    if (opts.enabled != null) persistenceEnabled = opts.enabled !== false
-    if (opts.maxBytes != null) persistenceMaxBytes = boundedNumber(opts.maxBytes, persistenceMaxBytes, 4096)
-    if (opts.maxMessagesPerAgent != null) persistenceMaxMessagesPerAgent = boundedNumber(opts.maxMessagesPerAgent, persistenceMaxMessagesPerAgent, 1)
-    if (opts.toolResultPolicy != null && PERSISTENCE_TOOL_POLICIES[opts.toolResultPolicy]) persistenceToolResultPolicy = opts.toolResultPolicy
-    if (persistenceKey !== previousKey ||
-        persistenceEnabled !== previousEnabled ||
-        persistenceMaxBytes !== previousMaxBytes ||
-        persistenceMaxMessagesPerAgent !== previousMaxMessages ||
-        persistenceToolResultPolicy !== previousPolicy) {
-      resetPersistenceFailureState()
-    }
-    if (persistenceKey !== previousKey) resetRuntimeState()
-    if (opts.load !== false) restore()
-    return snapshot()
-  }
-
-  function clearStoredState() {
-    const s = storage()
-    if (s) s.removeItem(persistenceKey)
+    clearMap(activeRunStateSigs)
+    agentsSig.set((next.agents || []).map(function (agent) { return normalizeCheckpointRuntime(makeAgent(agent)) }))
+    attachmentsSig.set((next.attachments || []).map(makeAttachment))
+    activeAgentIdSig.set(next.activeAgentId || (agentsSig.peek()[0] && agentsSig.peek()[0].id) || null)
+    const agents = agentsSig.peek()
+    for (let i = 0; i < agents.length; i++) touchMessages(agents[i].id, agents[i].messages)
+    suppressStoreVersion = false
+    touchStore()
+    return checkpointSnapshot()
   }
 
   function setLastSelectedModel(selection) {
@@ -1202,7 +812,7 @@
       connection: s.connection || null,
       model: s.model || '',
     }
-    scheduleSave()
+    touchStore()
     return Object.assign({}, lastModelSelection)
   }
 
@@ -1247,7 +857,12 @@
     const quest = questApiRead(agentId, questId, actor)
     if (!quest || !quest.resultId) return quest
     const message = messageApiRead(agentId, quest.resultId, actor)
-    return Object.assign({}, quest, { message: message || null, content: message ? message.content : null, resultMessageId: quest.resultId })
+    return Object.assign({}, quest, {
+      message: message || null,
+      content: message ? message.content : null,
+      output: message ? message.output : null,
+      resultMessageId: quest.resultId,
+    })
   }
 
   function agentApiRead(agentId, actor) {
@@ -1321,6 +936,10 @@
     return versionSig(messageListVersionSigs, agentId)()
   }
 
+  function agentVersion(agentId) {
+    return versionSig(agentVersionSigs, agentId)()
+  }
+
   function idleRunState(agentId) {
     return {
       agentId: agentId || null,
@@ -1373,9 +992,11 @@
   ai.agents = agentsSig
   ai.attachments = attachmentsSig
   ai.activeAgentId = activeAgentIdSig
+  ai.storeVersion = storeVersionSig
   ai.findAgent = findAgent
   ai.getActiveAgent = getActiveAgent
   ai.activeAgentMeta = activeAgentMeta
+  ai.agentVersion = agentVersion
   ai.agentMessageIds = agentMessageIds
   ai.messageVersion = messageVersion
   ai.messageListVersion = messageListVersion
@@ -1407,10 +1028,10 @@
   ai.addAttachment = addAttachment
   ai.removeAttachment = removeAttachment
   ai.snapshot = snapshot
-  ai.save = save
+  ai.checkpointSnapshot = checkpointSnapshot
+  ai.resetRuntimeState = resetRuntimeState
   ai.restore = restore
-  ai.configurePersistence = configurePersistence
-  ai.clearStoredState = clearStoredState
+  ai.restoreCheckpoint = restoreCheckpoint
   ai.setLastSelectedModel = setLastSelectedModel
   ai.getLastSelectedModel = getLastSelectedModel
   ai.message = ai.message || {}
@@ -1422,12 +1043,4 @@
   ai.agent.read = agentApiRead
   ai.agent.messages = agentMessages
 
-  installPersistenceFlushHandlers()
-  restore()
-  aiditor.effect(function () {
-    agentsSig()
-    attachmentsSig()
-    activeAgentIdSig()
-    scheduleSave()
-  })
 })(window.aiditor = window.aiditor || {})

@@ -127,6 +127,7 @@
       }
     }
     check('tools', ai && ai.tools, 'Tool')
+    check('skills', ai && ai.skills, 'Skill')
     check('context', ai && ai.context, 'Context provider')
     check('references', ai && ai.references, 'Reference provider')
     check('operations', ai && ai.operations, 'Operation')
@@ -638,6 +639,8 @@
     for (let j = 0; j < d.length; j++) changes.push({ type: 'dockPanel', dock: d[j].dock || d[j].dockId || d[j].target || 'main', component: d[j].component })
     const tools = manifest.contributes.tools
     for (let t = 0; t < tools.length; t++) changes.push({ type: 'tool', id: tools[t].publicId, owner: owner })
+    const skills = manifest.contributes.skills
+    for (let u = 0; u < skills.length; u++) changes.push({ type: 'skill', id: skills[u].publicId, owner: owner })
     const context = manifest.contributes.context
     for (let q = 0; q < context.length; q++) changes.push({ type: 'context', id: context[q].publicId, owner: owner })
     const r = manifest.contributes.references
@@ -724,6 +727,7 @@
     if (opts.replaceExternal !== false) replaceExternalPanels(entry)
     const removedPanels = removeExtensionPanels(entry)
     unregisterOwned(aiditor.ai && aiditor.ai.tools, owner)
+    unregisterOwned(aiditor.ai && aiditor.ai.skills, owner)
     unregisterOwned(aiditor.ai && aiditor.ai.context, owner)
     unregisterOwned(aiditor.ai && aiditor.ai.references, owner)
     unregisterOwned(aiditor.ai && aiditor.ai.operations, owner)

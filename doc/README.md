@@ -36,7 +36,7 @@ explicitly references one.
 | --- | --- | --- |
 | Kernel | Shared infrastructure: signals, log, bus, history, settings, commands, shortcuts, theme, i18n, workspace contracts, component registry, dock tree, and dock runtime. | Editor business rules, product project formats, app shortcut policy, or widget catalog breadth. |
 | UI | `aiditor.ui.*` widgets, schema-driven `propertyForm`, generic Inspector selection/providers, settings UI, built-in tab/history/log/inspector panel components, and theme consumption. | AI execution or domain data semantics. |
-| AI Host | Agents, providers, streaming, permissions, tools, context references, operations, ChangeSet, compaction, and memory. | Product data models or hidden host privileges. |
+| AI Host | Agents, providers, streaming, structured outputs, permissions, tools, context references, operations, ChangeSet, compaction, checkpoints, evals, and memory. | Product data models, workflow databases, or hidden host privileges. |
 | Extension Runtime | Package, review, install, disable, and uninstall contributions through existing registries. | A second component/tool/context model. |
 | Host Adapters | File-system bridges, provider transports, git, verification, and other privileged integrations. | Framework policy bypasses. |
 
@@ -141,7 +141,9 @@ extension runtime, AI panels, or AI-specific styles.
 - [inspector.md](./inspector.md): ordered selection, provider protocol, multi-target property editing, and the built-in Inspector panel.
 - [ai.md](./ai.md): optional AI Host and the public AI concept model.
 - [ai-runtime.md](./ai-runtime.md): agents, skills, messages, queues, live run state, compaction, and persistence.
-- [ai-persistence.md](./ai-persistence.md): bounded AI runtime recovery snapshots, localStorage quota policy, and persistence compaction.
+- [ai-skills.md](./ai-skills.md): SkillSpec, activation attribution, owner lifecycle, progressive disclosure, and bounded `SKILL.md` packages.
+- [ai-persistence.md](./ai-persistence.md): complete IndexedDB transcript persistence, bootstrap metadata, hydration, and adapter contract.
+- [ai-evals.md](./ai-evals.md): deterministic case/evaluator runner over Agent outputs and compact traces.
 - [ai-permission-policy.md](./ai-permission-policy.md): unified permission resolver, audit, and always-allow policy.
 - [ai-context-assembly.md](./ai-context-assembly.md): budgeted request context layers and model-facing context order.
 - [ai-context-compaction.md](./ai-context-compaction.md): context budgeting, semantic compaction, memory, and long-session request assembly.

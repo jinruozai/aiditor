@@ -12,6 +12,9 @@ for (const file of [
   'src/ai/name-generator.js',
   'src/ai/permission.js',
   'src/ai/store.js',
+  'src/ai/connection.js',
+  'src/ai/adapter.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/skills.js',
@@ -24,6 +27,9 @@ for (const file of [
 
 const aiditor = window.aiditor
 const ai = aiditor.ai
+ai.registerTransport('workspace-test', { toolProtocol: 'native' })
+ai.registerConnection('workspace-test', { auth: { type: 'none' }, transport: { type: 'workspace-test' }, configDefaults: {} })
+ai.setActiveConnection('workspace-test')
 const workspace = aiditor.workspace.memory({
   'src/app.js': 'const value = 1\nconsole.log(value)\n',
   'README.md': 'hello workspace',

@@ -89,15 +89,6 @@
   min-width: 0;
 }
 
-.aiditor-ai-agent-tree .aiditor-ui-tree-actions {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-left: 0;
-  padding-left: 4px;
-}
-
 .aiditor-ai-agent-label {
   display: inline-flex;
   align-items: center;
@@ -156,17 +147,17 @@
   white-space: nowrap;
 }
 
-.aiditor-ai-agent-tree .aiditor-ui-tree-trailing {
-  max-width: 46%;
+.aiditor-ai-agent-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: auto;
   min-width: 0;
 }
 
-.aiditor-ai-agent-meta {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--aiditor-space-1);
-  min-width: 0;
+.aiditor-ai-agent-actions {
+  margin-left: 0;
 }
 
 .aiditor-ai-group-count {

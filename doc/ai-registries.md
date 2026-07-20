@@ -18,6 +18,21 @@ skills.
 Skills are separate from these registries. They shape agent behavior and prompt
 rules, but they do not execute actions, read context, or apply changes.
 
+The Skill registry still follows the shared contribution lifecycle:
+
+```js
+aiditor.ai.skills.register(name, spec, meta)
+aiditor.ai.skills.unregister(name, meta)
+aiditor.ai.skills.unregisterOwner(owner)
+aiditor.ai.skills.unregisterPrefix(prefix)
+aiditor.ai.skills.get(name)
+aiditor.ai.skills.list(prefixOrFilter)
+aiditor.ai.skills.meta(name)
+```
+
+`owner` is the exact cleanup identity. `layer` and `source` are diagnostics, not
+implicit override precedence. See [ai-skills.md](./ai-skills.md).
+
 Public API:
 
 ```js

@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
 global.window = { aiditor: {} }
+vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'core/names.js' })
 vm.runInThisContext(readFileSync('src/ai/adapter.js', 'utf8'), { filename: 'ai/adapter.js' })
+vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
+vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
 
 const ai = window.aiditor.ai
 
@@ -58,7 +61,31 @@ assert.equal(rawDecoded.toolCalls[0].toolId, 'agent.send')
 const openAiTools = ai.openAiTools(request)
 assert.equal(openAiTools[0].type, 'function')
 assert.equal(openAiTools[0].function.name, 'agent__create')
+assert.match(openAiTools[0].function.description, /Public tool id: agent\.create/)
 assert.equal(openAiTools[0].function.parameters.type, 'object')
+
+const collidingTools = ai.openAiTools({
+  toolSpecs: [
+    { id: 'same.name', schema: {} },
+    { id: 'same__name', schema: {} },
+  ],
+})
+assert.equal(collidingTools[0].function.name, 'same__name')
+assert.notEqual(collidingTools[1].function.name, collidingTools[0].function.name)
+const normalizedCollision = ai.normalizeOpenAiToolCalls([{
+  id: 'call_collision',
+  function: { name: collidingTools[1].function.name, arguments: '{}' },
+}], {
+  toolSpecs: [
+    { id: 'same.name', schema: {} },
+    { id: 'same__name', schema: {} },
+  ],
+})
+assert.equal(normalizedCollision[0].toolId, 'same__name')
+
+assert.throws(function () {
+  ai.normalizeToolSchema({ type: 'object', required: ['missing'], properties: {} })
+}, /required property is not defined/)
 
 const anySchemaTool = ai.openAiTools({ toolSpecs: [{
   id: 'data.query',
@@ -110,6 +137,28 @@ const normalized = ai.normalizeOpenAiToolCalls([{
 }], request)
 assert.equal(normalized[0].toolId, 'agent.create')
 assert.equal(normalized[0].args.name, 'worker')
+assert.equal(normalized[0].providerName, 'agent__create')
+
+const anthropicTools = ai.anthropicTools(request)
+assert.equal(anthropicTools[0].name, 'agent__create')
+assert.equal(anthropicTools[0].input_schema.type, 'object')
+
+const anthropicToolMessages = ai.anthropicPayloadMessages([
+  { role: 'assistant', content: 'Checking.', toolCalls: [{ id: 'call_a', providerCallId: 'call_a', toolId: 'agent.create', args: { name: 'worker' } }] },
+  { role: 'tool', meta: { toolCallId: 'call_a' }, content: '{"ok":true}' },
+], request)
+assert.equal(anthropicToolMessages[0].content[1].type, 'tool_use')
+assert.equal(anthropicToolMessages[0].content[1].name, 'agent__create')
+assert.equal(anthropicToolMessages[1].content[0].type, 'tool_result')
+assert.equal(anthropicToolMessages[1].content[0].tool_use_id, 'call_a')
+
+const normalizedAnthropic = ai.normalizeAnthropicContent([
+  { type: 'text', text: 'Checking.' },
+  { type: 'tool_use', id: 'call_b', name: 'agent__create', input: { name: 'worker' } },
+], request)
+assert.equal(normalizedAnthropic.content, 'Checking.')
+assert.equal(normalizedAnthropic.toolCalls[0].toolId, 'agent.create')
+assert.equal(normalizedAnthropic.toolCalls[0].providerName, 'agent__create')
 
 const imageRequest = {
   attachmentRefs: [{ kind: 'file.image', title: 'icon.png' }],

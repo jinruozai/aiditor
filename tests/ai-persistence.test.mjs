@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
-function storage() {
+function localStorage() {
   const data = {}
   return {
     getItem: function (key) { return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null },
@@ -11,345 +11,226 @@ function storage() {
   }
 }
 
-function quotaStorage() {
-  let attempts = 0
+function memoryAdapter(records) {
+  records = records || new Map()
   return {
-    getItem: function () { return null },
-    setItem: function () {
-      attempts++
-      const err = new Error('Quota exceeded')
-      err.name = 'QuotaExceededError'
-      err.code = 22
-      throw err
+    records: records,
+    load: function (key) { return Promise.resolve(records.get(key) || null) },
+    save: function (key, value) {
+      records.set(key, JSON.parse(JSON.stringify(value)))
+      return Promise.resolve()
     },
-    removeItem: function () {},
-    attempts: function () { return attempts },
+    remove: function (key) { records.delete(key); return Promise.resolve() },
   }
 }
 
-function storedBytes(store, key) {
-  const text = store.getItem(key) || ''
-  return text.length * 2
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise(function (yes, no) { resolve = yes; reject = no })
+  return { promise: promise, resolve: resolve, reject: reject }
 }
 
-function loadRuntime(store, location, events) {
-  global.document = { visibilityState: 'visible' }
+function loadRuntime(storage, location) {
+  const windowEvents = {}
+  const documentEvents = {}
+  global.document = {
+    visibilityState: 'visible',
+    addEventListener: function (type, fn) { (documentEvents[type] = documentEvents[type] || []).push(fn) },
+  }
   global.window = {
     aiditor: {},
-    localStorage: store,
-    addEventListener: function (type, fn) {
-      if (!events) return
-      if (!events[type]) events[type] = []
-      events[type].push(fn)
-    },
+    localStorage: storage,
+    location: location,
+    addEventListener: function (type, fn) { (windowEvents[type] = windowEvents[type] || []).push(fn) },
   }
-  if (location) global.window.location = location
-  vm.runInThisContext(readFileSync('src/core/signal.js', 'utf8'), { filename: 'signal.js' })
-  vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
-  vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
-  vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
-  return window.aiditor.ai
+  for (const file of [
+    'src/core/signal.js',
+    'src/core/log.js',
+    'src/ai/name-generator.js',
+    'src/ai/serialize.js',
+    'src/ai/schema.js',
+    'src/ai/permission.js',
+    'src/ai/store.js',
+    'src/ai/persistence.js',
+  ]) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+  return { ai: window.aiditor.ai, windowEvents: windowEvents, documentEvents: documentEvents }
 }
 
-const memory = storage()
-let ai = loadRuntime(memory)
-ai.configurePersistence({ key: 'test.ai', load: false })
-ai.setLastSelectedModel({ connection: 'persisted-connection', model: 'persisted-model' })
-const parent = ai.createAgent({ name: 'Saved Parent' })
-const agent = ai.createAgent({
-  name: 'Saved Agent',
-  parentAgentId: parent.id,
-  messages: [{ role: 'user', content: 'hello' }],
-})
-const res = ai.addAttachment({ resolver: 'case', uri: 'case://one', title: 'One' })
-ai.updateAgent(agent.id, { contextRefs: [res.id] })
-ai.updateAgent(agent.id, {
-  status: 'running',
-  statusText: 'doing work',
-  activeMessageId: agent.messages[0].id,
-  queue: [{ messageId: agent.messages[0].id }],
-  messages: agent.messages.concat([{
+{
+  const storage = localStorage()
+  const adapter = memoryAdapter()
+  let runtime = loadRuntime(storage)
+  let ai = runtime.ai
+  ai.configurePersistence({ key: 'complete.ai', adapter: adapter, load: false, debounceMs: 10000 })
+  ai.setLastSelectedModel({ connection: 'persisted-connection', model: 'persisted-model' })
+  const parent = ai.createAgent({ name: 'Saved Parent' })
+  const agent = ai.createAgent({ name: 'Saved Agent', parentAgentId: parent.id })
+  ai.appendMessage(agent.id, { role: 'user', content: 'old:' + 'x'.repeat(50000) })
+  ai.appendMessage(agent.id, {
     role: 'assistant',
-    content: 'in flight',
-    status: 'running',
-    toolCalls: [{ id: 'big_tool', toolId: 'demo.project.writeFile', args: { text: 'x'.repeat(50000) }, applyResult: { text: 'x'.repeat(50000) } }],
-  }]),
-  quests: [{ id: 'q1', requestMessageId: 'q1', status: 'running' }],
-})
-ai.save()
-
-const stored = JSON.parse(window.localStorage.getItem('test.ai'))
-assert.equal(stored.version, 2)
-assert.deepEqual(stored.preferences, { lastConnection: 'persisted-connection', lastModel: 'persisted-model' })
-assert.equal(stored.agents.length, 2)
-assert.equal(stored.attachments.length, 1)
-assert.equal('groups' in stored, false)
-assert.equal('path' in stored.agents[1], false)
-assert.equal('groupId' in stored.agents[1], false)
-assert.deepEqual(stored.agents[1].contextRefs, [])
-assert.equal(stored.agents[1].messages[1].toolCalls[0].args.text.length < 13000, true)
-
-ai = loadRuntime(memory)
-ai.configurePersistence({ key: 'test.ai' })
-
-assert.deepEqual(ai.getLastSelectedModel(), { connection: 'persisted-connection', model: 'persisted-model' })
-const inherited = ai.createAgent({ name: 'Inherited Model', select: false })
-assert.equal(inherited.connection, 'persisted-connection')
-assert.equal(inherited.model, 'persisted-model')
-ai.deleteAgent(inherited.id)
-
-const restored = ai.agents().find(function (item) { return item.id === agent.id })
-assert.equal(restored.name, 'Saved Agent')
-assert.equal(restored.parentAgentId, parent.id)
-assert.equal(restored.messages[0].content, 'hello')
-assert.equal(restored.status, 'idle')
-assert.equal(restored.statusText, '')
-assert.equal(restored.activeMessageId, null)
-assert.equal(restored.queue.length, 0)
-assert.equal(restored.messages[1].status, 'stopped')
-assert.equal(restored.quests[0].status, 'stopped')
-assert.deepEqual(restored.contextRefs, [])
-assert.equal(ai.attachments()[0].uri, 'case://one')
-assert.equal(ai.activeAgentId(), agent.id)
-
-ai.clearStoredState()
-assert.equal(window.localStorage.getItem('test.ai'), null)
-
-window.localStorage.setItem('too.big.ai', 'x'.repeat(5000001))
-ai.configurePersistence({ key: 'too.big.ai' })
-assert.equal(ai.agents().length, 0)
-
-const oversizedValid = storage()
-oversizedValid.setItem('oversized.ai', JSON.stringify({
-  version: 2,
-  agents: [{
-    id: 'oversized-agent',
-    name: 'Oversized Agent',
-    messages: [
-      { id: 'old', role: 'user', content: 'old:' + 'x'.repeat(40000) },
-      { id: 'new', role: 'assistant', content: 'new:' + 'y'.repeat(40000) },
-    ],
-  }],
-  attachments: [],
-  activeAgentId: 'oversized-agent',
-}))
-ai = loadRuntime(oversizedValid)
-ai.configurePersistence({ key: 'oversized.ai', maxBytes: 16000, maxMessagesPerAgent: 1 })
-assert.equal(ai.agents().length, 1)
-assert.equal(ai.agents()[0].name, 'Oversized Agent')
-assert.equal(ai.agents()[0].messages.length, 1)
-assert.equal(ai.agents()[0].messages[0].id, 'new')
-assert.equal(ai.agents()[0].messages[0].content.indexOf('[truncated for persistence]') > 0, true)
-const migratedOversized = JSON.parse(window.localStorage.getItem('oversized.ai'))
-assert.equal(migratedOversized.persistence.compacted, true)
-assert.equal(storedBytes(window.localStorage, 'oversized.ai') <= 16000, true)
-
-const defaultMemory = storage()
-defaultMemory.setItem('aiditor.ai.v2', JSON.stringify({
-  version: 2,
-  agents: [{ id: 'legacy-agent', name: 'Legacy Default Key' }],
-  attachments: [],
-  activeAgentId: 'legacy-agent',
-}))
-ai = loadRuntime(defaultMemory)
-assert.equal(ai.agents().length, 0)
-ai.createAgent({ name: 'Default Key Agent' })
-ai.save()
-assert.equal(!!window.localStorage.getItem('aiditor.ai'), true)
-assert.equal(!!window.localStorage.getItem('aiditor.ai.v2'), true)
-
-const locatedMemory = storage()
-ai = loadRuntime(locatedMemory, { origin: 'https://example.test', pathname: '/editor/index.html' })
-ai.createAgent({ name: 'Located Agent' })
-ai.save()
-assert.equal(!!window.localStorage.getItem('aiditor.ai.https_example.test_editor_index.html'), true)
-assert.equal(window.localStorage.getItem('aiditor.ai'), null)
-
-const namespaceMemory = storage()
-ai = loadRuntime(namespaceMemory)
-ai.createAgent({ name: 'Before Namespace' })
-ai.configurePersistence({ namespace: 'app one', load: false })
-assert.equal(ai.agents().length, 0)
-ai.createAgent({ name: 'Namespaced Agent' })
-ai.save()
-assert.equal(!!window.localStorage.getItem('aiditor.ai.app_one'), true)
-
-window.localStorage.setItem('aiditor.ai.one', JSON.stringify({
-  version: 2,
-  agents: [{ id: 'agent-one', name: 'Agent One' }],
-  attachments: [],
-  activeAgentId: 'agent-one',
-}))
-window.localStorage.setItem('aiditor.ai.two', JSON.stringify({
-  version: 2,
-  agents: [{ id: 'agent-two', name: 'Agent Two' }],
-  attachments: [],
-  activeAgentId: 'agent-two',
-}))
-ai.configurePersistence({ namespace: 'one' })
-assert.equal(ai.agents().length, 1)
-assert.equal(ai.agents()[0].name, 'Agent One')
-ai.configurePersistence({ namespace: 'two' })
-assert.equal(ai.agents().length, 1)
-assert.equal(ai.agents()[0].name, 'Agent Two')
-ai.clearStoredState()
-assert.equal(window.localStorage.getItem('aiditor.ai.two'), null)
-
-{
-  const compactMemory = storage()
-  ai = loadRuntime(compactMemory)
-  ai.configurePersistence({ key: 'compact.ai', maxBytes: 18000, maxMessagesPerAgent: 2, load: false })
-  const compactAgent = ai.createAgent({ name: 'Compact Agent' })
-  for (let i = 0; i < 6; i++) {
-    ai.appendMessage(compactAgent.id, { role: i % 2 ? 'assistant' : 'user', content: 'message-' + i + ':' + 'x'.repeat(20000) })
-  }
-  const saved = ai.save()
-  const storedCompact = JSON.parse(window.localStorage.getItem('compact.ai'))
-  assert.equal(storedCompact.persistence.compacted, true)
-  assert.equal(saved.persistence.compacted, true)
-  assert.equal(storedCompact.agents[0].messages.length, 2)
-  assert.equal(storedCompact.agents[0].messages[0].content.length < 1600, true)
-  assert.equal(storedCompact.agents[0].meta.persistence.omittedMessages, 4)
-  assert.equal(storedBytes(window.localStorage, 'compact.ai') <= 18000, true)
-
-  ai = loadRuntime(compactMemory)
-  ai.configurePersistence({ key: 'compact.ai', maxBytes: 18000, maxMessagesPerAgent: 2 })
-  assert.equal(ai.agents()[0].messages.length, 2)
-  assert.equal(ai.agents()[0].messages[0].content.indexOf('[truncated for persistence]') > 0, true)
-}
-
-{
-  const questMemory = storage()
-  ai = loadRuntime(questMemory)
-  ai.configurePersistence({ key: 'quest.ai', maxBytes: 18000, maxMessagesPerAgent: 2, load: false })
-  const questAgent = ai.createAgent({ name: 'Quest Agent' })
-  ai.updateAgent(questAgent.id, {
-    quests: [{
-      id: 'quest-1',
-      goal: 'Keep the plan structurally valid',
-      status: 'running',
-      plan: [{ id: 'step-1', title: 'Inspect state', status: 'running', result: { files: ['one.js', 'two.js'] } }],
-      currentStepId: 'step-1',
-    }],
+    content: 'new:' + 'y'.repeat(50000),
+    toolCalls: [{ id: 'tool-1', toolId: 'demo.large', status: 'completed', result: { text: 'z'.repeat(50000) } }],
   })
-  for (let i = 0; i < 6; i++) {
-    ai.appendMessage(questAgent.id, { role: i % 2 ? 'assistant' : 'user', content: 'quest-message-' + i + ':' + 'x'.repeat(20000) })
-  }
-  ai.save()
-  const storedQuestSnapshot = JSON.parse(window.localStorage.getItem('quest.ai'))
-  const storedQuest = storedQuestSnapshot.agents[0].quests[0]
-  assert.equal(storedQuestSnapshot.persistence.emergency, true)
-  assert.equal(Array.isArray(storedQuest.plan), true)
-  assert.equal(storedQuest.plan[0].id, 'step-1')
-  assert.equal(typeof storedQuest.plan[0], 'object')
+  await ai.save()
 
-  ai = loadRuntime(questMemory)
-  ai.configurePersistence({ key: 'quest.ai', maxBytes: 18000, maxMessagesPerAgent: 2 })
-  const restoredQuest = ai.agents()[0].quests[0]
-  assert.equal(Array.isArray(restoredQuest.plan), true)
-  assert.equal(restoredQuest.plan[0].title, 'Inspect state')
-  assert.equal(restoredQuest.currentStepId, 'step-1')
+  const envelope = adapter.records.get('complete.ai')
+  assert.equal(envelope.state.agents[1].messages.length, 2)
+  assert.equal(envelope.state.agents[1].messages[0].content.length, 50004)
+  assert.equal(envelope.state.agents[1].messages[1].toolCalls[0].result.text.length, 50000)
+  const bootstrap = JSON.parse(storage.getItem('complete.ai'))
+  assert.equal(bootstrap.kind, 'aiditor.ai.bootstrap')
+  assert.equal(Object.prototype.hasOwnProperty.call(bootstrap.agents[0], 'messages'), false)
+  assert.equal(JSON.stringify(bootstrap).includes('old:'), false)
+
+  runtime = loadRuntime(storage)
+  ai = runtime.ai
+  ai.configurePersistence({ key: 'complete.ai', adapter: adapter })
+  await ai.persistence.ready()
+  const restored = ai.findAgent(agent.id)
+  assert.deepEqual(ai.getLastSelectedModel(), { connection: 'persisted-connection', model: 'persisted-model' })
+  assert.equal(restored.messages.length, 2)
+  assert.equal(restored.messages[0].content.length, 50004)
+  assert.equal(restored.messages[1].toolCalls[0].result.text.length, 50000)
+  assert.equal(ai.activeAgentId(), agent.id)
+
+  await ai.clearStoredState()
+  assert.equal(adapter.records.has('complete.ai'), false)
+  assert.equal(storage.getItem('complete.ai'), null)
 }
 
 {
-  const malformedMemory = storage()
-  malformedMemory.setItem('aiditor.ai', JSON.stringify({
-    version: 2,
-    agents: [{
-      id: 'malformed-agent',
-      name: 'Malformed Quest Agent',
-      messages: [{ id: 'kept-message', role: 'assistant', content: 'keep this transcript' }],
-      quests: [{ id: 'malformed-quest', status: 'completed', plan: '[{"id":"step-1"}]' }],
-    }],
-    attachments: [],
-    activeAgentId: 'malformed-agent',
+  const storage = localStorage()
+  storage.setItem('race.ai', JSON.stringify({
+    version: 1,
+    kind: 'aiditor.ai.bootstrap',
+    agents: [{ id: 'agent-race', name: 'Race', updatedAt: 1 }],
+    activeAgentId: 'agent-race',
   }))
-  ai = loadRuntime(malformedMemory)
-  assert.equal(ai.agents()[0].messages[0].content, 'keep this transcript')
-  assert.deepEqual(ai.agents()[0].quests[0].plan, [])
-  ai.save()
-  assert.equal(Array.isArray(JSON.parse(window.localStorage.getItem('aiditor.ai')).agents[0].quests[0].plan), true)
-}
-
-{
-  const toolMemory = storage()
-  ai = loadRuntime(toolMemory)
-  ai.configurePersistence({ key: 'tool.ai', maxBytes: 50000, maxMessagesPerAgent: 5, toolResultPolicy: 'metadata-only', load: false })
-  const toolAgent = ai.createAgent({ name: 'Tool Agent' })
-  const calls = []
-  for (let i = 0; i < 24; i++) {
-    calls.push({
-      id: 'tool-' + i,
-      toolId: 'demo.tool',
-      name: 'demo.tool',
-      args: { text: 'a'.repeat(4000), index: i },
-      result: { text: 'r'.repeat(12000), rows: Array(50).fill({ value: 'row' }) },
-      preview: { text: 'p'.repeat(12000) },
-      applyResult: { text: 'w'.repeat(12000) },
-      status: 'completed',
-    })
+  const pendingLoad = deferred()
+  const adapter = {
+    load: function () { return pendingLoad.promise },
+    save: function () { return Promise.resolve() },
+    remove: function () { return Promise.resolve() },
   }
-  ai.appendMessage(toolAgent.id, { role: 'assistant', content: 'tools', toolCalls: calls })
-  ai.save()
-  const storedTools = JSON.parse(window.localStorage.getItem('tool.ai'))
-  const savedCall = storedTools.agents[0].messages[0].toolCalls[0]
-  assert.equal(storedBytes(window.localStorage, 'tool.ai') <= 50000, true)
-  assert.equal(savedCall.id, 'tool-0')
-  assert.equal(savedCall.toolId, 'demo.tool')
-  assert.equal(savedCall.status, 'completed')
-  assert.equal('args' in savedCall, true)
-  assert.equal('result' in savedCall, false)
-  assert.equal('preview' in savedCall, false)
-  assert.equal('applyResult' in savedCall, false)
+  const ai = loadRuntime(storage).ai
+  ai.configurePersistence({ key: 'race.ai', adapter: adapter, debounceMs: 0 })
+  ai.appendMessage('agent-race', { id: 'message-c', role: 'user', content: 'C' })
+  pendingLoad.resolve({
+    version: 1,
+    savedAt: 1,
+    state: {
+      version: 2,
+      agents: [{
+        id: 'agent-race',
+        name: 'Race',
+        updatedAt: 1,
+        messages: [
+          { id: 'message-a', role: 'user', content: 'A' },
+          { id: 'message-b', role: 'assistant', content: 'B' },
+        ],
+      }],
+      attachments: [],
+      preferences: {},
+      activeAgentId: 'agent-race',
+    },
+  })
+  await ai.persistence.ready()
+  assert.deepEqual(ai.findAgent('agent-race').messages.map(function (message) { return message.content }), ['A', 'B', 'C'])
 }
 
 {
-  const circularMemory = storage()
-  ai = loadRuntime(circularMemory)
-  ai.configurePersistence({ key: 'circular.ai', maxBytes: 50000, load: false })
-  const circularAgent = ai.createAgent({ name: 'Circular Agent' })
-  const state = { label: 'root' }
-  state.self = state
-  ai.updateAgent(circularAgent.id, { state: state })
-  ai.save()
-  const storedCircular = JSON.parse(window.localStorage.getItem('circular.ai'))
-  assert.equal(storedCircular.persistence.compacted, true)
-  assert.equal(storedCircular.agents[0].state.self, '[Circular]')
+  const storage = localStorage()
+  const firstSave = deferred()
+  const calls = []
+  const records = new Map()
+  const adapter = {
+    load: function () { return Promise.resolve(null) },
+    save: function (key, envelope) {
+      calls.push(envelope)
+      if (calls.length === 1) return firstSave.promise.then(function () { records.set(key, envelope) })
+      records.set(key, envelope)
+      return Promise.resolve()
+    },
+    remove: function () { return Promise.resolve() },
+  }
+  const ai = loadRuntime(storage).ai
+  ai.configurePersistence({ key: 'ordered.ai', adapter: adapter, load: false, debounceMs: 10000 })
+  const agent = ai.createAgent({ name: 'Ordered' })
+  ai.appendMessage(agent.id, { id: 'one', role: 'user', content: 'one' })
+  const saveOne = ai.save()
+  ai.appendMessage(agent.id, { id: 'two', role: 'assistant', content: 'two' })
+  const saveTwo = ai.save()
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.equal(calls.length, 1)
+  firstSave.resolve()
+  await Promise.all([saveOne, saveTwo])
+  assert.equal(calls.length, 2)
+  assert.deepEqual(records.get('ordered.ai').state.agents[0].messages.map(function (message) { return message.id }), ['one', 'two'])
 }
 
 {
-  const failing = quotaStorage()
-  ai = loadRuntime(failing)
-  let reports = 0
-  window.aiditor.reportError = function () { reports++ }
-  ai.configurePersistence({ key: 'quota.ai', maxBytes: 50000, load: false })
-  const quotaAgent = ai.createAgent({ name: 'Quota Agent' })
-  ai.appendMessage(quotaAgent.id, { role: 'assistant', content: 'x'.repeat(2000) })
-  ai.save()
-  ai.appendMessage(quotaAgent.id, { role: 'assistant', content: 'again' })
-  ai.save()
-  assert.equal(reports, 1)
-  assert.equal(failing.attempts(), 2)
+  const storage = localStorage()
+  storage.setItem('legacy.ai', JSON.stringify({
+    version: 2,
+    agents: [{ id: 'legacy-agent', name: 'Legacy', messages: [{ id: 'legacy-message', role: 'user', content: 'keep me' }] }],
+    attachments: [],
+    activeAgentId: 'legacy-agent',
+  }))
+  const adapter = memoryAdapter()
+  const ai = loadRuntime(storage).ai
+  ai.configurePersistence({ key: 'legacy.ai', adapter: adapter })
+  await ai.persistence.ready()
+  assert.equal(adapter.records.get('legacy.ai').state.agents[0].messages[0].content, 'keep me')
+  assert.equal(JSON.parse(storage.getItem('legacy.ai')).kind, 'aiditor.ai.bootstrap')
 }
 
 {
-  const flushMemory = storage()
-  const events = {}
-  ai = loadRuntime(flushMemory, null, events)
-  ai.configurePersistence({ key: 'flush.ai', load: false })
-  ai.createAgent({ name: 'Flush Agent' })
-  assert.equal(window.localStorage.getItem('flush.ai'), null)
-  events.beforeunload[0]()
-  assert.equal(JSON.parse(window.localStorage.getItem('flush.ai')).agents[0].name, 'Flush Agent')
+  const storage = localStorage()
+  let attempts = 0
+  const adapter = {
+    load: function () { return Promise.resolve(null) },
+    save: function () { attempts++; return Promise.reject(new Error('quota')) },
+    remove: function () { return Promise.resolve() },
+  }
+  const runtime = loadRuntime(storage)
+  const ai = runtime.ai
+  ai.configurePersistence({ key: 'failure.ai', adapter: adapter, load: false })
+  ai.createAgent({ name: 'Failure' })
+  await ai.save().catch(function () {})
+  await ai.save().catch(function () {})
+  assert.equal(attempts, 2)
+  assert.equal(window.aiditor.log().filter(function (entry) { return entry.error && entry.error.code === 'AI_PERSISTENCE_SAVE_FAILED' }).length, 1)
+  assert.equal(ai.agents().length, 1)
+}
 
-  ai.createAgent({ name: 'Pagehide Agent' })
-  events.pagehide[0]()
-  assert.equal(JSON.parse(window.localStorage.getItem('flush.ai')).agents.length, 2)
+{
+  const storage = localStorage()
+  const adapter = memoryAdapter()
+  const runtime = loadRuntime(storage)
+  const ai = runtime.ai
+  ai.configurePersistence({ key: 'lifecycle.ai', adapter: adapter, load: false, debounceMs: 10000 })
+  ai.createAgent({ name: 'Lifecycle' })
+  runtime.windowEvents.pagehide[0]()
+  await ai.persistence.flush()
+  assert.equal(adapter.records.get('lifecycle.ai').state.agents[0].name, 'Lifecycle')
+}
 
-  ai.createAgent({ name: 'Hidden Agent' })
-  document.visibilityState = 'hidden'
-  events.visibilitychange[0]()
-  assert.equal(JSON.parse(window.localStorage.getItem('flush.ai')).agents.length, 3)
+{
+  const storage = localStorage()
+  const adapter = memoryAdapter()
+  const ai = loadRuntime(storage, { origin: 'https://example.test', pathname: '/editor/index.html' }).ai
+  ai.configurePersistence({ namespace: 'one', adapter: adapter, load: false })
+  ai.createAgent({ name: 'One' })
+  await ai.save()
+  ai.configurePersistence({ namespace: 'two', adapter: adapter, load: false })
+  assert.equal(ai.agents().length, 0)
+  ai.createAgent({ name: 'Two' })
+  await ai.save()
+  ai.configurePersistence({ namespace: 'one', adapter: adapter })
+  await ai.persistence.ready()
+  assert.equal(ai.agents()[0].name, 'One')
+  assert.equal(adapter.records.has('aiditor.ai.two'), true)
 }
 
 console.log('ai persistence tests ok')

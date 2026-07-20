@@ -42,6 +42,8 @@ for (const file of [
   'src/ai/name-generator.js',
   'src/ai/permission.js',
   'src/ai/store.js',
+  'src/ai/connection.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/context.js',
   'src/ai/workdir.js',
@@ -57,6 +59,8 @@ for (const file of [
 
 const aiditor = window.aiditor
 const ai = aiditor.ai
+ai.registerTransport('extension-test', { toolProtocol: 'native' })
+ai.registerConnection('mock', { auth: { type: 'none' }, transport: { type: 'extension-test' }, configDefaults: {} })
 assert.equal(ai.tools.get('aiditor.createPanel'), undefined)
 assert.equal(ai.operations.get('aiditor.createPanel'), null)
 assert.equal(typeof ai.tools.get('aiditor.inspectDocks').run, 'function')
@@ -227,6 +231,7 @@ aiditor.extensions.install({
     references: [{ id: 'data', provider: {} }],
     operations: [{ id: 'patch', risk: 'edit' }],
     tools: [{ id: 'read', title: 'Nested Read', run: function () { return 'parent' } }],
+    skills: [{ id: 'review', title: 'Nested Review', tools: ['read'], rules: ['Review nested data'] }],
     context: [{ id: 'ctx', provider: { capture: function () { return 'parent' } } }],
     commands: [{ id: 'refresh', title: 'Nested Refresh' }],
     menus: [{ target: 'dock.panel.context', command: 'refresh', label: 'Nested Refresh' }],
@@ -240,6 +245,7 @@ aiditor.extensions.install({
     references: [{ id: 'data', provider: {} }],
     operations: [{ id: 'patch', risk: 'edit' }],
     tools: [{ id: 'read', title: 'Nested Child Read', run: function () { return 'child' } }],
+    skills: [{ id: 'review', title: 'Nested Child Review', tools: ['read'], rules: ['Review child data'] }],
     context: [{ id: 'ctx', provider: { capture: function () { return 'child' } } }],
     commands: [{ id: 'refresh', title: 'Nested Child Refresh' }],
     menus: [{ target: 'dock.panel.context', command: 'refresh', label: 'Nested Child Refresh' }],
@@ -251,6 +257,7 @@ assert.equal(aiditor.componentRegistration('nested.panel'), null)
 assert.equal(ai.references.get('nested.data'), null)
 assert.equal(ai.operations.get('nested.patch'), null)
 assert.equal(ai.tools.get('nested.read'), undefined)
+assert.equal(ai.skills.get('nested.review'), undefined)
 assert.equal(ai.context.get('nested.ctx'), undefined)
 assert.equal(aiditor.commands.get('nested.refresh'), null)
 assert.equal(aiditor.commands.menuMeta('nested.dock.panel.context:refresh').owner, undefined)
@@ -259,6 +266,9 @@ assert.notEqual(aiditor.componentRegistration('nested.child.panel'), null)
 assert.notEqual(ai.references.get('nested.child.data'), null)
 assert.notEqual(ai.operations.get('nested.child.patch'), null)
 assert.notEqual(ai.tools.get('nested.child.read'), undefined)
+assert.notEqual(ai.skills.get('nested.child.review'), undefined)
+assert.deepEqual(ai.skills.get('nested.child.review').tools, ['nested.child.read'])
+assert.equal(ai.skills.meta('nested.child.review').owner, 'extension:nested.child')
 assert.notEqual(ai.context.get('nested.child.ctx'), null)
 assert.notEqual(aiditor.commands.get('nested.child.refresh'), null)
 assert.equal(aiditor.commands.menuMeta('nested.child.dock.panel.context:refresh').owner, 'extension:nested.child')
@@ -361,6 +371,7 @@ assert.match(aiditor.extensions.preview({
 
 aiditor.registerComponent('conflict.panel', { factory: function () { return document.createElement('div') } }, { owner: 'host' })
 ai.tools.register('conflict.read', {}, { owner: 'host' })
+ai.skills.register('conflict.review', {}, { owner: 'host' })
 ai.context.register('conflict.context', {})
 ai.references.register('conflict.data', {}, { owner: 'host' })
 ai.operations.register('conflict.setValue', {}, { owner: 'host' })
@@ -371,6 +382,7 @@ const conflictPreview = aiditor.extensions.preview({
   contributes: {
     components: [{ id: 'panel', ui: null }],
     tools: [{ id: 'read' }],
+    skills: [{ id: 'review' }],
     context: [{ id: 'context' }],
     references: [{ id: 'data' }],
     operations: [{ id: 'setValue' }],
@@ -381,6 +393,7 @@ const conflictPreview = aiditor.extensions.preview({
 assert.equal(conflictPreview.ok, false)
 assert.equal(conflictPreview.errors.some(function (item) { return /Component already registered: conflict\.panel/.test(item.message) }), true)
 assert.equal(conflictPreview.errors.some(function (item) { return /Tool already registered: conflict\.read/.test(item.message) }), true)
+assert.equal(conflictPreview.errors.some(function (item) { return /Skill already registered: conflict\.review/.test(item.message) }), true)
 assert.equal(conflictPreview.errors.some(function (item) { return /Context provider already registered: conflict\.context/.test(item.message) }), true)
 assert.equal(conflictPreview.errors.some(function (item) { return /Reference provider already registered: conflict\.data/.test(item.message) }), true)
 assert.equal(conflictPreview.errors.some(function (item) { return /Operation already registered: conflict\.setValue/.test(item.message) }), true)
@@ -388,6 +401,7 @@ assert.equal(conflictPreview.errors.some(function (item) { return /Command alrea
 assert.equal(conflictPreview.errors.some(function (item) { return /Menu already registered: conflict\.menu/.test(item.message) }), true)
 aiditor.unregisterComponent('conflict.panel', { owner: 'host' })
 ai.tools.unregister('conflict.read', { owner: 'host' })
+ai.skills.unregister('conflict.review', { owner: 'host' })
 ai.context.unregister('conflict.context')
 ai.references.unregister('conflict.data', { owner: 'host' })
 ai.operations.unregister('conflict.setValue', { owner: 'host' })

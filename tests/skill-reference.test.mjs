@@ -7,6 +7,7 @@ global.window = { aiditor: {} }
 for (const file of [
   'src/core/names.js',
   'src/core/runtime.js',
+  'src/ai/schema.js',
   'src/ai/registries.js',
   'src/ai/skills.js',
   'src/ai/reference.js',
@@ -29,6 +30,7 @@ const runtime = aiditor.ai.references.read({ uri: 'aiditor://skills/aiditor.runt
 assert.equal(runtime.id, 'aiditor.runtime-authoring')
 assert.ok(runtime.relatedApis.includes('aiditor.addPanelToDock'))
 assert.ok(runtime.tools.includes('aiditor.addPanelToDock'))
+assert.ok(runtime.tools.includes('aiditor.readReference'))
 assert.equal(Object.hasOwn(runtime, 'relatedTools'), false)
 assert.ok(runtime.rules.some(function (rule) { return /inspect docks/.test(rule) }))
 
