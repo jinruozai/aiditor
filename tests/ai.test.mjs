@@ -741,9 +741,14 @@ async function assertGdePatchPreviewRendering() {
       },
     ],
   })
+  ai.updateQuest(pendingChild.id, 'pending-quest', {
+    fromAgentId: delegatedAgent.id,
+    meta: { sourceResponseId: 'delegated-input' },
+  })
   ai.activeAgentId.set(delegatedAgent.id)
   const delegatedRoot = components['ai-messages'].factory(null, {})
   assert.equal(countClass(delegatedRoot, 'aiditor-ai-message-footer'), 1)
+  assert.equal(delegatedRoot.querySelector('.aiditor-ai-live-run').attributes['data-state'], 'waiting')
   ai.appendMessage(pendingChild.id, {
     id: 'pending-result',
     role: 'assistant',
@@ -756,6 +761,7 @@ async function assertGdePatchPreviewRendering() {
   ai.setAgentStatus(pendingChild.id, 'idle')
   await new Promise(function (resolve) { setTimeout(resolve, 140) })
   assert.equal(countClass(delegatedRoot, 'aiditor-ai-message-footer'), 2)
+  assert.equal(delegatedRoot.querySelector('.aiditor-ai-live-run').attributes['data-state'], 'idle')
 
   const measuredChild = ai.createAgent({
     name: 'Measured Child',

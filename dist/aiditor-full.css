@@ -7303,6 +7303,7 @@ div.aiditor-ui-view {
 }
 
 .aiditor-ai-live-run[data-state="connecting"] .aiditor-ai-live-run-dot,
+.aiditor-ai-live-run[data-state="waiting"] .aiditor-ai-live-run-dot,
 .aiditor-ai-live-run[data-state="queued"] .aiditor-ai-live-run-dot {
   background: var(--aiditor-warn);
   animation: aiditor-ai-live-pulse 1.2s ease-in-out infinite;

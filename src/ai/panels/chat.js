@@ -302,13 +302,19 @@
     const permissionMode = aiditor.signal(props.permissionMode || 'full')
     const draft = aiditor.signal(aiditor.ai.richPrompt.empty())
     const hasTarget = aiditor.derived(function () { return !!activeAgent() })
+    const responseState = aiditor.derived(function () {
+      const a = activeAgent()
+      return a && aiditor.ai.response ? aiditor.ai.response.read(a.id) : null
+    })
     const busy = aiditor.derived(function () {
       const a = activeAgent()
-      return !!(a && (a.status === 'running' || a.status === 'queued'))
+      const response = responseState()
+      return !!(a && ((a.status === 'running' || a.status === 'queued') || (response && response.active)))
     })
     const stoppable = aiditor.derived(function () {
       const a = activeAgent()
-      return !!(a && (a.status === 'running' || a.status === 'waiting_approval'))
+      const response = responseState()
+      return !!(a && ((a.status === 'running' || a.status === 'waiting_approval') || (response && response.stoppable)))
     })
     const controlDisabled = aiditor.derived(function () { return !hasTarget() })
     const sendDisabled = aiditor.derived(function () { return !hasTarget() || (aiditor.ai.richPrompt.isEmpty(draft()) && !stoppable()) })
@@ -316,6 +322,7 @@
 
     const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat' })
     ui.collect(root, hasTarget.dispose)
+    ui.collect(root, responseState.dispose)
     ui.collect(root, busy.dispose)
     ui.collect(root, stoppable.dispose)
     ui.collect(root, controlDisabled.dispose)
@@ -461,7 +468,7 @@
           aiditor.batch(function () {
             connection.set(parsed.connection)
             model.set(parsed.model)
-            updateCurrentAgent({ connection: parsed.connection, model: parsed.model, stream: !!connectionConfig(parsed.connection).stream })
+            updateCurrentAgent({ connection: parsed.connection, model: parsed.model })
           })
         },
       }))
@@ -501,7 +508,12 @@
       if (!agent) return
       const currentDraft = aiditor.ai.richPrompt.normalize(draft.peek())
       if (aiditor.ai.richPrompt.isEmpty(currentDraft) && stoppable()) {
-        aiditor.ai.stopAgent(agent.id)
+        const response = responseState.peek()
+        if (response && response.stoppable && aiditor.ai.response) {
+          aiditor.ai.response.stop(agent.id, response.responseId)
+        } else {
+          aiditor.ai.stopAgent(agent.id)
+        }
         return
       }
       if (aiditor.ai.richPrompt.isEmpty(currentDraft)) return
@@ -511,7 +523,6 @@
         connection: connection.peek(),
         model: model.peek() || defaultModel(connection.peek()),
         permissionMode: permissionMode.peek(),
-        stream: !!connectionConfig(connection.peek()).stream,
       })
       const meta = {
         connection: connection.peek(),

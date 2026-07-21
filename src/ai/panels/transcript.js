@@ -1159,7 +1159,28 @@
     }))
     ui.collect(root, aiditor.effect(function () {
       const agentId = read(aiditor.ai.activeAgentId)
-      liveStrip.update(agentId && aiditor.ai.activeRunState ? aiditor.ai.activeRunState(agentId) : null)
+      if (aiditor.ai.agents) aiditor.ai.agents()
+      let state = agentId && aiditor.ai.activeRunState ? aiditor.ai.activeRunState(agentId) : null
+      const response = agentId && aiditor.ai.response ? aiditor.ai.response.read(agentId) : null
+      if (response && response.status === 'waiting' && (!state || state.state === 'idle')) {
+        state = {
+          agentId: agentId,
+          state: 'waiting',
+          startedAt: response.startedAt,
+          completedAt: null,
+          activityText: response.pendingQuestCount === 1
+            ? 'waiting for 1 delegated task'
+            : 'waiting for ' + response.pendingQuestCount + ' delegated tasks',
+          previewTail: '',
+          modelTail: '',
+          turn: null,
+          usage: null,
+          outputTokens: 0,
+          totalTokens: 0,
+          cost: null,
+        }
+      }
+      liveStrip.update(state)
     }))
     return root
   }

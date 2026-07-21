@@ -183,6 +183,18 @@ provider-neutral. Retry attempts emit compact `provider_retry` trace events.
 
 ## Streaming
 
+Streaming is resolved once while building each provider request:
+
+```text
+effective stream = connection capability supports stream
+                   AND connection config has not disabled stream
+```
+
+Agent records do not duplicate this setting. This keeps first-run delegation,
+direct chat input, and persistence restore on the same transport path. A panel
+may edit the selected Connection or its settings, but it must not make streaming
+work by mutating transient Agent state.
+
 Provider helpers support:
 
 ```js

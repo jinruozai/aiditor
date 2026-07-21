@@ -33,6 +33,10 @@ function byId(items, id) {
   return items.find(function (item) { return item.id === id })
 }
 
+async function flush(count = 1) {
+  for (let i = 0; i < count; i++) await new Promise(function (resolve) { setTimeout(resolve, 0) })
+}
+
 let streamRequest = null
 let streamCtx = null
 ai.registerTransport('stream-capture', {
@@ -55,7 +59,6 @@ const streamed = ai.createAgent({
   connection: 'stream-capture',
   model: 'stream-model',
 })
-ai.updateAgent(streamed.id, { stream: true })
 const sent = ai.message.send(streamed.id, { content: 'stream this' }, 'user')
 assert.equal(sent.request.stream, true)
 assert.equal(byId(ai.agents(), streamed.id).status, 'running')
@@ -72,6 +75,51 @@ assert.equal(streamedReply.meta.responseId, sent.message.id)
 assert.equal(byId(ai.agents(), streamed.id).status, 'idle')
 assert.equal(ai.peekActiveRunState(streamed.id).state, 'idle')
 assert.equal(ai.peekActiveRunState(streamed.id).previewTail, 'alphabetagamma')
+
+let releaseDelegatedStream
+const delegatedStreamGate = new Promise(function (resolve) { releaseDelegatedStream = resolve })
+let delegatedStreamRequest = null
+ai.registerTransport('delegated-stream', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    delegatedStreamRequest = request
+    return {
+      deltas: (async function* () {
+        yield { text: 'first child chunk ' }
+        await delegatedStreamGate
+        yield { text: 'second child chunk' }
+      })(),
+    }
+  },
+})
+ai.registerConnection('delegated-stream', { auth: { type: 'none' }, transport: { type: 'delegated-stream' }, configDefaults: { stream: true } })
+const delegatedParent = ai.createAgent({ name: 'Delegated Parent', connection: 'delegated-stream' })
+const delegatedChild = ai.createAgent({ name: 'Delegated Child', parentAgentId: delegatedParent.id, connection: 'delegated-stream' })
+const delegatedQuest = ai.agent.send(delegatedChild.id, {
+  fromAgentId: delegatedParent.id,
+  content: 'first delegated request',
+})
+await flush(3)
+assert.equal(delegatedStreamRequest.stream, true)
+assert.equal(ai.peekActiveRunState(delegatedChild.id).state, 'receiving')
+assert.equal(ai.peekActiveRunState(delegatedChild.id).previewTail, 'first child chunk ')
+assert.equal(ai.findQuest(delegatedChild.id, delegatedQuest.questId).status, 'running')
+releaseDelegatedStream()
+await flush(5)
+assert.equal(ai.findQuest(delegatedChild.id, delegatedQuest.questId).status, 'completed')
+
+let disabledStreamRequest = null
+ai.registerTransport('stream-disabled', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    disabledStreamRequest = request
+    return { role: 'assistant', content: 'non-stream response' }
+  },
+})
+ai.registerConnection('stream-disabled', { auth: { type: 'none' }, transport: { type: 'stream-disabled' }, capabilities: { stream: true }, configDefaults: { stream: false } })
+const disabledStreamAgent = ai.createAgent({ name: 'Disabled Stream', connection: 'stream-disabled' })
+await ai.message.send(disabledStreamAgent.id, { content: 'do not stream' }, 'user').promise
+assert.equal(disabledStreamRequest.stream, false)
 
 let release
 const held = new Promise(function (resolve) { release = resolve })
@@ -91,7 +139,6 @@ const aborting = ai.createAgent({
   name: 'Abort Stream',
   connection: 'stream-hold',
 })
-ai.updateAgent(aborting.id, { stream: true })
 const run = ai.runAgent(aborting.id)
 assert.equal(run.request.stream, true)
 await Promise.resolve()
@@ -132,7 +179,6 @@ const streamingTool = ai.createAgent({
   permissionMode: 'full',
   toolRefs: ['stream-read'],
 })
-ai.updateAgent(streamingTool.id, { stream: true })
 const toolRun = ai.message.send(streamingTool.id, { content: 'use streaming tool' }, 'user')
 await toolRun.promise
 assert.equal(toolStreamRequests, 2)
@@ -217,7 +263,6 @@ const streamApproval = ai.createAgent({
   permissionMode: 'auto',
   toolRefs: ['stream-approval-edit'],
 })
-ai.updateAgent(streamApproval.id, { stream: true })
 await ai.message.send(streamApproval.id, { content: 'needs approval' }, 'user').promise
 assert.equal(byId(ai.agents(), streamApproval.id).status, 'waiting_approval')
 assert.equal(ai.peekActiveRunState(streamApproval.id).state, 'waiting_approval')
@@ -242,7 +287,6 @@ const reasoningAgent = ai.createAgent({
   name: 'Stream Reasoning',
   connection: 'stream-reasoning-flow',
 })
-ai.updateAgent(reasoningAgent.id, { stream: true })
 const reasoningRun = ai.message.send(reasoningAgent.id, { content: 'reason' }, 'user')
 await reasoningRun.promise
 const reasoningMessage = byId(ai.agents(), reasoningAgent.id).messages.find(function (message) {
@@ -320,5 +364,13 @@ await ai.message.send(textProtocolAgent.id, { content: 'use text protocol tool' 
 assert.equal(textProtocolCalls, 1)
 assert.equal(textProtocolRequests, 2)
 assert.equal(byId(ai.agents(), textProtocolAgent.id).messages.at(-1).content, 'text protocol complete')
+
+const restoredStreamingAgent = ai.createAgent({ name: 'Restored Streaming', connection: 'stream-capture' })
+const restoredStreamingId = restoredStreamingAgent.id
+ai.restore(ai.snapshot())
+assert.equal(Object.prototype.hasOwnProperty.call(ai.findAgent(restoredStreamingId), 'stream'), false)
+const restoredStreamingRun = ai.message.send(restoredStreamingId, { content: 'stream after restore' }, 'user')
+assert.equal(restoredStreamingRun.request.stream, true)
+await restoredStreamingRun.promise
 
 console.log('ai stream tests ok')

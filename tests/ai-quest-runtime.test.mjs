@@ -596,6 +596,17 @@ assert.equal(postDelegationRequest.input.meta.delegated[0].messageId != null, tr
 assert.equal(postDelegationRequest.input.meta.responseId, batchResponseId)
 assert.equal(ai.findAgent(batchParent.id).messages.find(function (message) { return message.content === 'local title' }).meta.responseId, batchResponseId)
 assert.equal(ai.findQuest(batchChildA.id, postDelegationRequest.input.meta.delegated[0].questId).meta.sourceResponseId, batchResponseId)
+assert.equal(ai.findAgent(batchParent.id).status, 'idle')
+assert.deepEqual(ai.response.read(batchParent.id, batchResponseId), {
+  agentId: batchParent.id,
+  responseId: batchResponseId,
+  status: 'waiting',
+  active: true,
+  stoppable: true,
+  startedAt: batchRun.message.createdAt,
+  pendingQuestCount: 2,
+  pendingAgentCount: 2,
+})
 releaseBatchA('result a')
 await flush(5)
 const firstInbox = batchRequests.find(function (request) {
@@ -613,6 +624,209 @@ const inboxRequests = batchRequests.filter(function (request) {
 assert.equal(inboxRequests.length, 2)
 assert.equal(inboxRequests[1].input.meta.events.length, 1)
 assert.equal(inboxRequests[1].input.meta.pendingQuests.length, 0)
+assert.equal(ai.response.read(batchParent.id, batchResponseId).status, 'completed')
+assert.equal(ai.response.read(batchParent.id, batchResponseId).active, false)
+
+const responseStopReleases = {}
+ai.registerTransport('response-stop-child', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    return new Promise(function (resolve) { responseStopReleases[request.agent.id] = resolve })
+  },
+})
+ai.registerConnection('response-stop-child', { auth: { type: 'none' }, transport: { type: 'response-stop-child' }, configDefaults: {} })
+const responseStopParent = ai.createAgent({ name: 'Response Stop Parent', parentAgentId: parent.id, connection: 'quest-capture' })
+const responseStopChild = ai.createAgent({ name: 'Response Stop Child', parentAgentId: responseStopParent.id, connection: 'response-stop-child' })
+const responseStopGrandchild = ai.createAgent({ name: 'Response Stop Grandchild', parentAgentId: responseStopChild.id, connection: 'response-stop-child' })
+const responseStopUnrelated = ai.createAgent({ name: 'Response Stop Unrelated', parentAgentId: responseStopParent.id, connection: 'response-stop-child' })
+const responseStopRoot = ai.message.send(responseStopParent.id, { content: 'delegate a cancellable tree' })
+await responseStopRoot.promise
+const responseStopId = responseStopRoot.message.meta.responseId
+const responseStopChildQuest = ai.agent.send(responseStopChild.id, {
+  fromAgentId: responseStopParent.id,
+  sourceResponseId: responseStopId,
+  content: 'child task',
+})
+const responseStopGrandchildQuest = ai.agent.send(responseStopGrandchild.id, {
+  fromAgentId: responseStopChild.id,
+  sourceResponseId: responseStopChildQuest.messageId,
+  content: 'grandchild task',
+})
+const responseStopUnrelatedQuest = ai.agent.send(responseStopUnrelated.id, {
+  fromAgentId: responseStopParent.id,
+  sourceResponseId: 'unrelated-response',
+  content: 'unrelated task',
+})
+await flush(2)
+assert.equal(ai.findAgent(responseStopParent.id).status, 'idle')
+assert.equal(ai.response.read(responseStopParent.id, responseStopId).status, 'waiting')
+assert.equal(ai.response.read(responseStopParent.id, responseStopId).pendingQuestCount, 2)
+const stoppedResponse = ai.response.stop(responseStopParent.id, responseStopId)
+assert.equal(stoppedResponse.outcome, 'stopped')
+assert.equal(stoppedResponse.stopped, true)
+assert.equal(stoppedResponse.cancelledQuestCount, 2)
+assert.equal(ai.findQuest(responseStopChild.id, responseStopChildQuest.questId).status, 'stopped')
+assert.equal(ai.findQuest(responseStopGrandchild.id, responseStopGrandchildQuest.questId).status, 'stopped')
+assert.equal(ai.findQuest(responseStopUnrelated.id, responseStopUnrelatedQuest.questId).status, 'running')
+assert.equal(ai.response.read(responseStopParent.id, responseStopId).status, 'stopped')
+assert.equal(ai.response.read(responseStopParent.id, responseStopId).active, false)
+assert.equal(ai.readMessage(responseStopParent.id, responseStopRoot.messageId).status, 'done')
+assert.equal(ai.readMessage(responseStopParent.id, responseStopRoot.messageId).meta.responseStopReason, 'cancelled')
+assert.equal(ai.response.stop(responseStopParent.id, responseStopId).outcome, 'already_terminal')
+responseStopReleases[responseStopChild.id]({ role: 'assistant', content: 'late child result' })
+responseStopReleases[responseStopGrandchild.id]({ role: 'assistant', content: 'late grandchild result' })
+ai.quest.cancel(responseStopUnrelated.id, responseStopUnrelatedQuest.questId, 'user')
+responseStopReleases[responseStopUnrelated.id]({ role: 'assistant', content: 'late unrelated result' })
+await flush(3)
+assert.equal(ai.findAgent(responseStopParent.id).inbox.filter(function (event) {
+  return !event.consumed && event.meta && event.meta.responseId === responseStopId
+}).length, 0)
+assert.equal(ai.findAgent(responseStopChild.id).inbox.filter(function (event) {
+  return !event.consumed && event.meta && event.meta.responseId === responseStopChildQuest.messageId
+}).length, 0)
+
+const scopedRequests = []
+ai.registerTransport('response-scoped-inbox', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    scopedRequests.push(request)
+    const event = request.input && request.input.meta && request.input.meta.runtimeEvent
+    return { role: 'assistant', content: event ? 'handled current inbox' : String(request.input.content || '') }
+  },
+})
+ai.registerConnection('response-scoped-inbox', { auth: { type: 'none' }, transport: { type: 'response-scoped-inbox' }, configDefaults: {} })
+const scopedAgent = ai.createAgent({ name: 'Response Scoped Inbox', parentAgentId: parent.id, connection: 'response-scoped-inbox' })
+const scopedFirst = ai.message.send(scopedAgent.id, { content: 'response a' })
+await scopedFirst.promise
+const scopedFirstResponseId = scopedFirst.message.meta.responseId
+const staleBeforeNextInput = ai.appendInboxEvent(scopedAgent.id, {
+  type: 'quest.completed',
+  questId: 'stale-before-next-input',
+  summary: 'old result',
+  meta: { responseId: scopedFirstResponseId },
+})
+const scopedSecond = ai.message.send(scopedAgent.id, { content: 'only answer this' })
+await scopedSecond.promise
+await flush(2)
+assert.deepEqual(scopedRequests.map(function (request) { return request.input.content }), ['response a', 'only answer this'])
+assert.equal(ai.findAgent(scopedAgent.id).inbox.find(function (event) { return event.id === staleBeforeNextInput.id }).consumed, true)
+
+const scopedSecondResponseId = scopedSecond.message.meta.responseId
+const staleMixed = ai.appendInboxEvent(scopedAgent.id, {
+  type: 'quest.completed',
+  questId: 'stale-mixed',
+  meta: { responseId: scopedFirstResponseId },
+})
+const unidentifiedMixed = ai.appendInboxEvent(scopedAgent.id, {
+  type: 'quest.completed',
+  questId: 'unidentified-mixed',
+})
+const currentMixed = ai.appendInboxEvent(scopedAgent.id, {
+  type: 'quest.completed',
+  questId: 'current-mixed',
+  meta: { responseId: scopedSecondResponseId },
+})
+const scopedContinuation = ai.scheduleAgent(scopedAgent.id)
+await scopedContinuation.promise
+const scopedInboxRequest = scopedRequests.find(function (request) {
+  return request.input && request.input.meta && request.input.meta.runtimeEvent === 'inbox.continuation'
+})
+assert.equal(scopedInboxRequest.input.meta.responseId, scopedSecondResponseId)
+assert.deepEqual(scopedInboxRequest.input.meta.events.map(function (event) { return event.id }), [currentMixed.id])
+assert.equal(ai.findAgent(scopedAgent.id).inbox.find(function (event) { return event.id === staleMixed.id }).consumed, true)
+assert.equal(ai.findAgent(scopedAgent.id).inbox.find(function (event) { return event.id === unidentifiedMixed.id }).consumed, true)
+assert.equal(ai.findAgent(scopedAgent.id).inbox.find(function (event) { return event.id === currentMixed.id }).consumed, true)
+
+const supersedeRequests = []
+ai.registerTransport('supersede-continuation', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    supersedeRequests.push(request)
+    return { role: 'assistant', content: String(request.input.content || '') }
+  },
+})
+ai.registerConnection('supersede-continuation', { auth: { type: 'none' }, transport: { type: 'supersede-continuation' }, configDefaults: {} })
+const supersedeAgent = ai.createAgent({ name: 'Supersede Continuation', parentAgentId: parent.id, connection: 'supersede-continuation' })
+const supersedeSeed = ai.message.send(supersedeAgent.id, { content: 'seed response' })
+await supersedeSeed.promise
+const queuedRuntime = ai.message.send(supersedeAgent.id, {
+  from: 'system',
+  role: 'user',
+  content: 'queued stale continuation',
+  meta: { runtimeEvent: 'inbox.continuation', responseId: supersedeSeed.message.meta.responseId },
+  priority: -10,
+  schedule: false,
+})
+const supersedeForeground = ai.message.send(supersedeAgent.id, { content: 'new foreground response' })
+await supersedeForeground.promise
+assert.equal(ai.readMessage(supersedeAgent.id, queuedRuntime.messageId).status, 'stopped')
+assert.equal(ai.readMessage(supersedeAgent.id, queuedRuntime.messageId).meta.stopReason, 'superseded')
+assert.equal(supersedeRequests.some(function (request) { return request.input.id === queuedRuntime.messageId }), false)
+
+let releaseLateContinuationRoot
+const lateContinuationRoot = new Promise(function (resolve) { releaseLateContinuationRoot = resolve })
+const lateContinuationRequests = []
+ai.registerTransport('late-continuation', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    lateContinuationRequests.push(request)
+    if (request.input.content === 'running response a') return lateContinuationRoot
+    return { role: 'assistant', content: String(request.input.content || '') }
+  },
+})
+ai.registerConnection('late-continuation', { auth: { type: 'none' }, transport: { type: 'late-continuation' }, configDefaults: {} })
+const lateContinuationAgent = ai.createAgent({ name: 'Late Continuation', parentAgentId: parent.id, connection: 'late-continuation' })
+const lateRoot = ai.message.send(lateContinuationAgent.id, { content: 'running response a' })
+await flush(2)
+const lateForeground = ai.message.send(lateContinuationAgent.id, { content: 'queued response b' })
+const lateRuntime = ai.message.send(lateContinuationAgent.id, {
+  from: 'system',
+  role: 'user',
+  content: 'generated after response b was queued',
+  meta: { runtimeEvent: 'post-delegation.continuation', responseId: lateRoot.message.meta.responseId },
+  priority: -10,
+  schedule: false,
+})
+releaseLateContinuationRoot({ role: 'assistant', content: 'response a done' })
+await lateRoot.promise
+await flush(5)
+assert.equal(ai.readMessage(lateContinuationAgent.id, lateForeground.messageId).status, 'done')
+assert.equal(ai.readMessage(lateContinuationAgent.id, lateRuntime.messageId).status, 'stopped')
+assert.deepEqual(lateContinuationRequests.map(function (request) { return request.input.content }), ['running response a', 'queued response b'])
+
+let releaseActiveRuntime
+const activeRuntimeHeld = new Promise(function (resolve) { releaseActiveRuntime = resolve })
+const activeSupersedeRequests = []
+ai.registerTransport('supersede-active-continuation', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    activeSupersedeRequests.push(request)
+    if (request.input && request.input.meta && request.input.meta.runtimeEvent) return activeRuntimeHeld
+    return { role: 'assistant', content: String(request.input.content || '') }
+  },
+})
+ai.registerConnection('supersede-active-continuation', { auth: { type: 'none' }, transport: { type: 'supersede-active-continuation' }, configDefaults: {} })
+const activeSupersedeAgent = ai.createAgent({ name: 'Supersede Active Continuation', parentAgentId: parent.id, connection: 'supersede-active-continuation' })
+const activeSupersedeSeed = ai.message.send(activeSupersedeAgent.id, { content: 'active seed' })
+await activeSupersedeSeed.promise
+const activeRuntime = ai.message.send(activeSupersedeAgent.id, {
+  from: 'system',
+  role: 'user',
+  content: 'active stale continuation',
+  meta: { runtimeEvent: 'inbox.continuation', responseId: activeSupersedeSeed.message.meta.responseId },
+  priority: -10,
+})
+await flush(2)
+const activeForeground = ai.message.send(activeSupersedeAgent.id, { content: 'foreground wins' })
+await activeForeground.promise
+assert.equal(ai.readMessage(activeSupersedeAgent.id, activeRuntime.messageId).status, 'stopped')
+assert.equal(ai.readMessage(activeSupersedeAgent.id, activeRuntime.messageId).meta.runtimeEvent, 'inbox.continuation')
+assert.equal(activeSupersedeRequests[activeSupersedeRequests.length - 1].input.content, 'foreground wins')
+releaseActiveRuntime({ role: 'assistant', content: 'stale result' })
+await activeRuntime.promise
+assert.equal(ai.findAgent(activeSupersedeAgent.id).messages.some(function (message) {
+  return message.content === 'stale result' && message.status === 'done'
+}), false)
 
 assert.equal(requests.length >= 2, true)
 console.log('ai quest runtime tests ok')

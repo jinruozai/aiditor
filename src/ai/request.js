@@ -516,7 +516,7 @@
       const events = meta.events || []
       const pending = meta.pendingQuests || []
       return contextCardMessage('inbox', 'inbox', 20, [
-          'Current completed agent runtime event batch.',
+          'Completed agent runtime events for the current response.',
           'Process every completed/failed event in this batch.',
           'Use quest.result only for quest ids listed in completedEvents unless the user explicitly asks for broader reads.',
           'Do not wait for pendingQuests. They are non-blocking background and will produce later inbox events.',
@@ -761,6 +761,8 @@
     const skillActivations = activationDetails(skillActivationRecords)
     const connectionName = agent.connection || ai.defaultConnection || 'mock'
     const connectionCapabilities = ai.connectionCapabilities ? ai.connectionCapabilities(connectionName) : {}
+    const connectionConfig = ai.getConnectionConfig ? ai.getConnectionConfig(connectionName) : {}
+    const stream = !!connectionCapabilities.stream && connectionConfig.stream !== false
     baseCtx.skillRefs = skillRefs
     baseCtx.skillSpecs = skillSpecs
     baseCtx.skillActivations = skillActivations
@@ -817,6 +819,7 @@
           skillRefs: skillRefs.slice(),
           skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
           toolProtocol: connectionCapabilities.toolProtocol || 'none',
+          stream: stream,
           contextItems: contextPack ? contextPack.items.length : 0,
           contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
         },
@@ -844,7 +847,7 @@
       skillSpecs: skillSpecs,
       skillActivations: skillActivations,
       outputSchema: agent.outputSchema || null,
-      stream: !!agent.stream,
+      stream: stream,
       target: agent,
       event: input && input.event ? input.event : null,
       turn: turn || 0,

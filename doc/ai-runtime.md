@@ -29,7 +29,6 @@ status
 statusText
 connection
 model
-stream
 permissionMode
 messages
 queue
@@ -42,6 +41,16 @@ outputSchema
 ```
 
 Parent/child is an agent relationship, not a new runtime layer.
+
+`agent.status` describes only that Agent's scheduler: provider execution, queue,
+approval wait, or idle. It does not claim that the user-visible response is
+finished. A parent Agent may be `idle` while its response is waiting for
+delegated Quests.
+
+Streaming is connection-owned runtime behavior, not Agent state. Direct input,
+delegated Quests, newly created Agents, and restored Agents all derive the same
+effective stream mode from the selected Connection. UI panels must not write a
+temporary `agent.stream` flag to initialize runtime behavior.
 
 These JavaScript functions are trusted host APIs. In particular,
 `aiditor.ai.updateAgent(id, patch)` is not exposed to the model as an arbitrary
@@ -200,6 +209,35 @@ quests. Tool continuations, post-delegation continuations, and matching inbox
 continuations retain the originating `responseId`; each provider execution still
 gets its own `runId`. A delegated child starts its own response chain, while its
 quest carries the parent's source response id back in the completion event.
+
+For each Agent, the latest non-runtime `user` message defines the foreground
+response. This applies both to direct user input and to a parent Agent's Quest.
+Runtime-owned continuation messages never advance that boundary. A background
+result may resume the model only when its source `responseId` still equals the
+foreground response; starting a newer input supersedes older automatic
+continuations without deleting their Quest, message, or inbox records.
+
+Trusted host UI can inspect and stop that response lifecycle:
+
+```js
+aiditor.ai.response.read(agentId, responseId?)
+aiditor.ai.response.stop(agentId, responseId?)
+```
+
+`read` returns the response status (`running`, `waiting`, `completed`, or
+`stopped`), whether it is active/stoppable, and bounded pending Quest counts.
+Omitting `responseId` selects the Agent's latest non-runtime user response.
+
+`stop` is the user-facing turn cancellation primitive. It closes the root
+response, stops matching runtime continuations, and recursively cancels pending
+descendant Quests created by that response. It does not delete Agents, rewrite
+completed messages, or cancel unrelated responses. `agent.stop` remains the
+lower-level operation for stopping one Agent's current provider run.
+
+The built-in chat composer treats both `running` and `waiting` responses as
+stoppable. While only descendants are active, the parent Agent remains `idle`
+and the transcript live strip shows `waiting`; the UI must not falsify the
+Agent scheduler state to keep the Stop control available.
 
 The transcript renders the response footer only on the last assistant message in
 that chain, after no chain message is queued/running and every quest dispatched by
@@ -529,10 +567,26 @@ aiditor.ai.appendInboxEvent(agentId, event)
 aiditor.ai.markInboxEventConsumed(agentId, eventId)
 ```
 
-The runtime can enqueue a continuation when actionable inbox events exist.
-Inbox is a push-based internal delivery mechanism, not a model polling API.
-Parents recover task state through bounded `agent.read`, `quest.read`, and exact
-`quest.result` calls instead of consuming the inbox manually.
+Inbox events have two delivery outcomes:
+
+- **continuation**: the event has the foreground response's `responseId`, so the
+  runtime may enqueue one hidden continuation containing only events from that
+  response;
+- **passive result**: the event belongs to an older response or has no stable
+  response identity. The runtime marks it consumed without invoking the model.
+
+Events from different responses are never mixed into one continuation and an
+inbox continuation never uses a null `responseId`. Runtime continuations have
+lower queue priority than explicit input. A new foreground input also supersedes
+queued or active runtime-owned continuations from older responses. It does not
+interrupt an explicit user task or parent-Agent Quest already in progress;
+interrupting those remains an explicit caller policy.
+
+Passive results remain available through the immutable Quest/message records and
+the Agent inbox for diagnostics. Inbox is a push-based internal delivery
+mechanism, not a model polling API. Parents recover exact task state through
+bounded `agent.read`, `quest.read`, and `quest.result` calls instead of manually
+driving inbox delivery.
 
 ## Message Records
 

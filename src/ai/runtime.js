@@ -21,6 +21,7 @@
   const RUN_PREVIEW_CHARS = 140
   const MAX_STREAM_CONTENT_CHARS = 1000000
   const MAX_REASONING_CHARS = 65536
+  const RUNTIME_CONTINUATION_PRIORITY = -10
   let nextRunId = 1
   let nextProviderToolCallId = 1
 
@@ -1283,8 +1284,7 @@
     if (agent && agent.queue && agent.queue.length) {
       ai.setAgentStatus(agentId, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
       scheduleAgent(agentId)
-    } else if (agent && hasActionableInbox(agent)) {
-      enqueueInboxContinuation(agent)
+    } else if (agent && enqueueInboxContinuation(agent)) {
       ai.setAgentStatus(agentId, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
       scheduleAgent(agentId)
     } else {
@@ -1294,10 +1294,177 @@
     return result
   }
 
-  function hasActionableInbox(agent) {
+  function isRuntimeContinuation(message) {
+    return !!(message && message.role === 'user' && message.meta && message.meta.runtimeEvent)
+  }
+
+  function isForegroundInput(message) {
+    return !!(message && message.role === 'user' && !isRuntimeContinuation(message))
+  }
+
+  function foregroundResponseId(agent) {
+    const messages = agent && agent.messages || []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (!isForegroundInput(message)) continue
+      return message.meta && message.meta.responseId || message.id || null
+    }
+    return null
+  }
+
+  function messageResponseId(message) {
+    return message && message.meta && message.meta.responseId || message && message.id || null
+  }
+
+  function responseInput(agent, responseId) {
+    const messages = agent && agent.messages || []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (!isForegroundInput(message)) continue
+      if (messageResponseId(message) === responseId) return message
+    }
+    return null
+  }
+
+  function pendingExecutionStatus(status) {
+    return status === 'queued' || status === 'running' || status === 'waiting' || status === 'waiting_approval'
+  }
+
+  function responseWasStopped(input) {
+    return !!(input && (input.status === 'stopped' || input.meta && input.meta.responseStoppedAt))
+  }
+
+  function responseGraph(agentId, responseId) {
+    const agents = ai.agents ? ai.agents.peek() : []
+    const byId = {}
+    const questsBySource = {}
+    for (let i = 0; i < agents.length; i++) {
+      const agent = agents[i]
+      byId[agent.id] = agent
+      const quests = agent.quests || []
+      for (let q = 0; q < quests.length; q++) {
+        const quest = quests[q]
+        const sourceResponseId = quest.meta && quest.meta.sourceResponseId
+        if (!quest.fromAgentId || !sourceResponseId) continue
+        const key = quest.fromAgentId + '/' + sourceResponseId
+        if (!questsBySource[key]) questsBySource[key] = []
+        questsBySource[key].push({ agent: agent, quest: quest })
+      }
+    }
+    const root = byId[agentId]
+    const rootResponseId = responseId || foregroundResponseId(root)
+    if (!root || !rootResponseId) return null
+
+    const nodes = []
+    const pendingMessages = []
+    const pendingQuests = []
+    const pendingEvents = []
+    const seen = {}
+
+    function visit(currentAgentId, currentResponseId, depth) {
+      const key = currentAgentId + '/' + currentResponseId
+      if (seen[key]) return
+      seen[key] = true
+      const agent = byId[currentAgentId]
+      if (!agent) return
+      const input = responseInput(agent, currentResponseId)
+      nodes.push({ agentId: currentAgentId, responseId: currentResponseId, input: input, depth: depth })
+
+      const messages = agent.messages || []
+      for (let i = 0; i < messages.length; i++) {
+        const message = messages[i]
+        if (messageResponseId(message) !== currentResponseId) continue
+        if (pendingExecutionStatus(message.status)) {
+          pendingMessages.push({ agentId: currentAgentId, responseId: currentResponseId, message: message, depth: depth })
+        }
+      }
+
+      const inbox = agent.inbox || []
+      for (let i = 0; i < inbox.length; i++) {
+        const event = inbox[i]
+        if (event.consumed || !event.meta || event.meta.responseId !== currentResponseId) continue
+        pendingEvents.push({ agentId: currentAgentId, responseId: currentResponseId, event: event, depth: depth })
+      }
+
+      const children = questsBySource[key] || []
+      for (let q = 0; q < children.length; q++) {
+        const target = children[q].agent
+        const quest = children[q].quest
+        if (!terminalQuest(quest)) {
+          pendingQuests.push({ agentId: target.id, questId: quest.id, quest: quest, depth: depth + 1 })
+        }
+        const requestId = quest.requestMessageId || quest.id
+        const targetMessages = target.messages || []
+        let request = null
+        for (let m = 0; m < targetMessages.length; m++) {
+          if (targetMessages[m].id === requestId) {
+            request = targetMessages[m]
+            break
+          }
+        }
+        const childResponseId = messageResponseId(request) || quest.id
+        visit(target.id, childResponseId, depth + 1)
+      }
+    }
+
+    visit(agentId, rootResponseId, 0)
+    const rootInput = nodes.length ? nodes[0].input : null
+    const stopped = responseWasStopped(rootInput)
+    const active = !stopped && !!(pendingMessages.length || pendingQuests.length || pendingEvents.length)
+    let status = 'completed'
+    if (stopped) status = 'stopped'
+    else if (active) {
+      const rootRunning = pendingMessages.some(function (entry) {
+        return entry.agentId === agentId && entry.responseId === rootResponseId
+      })
+      status = rootRunning ? 'running' : 'waiting'
+    }
+    return {
+      agentId: agentId,
+      responseId: rootResponseId,
+      status: status,
+      active: active,
+      nodes: nodes,
+      pendingMessages: pendingMessages,
+      pendingQuests: pendingQuests,
+      pendingEvents: pendingEvents,
+      startedAt: rootInput && (rootInput.createdAt || rootInput.time) || null,
+    }
+  }
+
+  function readResponse(agentId, responseId) {
+    const graph = responseGraph(agentId, responseId)
+    if (!graph) return null
+    const pendingAgents = {}
+    for (let i = 0; i < graph.pendingMessages.length; i++) pendingAgents[graph.pendingMessages[i].agentId] = true
+    for (let i = 0; i < graph.pendingQuests.length; i++) pendingAgents[graph.pendingQuests[i].agentId] = true
+    for (let i = 0; i < graph.pendingEvents.length; i++) pendingAgents[graph.pendingEvents[i].agentId] = true
+    return {
+      agentId: graph.agentId,
+      responseId: graph.responseId,
+      status: graph.status,
+      active: graph.active,
+      stoppable: graph.active,
+      startedAt: graph.startedAt,
+      pendingQuestCount: graph.pendingQuests.length,
+      pendingAgentCount: Object.keys(pendingAgents).length,
+    }
+  }
+
+  function responseInboxBatch(agent) {
+    const responseId = foregroundResponseId(agent)
+    const input = responseInput(agent, responseId)
+    const stopped = responseWasStopped(input)
     const inbox = agent && agent.inbox || []
-    for (let i = 0; i < inbox.length; i++) if (!inbox[i].consumed) return true
-    return false
+    const events = []
+    for (let i = 0; i < inbox.length; i++) {
+      const event = inbox[i]
+      if (event.consumed) continue
+      const eventResponseId = event.meta && event.meta.responseId || null
+      if (!stopped && responseId && eventResponseId === responseId) events.push(event)
+      else ai.markInboxEventConsumed(agent.id, event.id)
+    }
+    return { responseId: stopped ? null : responseId, events: events }
   }
 
   function summarizeDelegationCalls(message) {
@@ -1341,18 +1508,17 @@
         responseId: message && message.meta && message.meta.responseId || null,
         delegated: delegated,
       },
-      priority: 10,
+      priority: RUNTIME_CONTINUATION_PRIORITY,
       schedule: false,
     })
   }
 
   function enqueueInboxContinuation(agent) {
-    const events = (agent.inbox || []).filter(function (event) { return !event.consumed })
-    if (!events.length) return null
-    events.sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0) })
-    const selected = events.slice()
+    const batch = responseInboxBatch(agent)
+    if (!batch.responseId || !batch.events.length) return null
+    const selected = batch.events.slice().sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0) })
     for (let i = 0; i < selected.length; i++) ai.markInboxEventConsumed(agent.id, selected[i].id)
-    const pending = pendingQuestsForEvents(agent.id, selected)
+    const pending = pendingQuestsForEvents(agent.id, selected, batch.responseId)
     const content = 'Process this completed agent runtime event batch:\n' + JSON.stringify(selected.map(function (event) {
       return {
         type: event.type,
@@ -1362,25 +1528,17 @@
         summary: event.summary,
       }
     })) + '\nPending related quests, if any, are non-blocking background:\n' + JSON.stringify(pending)
-    let responseId = null
-    for (let i = 0; i < selected.length; i++) {
-      const eventResponseId = selected[i].meta && selected[i].meta.responseId || null
-      if (!eventResponseId || (responseId && responseId !== eventResponseId)) {
-        responseId = null
-        break
-      }
-      responseId = eventResponseId
-    }
     return queueMessage(agent.id, {
       from: 'system',
       role: 'user',
       content: content,
-      meta: { runtimeEvent: 'inbox.continuation', responseId: responseId, events: selected, pendingQuests: pending },
+      meta: { runtimeEvent: 'inbox.continuation', responseId: batch.responseId, events: selected, pendingQuests: pending },
+      priority: RUNTIME_CONTINUATION_PRIORITY,
       schedule: false,
     })
   }
 
-  function pendingQuestsForEvents(agentId, events) {
+  function pendingQuestsForEvents(agentId, events, responseId) {
     const seen = {}
     const out = []
     const agents = ai.agents ? ai.agents.peek() : []
@@ -1391,6 +1549,7 @@
       for (let j = 0; j < list.length; j++) {
         const quest = list[j]
         if (quest.fromAgentId !== agentId) continue
+        if (!quest.meta || quest.meta.sourceResponseId !== responseId) continue
         if (quest.status === 'completed' || quest.status === 'failed' || quest.status === 'stopped') continue
         if (sourceIds[agents[a].id]) continue
         const key = agents[a].id + '/' + quest.id
@@ -1557,20 +1716,161 @@
     return Object.assign({ outcome: 'cancelled', cancelled: true, previousStatus: previousStatus }, ai.quest.read(agentId, questId, who))
   }
 
+  function stopResponse(agentId, responseId) {
+    const graph = responseGraph(agentId, responseId)
+    if (!graph) {
+      return { outcome: 'not_found', stopped: false, agentId: agentId || null, responseId: responseId || null }
+    }
+    if (!graph.active) {
+      return {
+        outcome: 'already_terminal',
+        stopped: false,
+        agentId: graph.agentId,
+        responseId: graph.responseId,
+        status: graph.status,
+        stoppedRunCount: 0,
+        cancelledQuestCount: 0,
+      }
+    }
+
+    const now = Date.now()
+    const nodeKeys = {}
+    const nodes = graph.nodes.slice().sort(function (a, b) { return b.depth - a.depth })
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      nodeKeys[node.agentId + '/' + node.responseId] = true
+      if (node.input) {
+        ai.updateMessage(node.agentId, node.input.id, {
+          meta: Object.assign({}, node.input.meta || {}, {
+            responseStoppedAt: now,
+            responseStopReason: 'cancelled',
+          }),
+        })
+      }
+      const agent = ai.findAgent(node.agentId)
+      const queue = agent && agent.queue || []
+      for (let q = queue.length - 1; q >= 0; q--) {
+        const message = ai.readMessage(node.agentId, queue[q].messageId)
+        if (messageResponseId(message) !== node.responseId) continue
+        ai.dequeueMessage(node.agentId, message.id)
+        ai.updateMessage(node.agentId, message.id, {
+          status: 'stopped',
+          completedAt: now,
+          meta: Object.assign({}, message.meta || {}, {
+            stopReason: 'cancelled',
+            responseStoppedAt: now,
+            responseStopReason: 'cancelled',
+          }),
+        })
+      }
+      const inbox = agent && agent.inbox || []
+      for (let e = 0; e < inbox.length; e++) {
+        const event = inbox[e]
+        if (!event.consumed && event.meta && event.meta.responseId === node.responseId) {
+          ai.markInboxEventConsumed(node.agentId, event.id)
+        }
+      }
+    }
+
+    let stoppedRunCount = 0
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      const current = runs[node.agentId] || waitingRuns[node.agentId]
+      const input = current && current.request && current.request.input
+      if (!input || !nodeKeys[node.agentId + '/' + messageResponseId(input)]) continue
+      if (stopRun(node.agentId, 'idle', 'cancelled')) stoppedRunCount++
+    }
+
+    let cancelledQuestCount = 0
+    const quests = graph.pendingQuests.slice().sort(function (a, b) { return b.depth - a.depth })
+    for (let i = 0; i < quests.length; i++) {
+      const entry = quests[i]
+      const current = ai.findQuest(entry.agentId, entry.questId)
+      if (current && !terminalQuest(current)) cancelQuest(entry.agentId, entry.questId, 'user')
+      const stoppedQuest = ai.findQuest(entry.agentId, entry.questId)
+      if (stoppedQuest && stoppedQuest.status === 'stopped') cancelledQuestCount++
+    }
+
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      const agent = ai.findAgent(node.agentId)
+      if (!agent) continue
+      const inbox = agent.inbox || []
+      for (let e = 0; e < inbox.length; e++) {
+        const event = inbox[e]
+        if (!event.consumed && event.meta && event.meta.responseId === node.responseId) {
+          ai.markInboxEventConsumed(node.agentId, event.id)
+        }
+      }
+      if (runs[node.agentId] || waitingRuns[node.agentId]) continue
+      if (agent.queue && agent.queue.length) {
+        ai.setAgentStatus(node.agentId, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
+        scheduleAgent(node.agentId)
+      } else {
+        ai.setAgentStatus(node.agentId, { status: 'idle', statusText: '', activeMessageId: null, activeQuestId: null })
+      }
+    }
+    scheduleQueuedAgents()
+    return {
+      outcome: 'stopped',
+      stopped: true,
+      agentId: graph.agentId,
+      responseId: graph.responseId,
+      status: 'stopped',
+      stoppedRunCount: stoppedRunCount,
+      cancelledQuestCount: cancelledQuestCount,
+    }
+  }
+
+  function supersedeQueuedRuntimeContinuations(agentId, responseId) {
+    const agent = ai.findAgent(agentId)
+    const queue = agent && agent.queue || []
+    for (let i = 0; i < queue.length; i++) {
+      const message = ai.readMessage(agentId, queue[i].messageId)
+      const messageResponseId = message && message.meta && message.meta.responseId || null
+      if (!isRuntimeContinuation(message)) continue
+      if (responseId && messageResponseId === responseId) continue
+      ai.dequeueMessage(agentId, message.id)
+      ai.updateMessage(agentId, message.id, {
+        status: 'stopped',
+        completedAt: Date.now(),
+        meta: Object.assign({}, message.meta, { stopReason: 'superseded', supersededByResponseId: responseId }),
+      })
+    }
+  }
+
+  function supersedeActiveRuntimeContinuation(agentId, responseId) {
+    const active = runs[agentId] || waitingRuns[agentId]
+    const input = active && active.request && active.request.input
+    const inputResponseId = input && input.meta && input.meta.responseId || null
+    if (!isRuntimeContinuation(input) || inputResponseId === responseId) return false
+    return stopRun(agentId, 'queued', 'superseded')
+  }
+
+  function supersedeRuntimeContinuations(agentId, responseId) {
+    supersedeActiveRuntimeContinuation(agentId, responseId)
+    supersedeQueuedRuntimeContinuations(agentId, responseId)
+  }
+
   function scheduleAgent(agentId) {
     let agent = agentId ? ai.findAgent(agentId) : ai.getActiveAgent()
     if (!agent) return null
     if (runs[agent.id] || agent.status === 'running' || agent.status === 'waiting_approval') return null
-    if (!canStartRun(agent.id)) {
-      if (agent.queue && agent.queue.length) ai.setAgentStatus(agent.id, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
-      return null
-    }
-    if ((!agent.queue || !agent.queue.length) && hasActionableInbox(agent)) {
+    supersedeQueuedRuntimeContinuations(agent.id, foregroundResponseId(agent))
+    agent = ai.findAgent(agent.id)
+    if (!agent.queue || !agent.queue.length) {
       enqueueInboxContinuation(agent)
       agent = ai.findAgent(agent.id)
     }
+    if (!agent.queue || !agent.queue.length) {
+      if (agent.status === 'queued') ai.setAgentStatus(agent.id, { status: 'idle', statusText: '', activeMessageId: null, activeQuestId: null })
+      return null
+    }
+    if (!canStartRun(agent.id)) {
+      ai.setAgentStatus(agent.id, { status: 'queued', statusText: '', activeMessageId: null, activeQuestId: null })
+      return null
+    }
     const queue = agent.queue || []
-    if (!queue.length) return null
     const item = queue.slice().sort(function (a, b) {
       return (b.priority || 0) - (a.priority || 0) || a.createdAt - b.createdAt
     })[0]
@@ -1610,6 +1910,7 @@
       messageMeta.responseId = message.id
       message = ai.updateMessage(agent.id, message.id, { meta: messageMeta })
     }
+    if (isForegroundInput(message)) supersedeRuntimeContinuations(agent.id, messageMeta.responseId)
     ai.enqueueMessage(agent.id, message.id, {
       interrupt: !!spec.interrupt,
       priority: spec.priority || 0,
@@ -1652,6 +1953,7 @@
     })
     if (!messageMeta.responseId) messageMeta.responseId = message.id
     message = ai.updateMessage(target.id, message.id, { questId: message.id, meta: messageMeta })
+    supersedeRuntimeContinuations(target.id, messageMeta.responseId)
     const quest = ai.createQuest(target.id, {
       id: message.id,
       fromAgentId: spec.fromAgentId || null,
@@ -1695,7 +1997,10 @@
   ai.message = ai.message || {}
   ai.agent = ai.agent || {}
   ai.quest = ai.quest || {}
+  ai.response = ai.response || {}
   ai.message.send = function (agentId, spec) { return queueMessage(agentId, spec || {}, (spec && spec.from) || 'user') }
   ai.agent.send = sendAgentQuest
   ai.quest.cancel = cancelQuest
+  ai.response.read = readResponse
+  ai.response.stop = stopResponse
 })(window.aiditor = window.aiditor || {})
