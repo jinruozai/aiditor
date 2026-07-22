@@ -24,15 +24,16 @@
   }
 
   function stringify(value) {
-    const seen = []
+    const ancestors = []
     try {
       return JSON.stringify(value, function (key, item) {
         if (typeof item === 'function') return '[Function]'
         if (typeof item === 'bigint') return String(item)
         if (isDomLike(item)) return domLabel(item)
         if (item && typeof item === 'object') {
-          for (let i = 0; i < seen.length; i++) if (seen[i] === item) return '[Circular]'
-          seen.push(item)
+          while (ancestors.length && ancestors[ancestors.length - 1] !== this) ancestors.pop()
+          if (ancestors.indexOf(item) >= 0) return '[Circular]'
+          ancestors.push(item)
         }
         return item
       })

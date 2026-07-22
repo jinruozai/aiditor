@@ -5,34 +5,6 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const http = ai.provider
 
-  function mergeToolCallDeltas(calls) {
-    const out = []
-    for (let i = 0; i < (calls || []).length; i++) {
-      const delta = calls[i]
-      const index = delta.index != null ? delta.index : findToolCallIndex(out, delta)
-      const at = index >= 0 ? index : out.length
-      const cur = out[at] || {}
-      const next = Object.assign({}, cur)
-      if (delta.id) next.id = delta.id
-      if (delta.type) next.type = delta.type
-      if (delta.function) {
-        const fn = Object.assign({}, next.function || {})
-        if (delta.function.name) fn.name = delta.function.name
-        if (delta.function.arguments != null) fn.arguments = String(fn.arguments || '') + String(delta.function.arguments)
-        next.function = fn
-      }
-      out[at] = next
-    }
-    return out
-  }
-
-  function findToolCallIndex(calls, delta) {
-    if (delta.id) {
-      for (let i = 0; i < calls.length; i++) if (calls[i].id === delta.id) return i
-    }
-    return -1
-  }
-
   function configuredMaxTokens(config, fallback) {
     const n = Number(config.maxTokens || config.maxOutputTokens || config.max_tokens || config.max_completion_tokens || 0)
     return n > 0 ? n : fallback
@@ -115,7 +87,7 @@
             role: 'assistant',
           content: data.content,
           reasoning_content: data.reasoning_content || null,
-          toolCalls: ai.normalizeOpenAiToolCalls(mergeToolCallDeltas(data.toolCalls || []), request),
+          toolCalls: ai.normalizeOpenAiToolCalls(ai.toolArguments.mergeDeltas([], data.toolCalls || []), request),
           usage: data.usage || null,
           finishReason: data.finishReason || null,
         }

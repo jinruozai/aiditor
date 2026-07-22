@@ -96,6 +96,11 @@ content grows. Rich Markdown keeps the root connected and rebuilds only that
 text part's descendants. Transcript rows, tool cards, sibling parts, and other
 messages are not remounted.
 
+Reasoning follows the same rule. `collapsed` defines only its initial state; the
+mounted `details` element is patched in place while reasoning grows. The
+transcript keeps disclosure state locally across virtualized row remounts, so
+opening Thinking never mutates the Agent message or interrupts streaming.
+
 The renderer deliberately does not infer UI from arbitrary JSON or code fences.
 For example, a model response containing a JSON object with `type: "card"`
 remains a code block. A card must arrive as a normalized structured part from a

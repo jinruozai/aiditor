@@ -515,7 +515,8 @@
 
   aiditor.ai.operations.register('demo.setProp', {
     title: 'Set Demo Property',
-    schema: {
+    exposeToModel: true,
+    inputSchema: {
       type: 'object',
       required: ['componentId', 'prop', 'value'],
       properties: {
@@ -531,7 +532,8 @@
 
   aiditor.ai.operations.register('demo.setThemeToken', {
     title: 'Set Demo Theme Token',
-    schema: {
+    exposeToModel: true,
+    inputSchema: {
       type: 'object',
       required: ['token', 'value'],
       properties: {
@@ -546,7 +548,8 @@
 
   aiditor.ai.operations.register('demo.setThemeMode', {
     title: 'Set Demo Theme Mode',
-    schema: {
+    exposeToModel: true,
+    inputSchema: {
       type: 'object',
       required: ['mode'],
       properties: { mode: { type: 'string', enum: themeModes() } },

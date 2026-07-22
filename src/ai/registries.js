@@ -37,6 +37,13 @@
     return { type: 'object', properties: properties }
   }
 
+  function resolveToolSchema(tool, ctx) {
+    const schema = typeof tool.resolveSchema === 'function'
+      ? tool.resolveSchema(ctx || {})
+      : tool.schema
+    return normalizeToolSchema(schema)
+  }
+
   function normalizeMeta(meta) {
     if (aiditor.runtime && aiditor.runtime.registrationMeta) meta = aiditor.runtime.registrationMeta(meta)
     meta = meta || {}
@@ -57,6 +64,8 @@
 
   function registerTool(name, tool, meta) {
     assertFree('ai.tools', tools, name, meta)
+    if (tool.resolveSchema != null && typeof tool.resolveSchema !== 'function')
+      throw new Error('ai.tools.register: resolveSchema must be a function for "' + name + '"')
     tool.schema = normalizeToolSchema(tool.schema)
     tools[name] = tool
     toolMeta[name] = normalizeMeta(meta)
@@ -433,6 +442,10 @@
     },
     meta: function (name) { return Object.assign({}, toolMeta[name] || {}) },
     capabilities: toolCapabilities,
+    schema: function (name, ctx) {
+      const tool = getTool(name)
+      return tool ? resolveToolSchema(tool, ctx) : null
+    },
   }
   ai.toolMeta = function (name) { return Object.assign({}, toolMeta[name] || {}) }
   ai.normalizeToolSchema = normalizeToolSchema

@@ -139,6 +139,67 @@ assert.equal(normalized[0].toolId, 'agent.create')
 assert.equal(normalized[0].args.name, 'worker')
 assert.equal(normalized[0].providerName, 'agent__create')
 
+const fidelityArgs = {
+  enabled: true,
+  count: 0,
+  empty: '',
+  nothing: null,
+  points: [[1, 2], [3, 4]],
+  jsonLiteral: '{"must":"stay a string"}',
+  nested: { values: [false, null, '[1,2]'] },
+}
+const normalizedJsonArgs = ai.normalizeOpenAiToolCalls([{
+  id: 'call_json_args',
+  function: { name: 'agent__create', arguments: JSON.stringify(fidelityArgs) },
+}], request)
+assert.deepEqual(normalizedJsonArgs[0].args, fidelityArgs)
+assert.equal(normalizedJsonArgs[0].args.jsonLiteral, '{"must":"stay a string"}')
+
+const structuredArguments = ai.normalizeOpenAiToolCalls([{
+  id: 'call_structured_arguments',
+  function: { name: 'agent__create', arguments: fidelityArgs },
+}], request)
+assert.equal(structuredArguments[0].args, fidelityArgs)
+
+const canonicalArgs = ai.normalizeOpenAiToolCalls([{
+  id: 'call_canonical_args',
+  name: 'agent__create',
+  args: fidelityArgs,
+}], request)
+assert.equal(canonicalArgs[0].args, fidelityArgs)
+
+const mergedStringArguments = ai.toolArguments.mergeDeltas([], [
+  { index: 0, id: 'call_fragmented', function: { name: 'agent__create', arguments: '{"nested":' } },
+  { index: 0, function: { arguments: '{"value":"{\\"literal\\":true}"}}' } },
+])
+assert.deepEqual(ai.normalizeOpenAiToolCalls(mergedStringArguments, request)[0].args, {
+  nested: { value: '{"literal":true}' },
+})
+
+const mergedStructuredArguments = ai.toolArguments.mergeDeltas([], [{
+  index: 0,
+  id: 'call_structured_delta',
+  function: { name: 'agent__create', arguments: fidelityArgs },
+}])
+assert.equal(ai.normalizeOpenAiToolCalls(mergedStructuredArguments, request)[0].args, fidelityArgs)
+
+assert.throws(function () {
+  ai.normalizeOpenAiToolCalls([{
+    id: 'call_invalid_args',
+    function: { name: 'agent__create', arguments: '{"name":' },
+  }], request)
+}, function (error) {
+  return error && error.code === 'TOOL_ARGUMENTS_INVALID_JSON'
+})
+
+const textFidelity = ai.decodeTextToolResponse({
+  role: 'assistant',
+  content: '```json\n' + JSON.stringify({
+    aiditor_tool_calls: [{ toolId: 'agent.create', args: fidelityArgs }],
+  }) + '\n```',
+})
+assert.deepEqual(textFidelity.toolCalls[0].args, fidelityArgs)
+
 const anthropicTools = ai.anthropicTools(request)
 assert.equal(anthropicTools[0].name, 'agent__create')
 assert.equal(anthropicTools[0].input_schema.type, 'object')
@@ -159,6 +220,11 @@ const normalizedAnthropic = ai.normalizeAnthropicContent([
 assert.equal(normalizedAnthropic.content, 'Checking.')
 assert.equal(normalizedAnthropic.toolCalls[0].toolId, 'agent.create')
 assert.equal(normalizedAnthropic.toolCalls[0].providerName, 'agent__create')
+
+const normalizedAnthropicFidelity = ai.normalizeAnthropicContent([
+  { type: 'tool_use', id: 'call_b_fidelity', name: 'agent__create', input: fidelityArgs },
+], request)
+assert.equal(normalizedAnthropicFidelity.toolCalls[0].args, fidelityArgs)
 
 const imageRequest = {
   attachmentRefs: [{ kind: 'file.image', title: 'icon.png' }],

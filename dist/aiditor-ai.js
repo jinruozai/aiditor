@@ -96,15 +96,16 @@
   }
 
   function stringify(value) {
-    const seen = []
+    const ancestors = []
     try {
       return JSON.stringify(value, function (key, item) {
         if (typeof item === 'function') return '[Function]'
         if (typeof item === 'bigint') return String(item)
         if (isDomLike(item)) return domLabel(item)
         if (item && typeof item === 'object') {
-          for (let i = 0; i < seen.length; i++) if (seen[i] === item) return '[Circular]'
-          seen.push(item)
+          while (ancestors.length && ancestors[ancestors.length - 1] !== this) ancestors.pop()
+          if (ancestors.indexOf(item) >= 0) return '[Circular]'
+          ancestors.push(item)
         }
         return item
       })
@@ -3487,8 +3488,65 @@
     })
   }
 
-  function parseJsonArg(text) {
-    try { return text ? JSON.parse(text) : {} } catch (_) { return { value: text } }
+  function hasOwn(value, key) {
+    return !!value && Object.prototype.hasOwnProperty.call(value, key)
+  }
+
+  function decodeToolArguments(value) {
+    if (value === undefined || value === '') return {}
+    if (typeof value !== 'string') return value
+    try {
+      return JSON.parse(value)
+    } catch (cause) {
+      const err = new Error('Provider returned invalid JSON tool arguments')
+      err.code = 'TOOL_ARGUMENTS_INVALID_JSON'
+      err.cause = cause
+      throw err
+    }
+  }
+
+  function toolCallArgs(call) {
+    const fn = call && call.function || null
+    if (hasOwn(call, 'args')) return call.args === undefined ? {} : call.args
+    if (hasOwn(fn, 'arguments')) return decodeToolArguments(fn.arguments)
+    if (hasOwn(call, 'arguments')) return decodeToolArguments(call.arguments)
+    return {}
+  }
+
+  function mergeArgumentDelta(current, delta) {
+    if (typeof delta === 'string') return (typeof current === 'string' ? current : '') + delta
+    return delta
+  }
+
+  function mergeToolCallDeltas(existing, deltas) {
+    const out = (existing || []).slice()
+    for (let i = 0; i < (deltas || []).length; i++) {
+      const delta = deltas[i] || {}
+      const index = delta.index != null ? delta.index : findToolCallIndex(out, delta)
+      const at = index >= 0 ? index : out.length
+      const next = Object.assign({}, out[at] || {})
+      if (delta.id) next.id = delta.id
+      if (delta.type) next.type = delta.type
+      if (delta.toolId) next.toolId = delta.toolId
+      if (delta.name) next.name = delta.name
+      if (hasOwn(delta, 'args')) next.args = delta.args
+      if (hasOwn(delta, 'arguments')) next.arguments = mergeArgumentDelta(next.arguments, delta.arguments)
+      if (delta.function) {
+        const fn = Object.assign({}, next.function || {})
+        if (delta.function.name) fn.name = delta.function.name
+        if (hasOwn(delta.function, 'arguments')) fn.arguments = mergeArgumentDelta(fn.arguments, delta.function.arguments)
+        next.function = fn
+      }
+      out[at] = next
+    }
+    return out
+  }
+
+  function findToolCallIndex(calls, delta) {
+    if (delta.id) {
+      for (let i = 0; i < calls.length; i++) if (calls[i].id === delta.id) return i
+    }
+    return -1
   }
 
   function normalizeOpenAiToolCalls(calls, request) {
@@ -3501,7 +3559,7 @@
         toolId: id,
         name: id,
         providerName: providerName,
-        args: call.args || parseJsonArg(fn.arguments || call.arguments || ''),
+        args: toolCallArgs(call),
       }
     })
   }
@@ -3568,7 +3626,7 @@
             type: 'function',
             function: {
               name: call.providerName || toolName(call.toolId || call.name, request),
-              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(call.args || {}) : JSON.stringify(call.args || {}),
+              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(toolCallArgs(call)) : JSON.stringify(toolCallArgs(call)),
             },
           }
         })
@@ -3629,7 +3687,7 @@
             type: 'tool_use',
             id: toolCallId(call),
             name: call.providerName || toolName(call.toolId || call.name, request),
-            input: call.args || {},
+            input: toolCallArgs(call),
           })
         }
         out.push({ role: role, content: blocks })
@@ -3685,7 +3743,7 @@
         toolId: id,
         name: id,
         providerName: item.name || '',
-        args: item.input || {},
+        args: hasOwn(item, 'input') ? item.input : {},
       })
     }
     return { content: text.join(''), toolCalls: toolCalls }
@@ -3779,7 +3837,7 @@
         calls.push({
           toolId: item.toolId || item.name || item.tool || '',
           name: item.toolId || item.name || item.tool || '',
-          args: item.args || item.arguments || {},
+          args: hasOwn(item, 'args') ? item.args : (hasOwn(item, 'arguments') ? item.arguments : {}),
         })
       }
       cleaned = cleaned.replace(match[0], '').trim()
@@ -3796,7 +3854,7 @@
         calls.push({
           toolId: item.toolId || item.name || item.tool || '',
           name: item.toolId || item.name || item.tool || '',
-          args: item.args || item.arguments || {},
+          args: hasOwn(item, 'args') ? item.args : (hasOwn(item, 'arguments') ? item.arguments : {}),
         })
       }
       cleaned = cleaned.replace(raw, '').trim()
@@ -3820,6 +3878,10 @@
   }
 
   ai.messageText = ai.messageText || messageText
+  ai.toolArguments = {
+    read: toolCallArgs,
+    mergeDeltas: mergeToolCallDeltas,
+  }
   ai.toolAliasMap = toolAliasMap
   ai.openAiTools = openAiTools
   ai.openAiMessages = openAiMessages
@@ -4143,34 +4205,6 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const http = ai.provider
 
-  function mergeToolCallDeltas(calls) {
-    const out = []
-    for (let i = 0; i < (calls || []).length; i++) {
-      const delta = calls[i]
-      const index = delta.index != null ? delta.index : findToolCallIndex(out, delta)
-      const at = index >= 0 ? index : out.length
-      const cur = out[at] || {}
-      const next = Object.assign({}, cur)
-      if (delta.id) next.id = delta.id
-      if (delta.type) next.type = delta.type
-      if (delta.function) {
-        const fn = Object.assign({}, next.function || {})
-        if (delta.function.name) fn.name = delta.function.name
-        if (delta.function.arguments != null) fn.arguments = String(fn.arguments || '') + String(delta.function.arguments)
-        next.function = fn
-      }
-      out[at] = next
-    }
-    return out
-  }
-
-  function findToolCallIndex(calls, delta) {
-    if (delta.id) {
-      for (let i = 0; i < calls.length; i++) if (calls[i].id === delta.id) return i
-    }
-    return -1
-  }
-
   function configuredMaxTokens(config, fallback) {
     const n = Number(config.maxTokens || config.maxOutputTokens || config.max_tokens || config.max_completion_tokens || 0)
     return n > 0 ? n : fallback
@@ -4253,7 +4287,7 @@
             role: 'assistant',
           content: data.content,
           reasoning_content: data.reasoning_content || null,
-          toolCalls: ai.normalizeOpenAiToolCalls(mergeToolCallDeltas(data.toolCalls || []), request),
+          toolCalls: ai.normalizeOpenAiToolCalls(ai.toolArguments.mergeDeltas([], data.toolCalls || []), request),
           usage: data.usage || null,
           finishReason: data.finishReason || null,
         }
@@ -4512,6 +4546,13 @@
     return { type: 'object', properties: properties }
   }
 
+  function resolveToolSchema(tool, ctx) {
+    const schema = typeof tool.resolveSchema === 'function'
+      ? tool.resolveSchema(ctx || {})
+      : tool.schema
+    return normalizeToolSchema(schema)
+  }
+
   function normalizeMeta(meta) {
     if (aiditor.runtime && aiditor.runtime.registrationMeta) meta = aiditor.runtime.registrationMeta(meta)
     meta = meta || {}
@@ -4532,6 +4573,8 @@
 
   function registerTool(name, tool, meta) {
     assertFree('ai.tools', tools, name, meta)
+    if (tool.resolveSchema != null && typeof tool.resolveSchema !== 'function')
+      throw new Error('ai.tools.register: resolveSchema must be a function for "' + name + '"')
     tool.schema = normalizeToolSchema(tool.schema)
     tools[name] = tool
     toolMeta[name] = normalizeMeta(meta)
@@ -4908,6 +4951,10 @@
     },
     meta: function (name) { return Object.assign({}, toolMeta[name] || {}) },
     capabilities: toolCapabilities,
+    schema: function (name, ctx) {
+      const tool = getTool(name)
+      return tool ? resolveToolSchema(tool, ctx) : null
+    },
   }
   ai.toolMeta = function (name) { return Object.assign({}, toolMeta[name] || {}) }
   ai.normalizeToolSchema = normalizeToolSchema
@@ -4991,7 +5038,7 @@
       providerName: spec.providerName || null,
       toolId: spec.toolId || spec.name || spec.tool || '',
       name: spec.name || spec.toolId || spec.tool || '',
-      args: spec.args || {},
+      args: Object.prototype.hasOwnProperty.call(spec, 'args') ? spec.args : {},
       status: spec.status || 'proposed',
       actor: actor || spec.actor || 'user',
       messageId: spec.messageId || null,
@@ -6848,7 +6895,14 @@
 
   function registerOperation(name, spec, meta) {
     assertFree('ai.operations', operations, name, meta)
-    operations[name] = Object.assign({ id: name }, spec || {})
+    const normalized = Object.assign({ id: name }, spec || {})
+    if (normalized.schema != null)
+      throw new Error('ai.operations.register: use inputSchema instead of schema for "' + name + '"')
+    if (normalized.inputSchema != null)
+      normalized.inputSchema = ai.schema.normalize(normalized.inputSchema, 'operation.' + name + '.inputSchema')
+    if (normalized.exposeToModel === true && !normalized.inputSchema)
+      throw new Error('ai.operations.register: model-visible operation requires inputSchema for "' + name + '"')
+    operations[name] = normalized
     operationMeta[name] = normalizeMeta(meta)
     return operations[name]
   }
@@ -6894,7 +6948,7 @@
   function operationRisk(op, input, ctx) {
     const spec = getOperation(op)
     if (!spec) return 'edit'
-    if (typeof spec.risk === 'function') return spec.risk(input || {}, withOperationContext(op, ctx))
+    if (typeof spec.risk === 'function') return spec.risk(input === undefined ? {} : input, withOperationContext(op, ctx))
     return spec.risk || 'edit'
   }
 
@@ -6909,7 +6963,7 @@
     const preview = Object.assign({}, obj, {
       id: id,
       op: op,
-      input: clone(input || {}),
+      input: clone(input === undefined ? {} : input),
       ok: obj.ok !== false,
       risk: risk,
       title: obj.title || (getOperation(op) && getOperation(op).title) || op,
@@ -6944,11 +6998,31 @@
       ? opOrSpec
       : { op: opOrSpec, input: inputArg }
     const op = specInput.op || specInput.operation
-    const input = specInput.input || specInput.args || {}
+    const input = Object.prototype.hasOwnProperty.call(specInput, 'input')
+      ? specInput.input
+      : (Object.prototype.hasOwnProperty.call(specInput, 'args') ? specInput.args : {})
     const spec = getOperation(op)
     if (!spec) throw new Error('Operation not found: ' + op)
     const fn = spec.preview || spec.plan || spec.run
     if (!fn) throw new Error('Operation has no preview: ' + op)
+    if (spec.inputSchema) {
+      const validation = ai.schema.validate(input, spec.inputSchema)
+      if (!validation.valid) {
+        const errors = validation.errors.map(function (item) {
+          return {
+            code: 'SCHEMA_VALUE_INVALID',
+            path: item.path === '$' ? '$.input' : '$.input' + item.path.slice(1),
+            message: item.message,
+          }
+        })
+        return normalizePreview(op, input, {
+          ok: false,
+          code: 'OPERATION_INPUT_INVALID',
+          error: 'Operation input does not match inputSchema',
+          errors: errors,
+        }, ctx)
+      }
+    }
     const raw = fn(input, withOperationContext(op, ctx))
     return normalizePreview(op, input, raw, ctx)
   }
@@ -6956,9 +7030,73 @@
   function operationVisibleToModel(op, ctx) {
     const spec = getOperation(op)
     if (!spec) return false
-    if (spec.exposeToModel === false) return false
+    if (spec.exposeToModel !== true) return false
     if (typeof spec.available === 'function' && spec.available(withOperationContext(op, ctx)) === false) return false
     return true
+  }
+
+  function modelOperationNames(ctx) {
+    return keys(operations).filter(function (name) {
+      return operationVisibleToModel(name, ctx)
+    }).sort()
+  }
+
+  function operationSchemaBranch(name) {
+    const spec = getOperation(name)
+    return {
+      type: 'object',
+      required: ['op', 'input'],
+      additionalProperties: false,
+      properties: {
+        op: {
+          type: 'string',
+          enum: [name],
+          description: spec.description || spec.title || name,
+        },
+        input: clone(spec.inputSchema),
+      },
+    }
+  }
+
+  function operationGatewaySchema(ctx, includePreviewId) {
+    const variants = modelOperationNames(ctx).map(operationSchemaBranch)
+    if (includePreviewId) {
+      variants.unshift({
+        type: 'object',
+        required: ['previewId'],
+        additionalProperties: false,
+        properties: {
+          previewId: { type: 'string', description: 'A preview id returned by aiditor.previewOperation.' },
+        },
+      })
+    }
+    if (!variants.length) {
+      return {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+        description: 'No editor operations are available in the current request context.',
+      }
+    }
+    return { type: 'object', oneOf: variants }
+  }
+
+  function operationGatewayError(code, message, op, ctx, details) {
+    return Object.assign({
+      ok: false,
+      code: code,
+      error: message,
+      op: op || null,
+      allowedValues: modelOperationNames(ctx),
+    }, details || {})
+  }
+
+  function unavailableOperationResult(args, ctx) {
+    const op = args && args.op
+    if (!op) return operationGatewayError('OPERATION_REQUIRED', 'Operation id is required', null, ctx)
+    if (!getOperation(op)) return operationGatewayError('OPERATION_NOT_FOUND', 'Operation is not registered: ' + op, op, ctx)
+    if (!operationVisibleToModel(op, ctx)) return operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + op, op, ctx)
+    return null
   }
 
   function resolvePreview(spec) {
@@ -7064,19 +7202,15 @@
       title: 'Preview Editor Operation',
       description: 'Preview a registered editor operation. Never apply invalid previews; repair input from returned validation errors.',
       exposeToModel: false,
-      schema: {
-        type: 'object',
-        required: ['op', 'input'],
-        properties: {
-          op: { type: 'string' },
-          input: { type: 'object' },
-        },
-      },
+      schema: { type: 'object', properties: {}, additionalProperties: false },
+      resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
+      available: function (ctx) { return modelOperationNames(ctx).length > 0 },
       run: function (args, ctx) {
-        const op = args && (args.op || args.operation)
-        if (!operationVisibleToModel(op, ctx)) throw new Error('Operation is not available to the model: ' + op)
+        const unavailable = unavailableOperationResult(args, ctx)
+        if (unavailable) return unavailable
+        const op = args.op
         if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'preview', { input: args && args.input })) {
-          throw new Error('Operation preview not allowed: ' + op)
+          return operationGatewayError('OPERATION_PREVIEW_DENIED', 'Operation preview not allowed: ' + op, op, ctx)
         }
         return previewOperation(args, null, ctx)
       },
@@ -7085,26 +7219,33 @@
       title: 'Apply Editor Operation',
       description: 'Preview and apply a registered editor operation through the host transaction bridge.',
       exposeToModel: false,
-      schema: {
-        type: 'object',
-        required: ['op', 'input'],
-        properties: {
-          op: { type: 'string' },
-          input: { type: 'object' },
-          previewId: { type: 'string' },
-        },
-      },
+      schema: { type: 'object', properties: {}, additionalProperties: false },
+      resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
       preview: function (args, ctx) {
-        const op = args && (args.op || args.operation)
-        if (args && args.previewId && previews[args.previewId]) return previews[args.previewId]
-        if (!operationVisibleToModel(op, ctx)) return { ok: false, op: op, error: 'Operation is not available to the model: ' + op }
+        if (args && args.previewId && previews[args.previewId]) {
+          const resolved = previews[args.previewId]
+          if (!operationVisibleToModel(resolved.op, ctx)) {
+            return operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + resolved.op, resolved.op, ctx, { previewId: args.previewId })
+          }
+          return resolved
+        }
+        if (args && args.previewId) {
+          return operationGatewayError('OPERATION_PREVIEW_NOT_FOUND', 'Operation preview not found: ' + args.previewId, null, ctx, { previewId: args.previewId })
+        }
+        const unavailable = unavailableOperationResult(args, ctx)
+        if (unavailable) return unavailable
+        const op = args.op
         if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'preview', { input: args && args.input })) {
-          return { ok: false, op: op, error: 'Operation preview not allowed: ' + op }
+          return operationGatewayError('OPERATION_PREVIEW_DENIED', 'Operation preview not allowed: ' + op, op, ctx)
         }
         return previewOperation(args, null, ctx)
       },
       apply: function (preview, ctx) {
+        if (preview && preview.ok === false) return { applied: false, ok: false, error: preview.error || 'Preview is not valid', preview: preview }
         const op = preview && (preview.op || preview.operation)
+        if (!operationVisibleToModel(op, ctx)) {
+          return Object.assign({ applied: false, preview: preview }, operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + op, op, ctx))
+        }
         if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'apply', { preview: preview, risk: preview && preview.risk })) {
           return { applied: false, ok: false, error: 'Operation apply not allowed: ' + op, preview: preview }
         }
@@ -8817,6 +8958,9 @@
       const adapterId = o.adapter
       const spec = {
         title: o.title || o.id,
+        description: o.description || '',
+        inputSchema: o.inputSchema || null,
+        exposeToModel: o.exposeToModel === true,
         risk: o.risk || 'edit',
         preview: o.preview || (adapterId ? makeAdapterCall(adapters, adapterId, 'preview') : null),
         apply: o.apply || (adapterId ? makeAdapterCall(adapters, adapterId, 'apply') : null),
@@ -12432,7 +12576,7 @@
         id: refs[i],
         title: tool.title || refs[i],
         description: tool.description || '',
-        schema: tool.schema || null,
+        schema: ai.tools.schema ? ai.tools.schema(refs[i], ctx) : (tool.schema || null),
         permissions: tool.permissions || null,
         capabilities: ai.tools.capabilities ? ai.tools.capabilities(refs[i]) : null,
       })
@@ -12607,7 +12751,7 @@
       id: call.id || call.providerCallId || null,
       toolId: call.toolId || call.name || call.tool || '',
       name: call.name || call.toolId || call.tool || '',
-      args: compactToolArg(call.args || {}, '', 3),
+      args: compactToolArg(Object.prototype.hasOwnProperty.call(call, 'args') ? call.args : {}, '', 3),
       status: call.status || '',
       error: call.error ? compactString(call.error, 1000) : null,
     }
@@ -13308,7 +13452,7 @@
         id: id,
         toolId: toolId,
         name: call.name || call.toolId || call.tool || '',
-        args: call.args || {},
+        args: ai.toolArguments.read(call),
         status: denied ? 'failed' : (call.status || 'proposed'),
         error: denied ? ('Tool was not available in this request: ' + toolId) : call.error,
         actor: call.actor || who || 'user',
@@ -13326,38 +13470,6 @@
     for (let i = 0; i < specs.length; i++) map[specs[i].id] = true
     for (let j = 0; j < refs.length; j++) map[refs[j]] = true
     return map
-  }
-
-  function mergeToolCallDeltas(existing, deltas) {
-    const out = existing.slice()
-    for (let i = 0; i < (deltas || []).length; i++) {
-      const delta = deltas[i]
-      const index = delta.index != null ? delta.index : findToolCallIndex(out, delta)
-      const at = index >= 0 ? index : out.length
-      const cur = out[at] || {}
-      const next = Object.assign({}, cur)
-      if (delta.id) next.id = delta.id
-      if (delta.type) next.type = delta.type
-      if (delta.toolId) next.toolId = delta.toolId
-      if (delta.name) next.name = delta.name
-      if (delta.args) next.args = Object.assign({}, next.args || {}, delta.args)
-      if (delta.arguments != null) next.arguments = String(next.arguments || '') + String(delta.arguments)
-      if (delta.function) {
-        const fn = Object.assign({}, next.function || {})
-        if (delta.function.name) fn.name = delta.function.name
-        if (delta.function.arguments != null) fn.arguments = String(fn.arguments || '') + String(delta.function.arguments)
-        next.function = fn
-      }
-      out[at] = next
-    }
-    return out
-  }
-
-  function findToolCallIndex(calls, delta) {
-    if (delta.id) {
-      for (let i = 0; i < calls.length; i++) if (calls[i].id === delta.id) return i
-    }
-    return -1
   }
 
   function appendCapped(target, key, text, max, label) {
@@ -13609,7 +13721,7 @@
     }
     if (calls.length) {
       pushModelTail(state, toolCallDeltaText(calls))
-      state.toolCalls = mergeToolCallDeltas(state.toolCalls, calls)
+      state.toolCalls = ai.toolArguments.mergeDeltas(state.toolCalls, calls)
       state.activityText = toolActivityText(state.toolCalls)
       state.previewUpdatedAt = Date.now()
       state.runState = 'tool'
@@ -14564,6 +14676,7 @@
     if (!root || !rootResponseId) return null
 
     const nodes = []
+    const responseQuests = []
     const pendingMessages = []
     const pendingQuests = []
     const pendingEvents = []
@@ -14576,7 +14689,7 @@
       const agent = byId[currentAgentId]
       if (!agent) return
       const input = responseInput(agent, currentResponseId)
-      nodes.push({ agentId: currentAgentId, responseId: currentResponseId, input: input, depth: depth })
+      nodes.push({ agentId: currentAgentId, responseId: currentResponseId, input: input, agent: agent, depth: depth })
 
       const messages = agent.messages || []
       for (let i = 0; i < messages.length; i++) {
@@ -14598,6 +14711,7 @@
       for (let q = 0; q < children.length; q++) {
         const target = children[q].agent
         const quest = children[q].quest
+        responseQuests.push({ agentId: target.id, questId: quest.id, quest: quest, depth: depth + 1 })
         if (!terminalQuest(quest)) {
           pendingQuests.push({ agentId: target.id, questId: quest.id, quest: quest, depth: depth + 1 })
         }
@@ -14633,6 +14747,7 @@
       status: status,
       active: active,
       nodes: nodes,
+      quests: responseQuests,
       pendingMessages: pendingMessages,
       pendingQuests: pendingQuests,
       pendingEvents: pendingEvents,
@@ -14640,9 +14755,107 @@
     }
   }
 
+  function responseMessageUsage(message) {
+    return normalizedUsage(message && (message.usage || message.stats && message.stats.usage || message.meta && message.meta.usage))
+  }
+
+  function responseMessageStart(message) {
+    const stats = message && message.stats || {}
+    return message && (message.startedAt || message.createdAt || message.time) || stats.startTime || 0
+  }
+
+  function responseMessageEnd(message) {
+    const stats = message && message.stats || {}
+    return message && (message.completedAt || stats.completedAt || (!pendingExecutionStatus(message.status) && (message.time || message.createdAt))) || 0
+  }
+
+  function responseMessageGenerationMs(message) {
+    const stats = message && message.stats || {}
+    if (stats.generationMs > 0) return stats.generationMs
+    if (stats.firstTokenAt && stats.completedAt > stats.firstTokenAt) return stats.completedAt - stats.firstTokenAt
+    return 0
+  }
+
+  function responseSummary(graph) {
+    const metrics = {
+      startedAt: graph.startedAt || null,
+      completedAt: null,
+      durationMs: 0,
+      generationMs: 0,
+      promptTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      tokensPerSecond: 0,
+      toolCallCount: 0,
+      providerTurnCount: 0,
+      cost: null,
+    }
+    const relatedAgentIds = []
+    let lastAssistantMessageId = null
+    let lastCompletedAt = 0
+    let costAmount = 0
+
+    for (let n = 0; n < graph.nodes.length; n++) {
+      const node = graph.nodes[n]
+      relatedAgentIds.push(node.agentId)
+      const messages = node.agent && node.agent.messages || []
+      for (let i = 0; i < messages.length; i++) {
+        const message = messages[i]
+        if (messageResponseId(message) !== node.responseId) continue
+        const start = responseMessageStart(message)
+        const end = responseMessageEnd(message)
+        if (!metrics.startedAt && start) metrics.startedAt = start
+        if (end > lastCompletedAt) lastCompletedAt = end
+        if (message.role !== 'assistant') continue
+        metrics.providerTurnCount++
+        if (node.depth === 0) lastAssistantMessageId = message.id
+        metrics.toolCallCount += (message.toolCalls || []).length
+        let usage = responseMessageUsage(message)
+        let generationMs = responseMessageGenerationMs(message)
+        let cost = message.stats && message.stats.cost || message.meta && message.meta.cost || null
+        if (pendingExecutionStatus(message.status) && ai.peekActiveRunState) {
+          const live = ai.peekActiveRunState(node.agentId)
+          if (live && live.messageId === message.id) {
+            usage = usage || normalizedUsage(live.usage)
+            if (!generationMs && live.firstTokenAt) generationMs = Math.max(0, Date.now() - live.firstTokenAt)
+            cost = cost || live.cost || null
+          }
+        }
+        if (usage) {
+          metrics.promptTokens += usage.promptTokens
+          metrics.outputTokens += usage.outputTokens
+          metrics.totalTokens += usage.totalTokens
+        }
+        metrics.generationMs += generationMs
+        if (cost && cost.amount > 0) costAmount += Number(cost.amount || 0)
+      }
+    }
+
+    for (let i = 0; i < graph.quests.length; i++) {
+      const completedAt = graph.quests[i].quest.completedAt || 0
+      if (completedAt > lastCompletedAt) lastCompletedAt = completedAt
+    }
+    const rootInput = graph.nodes.length ? graph.nodes[0].input : null
+    const stoppedAt = rootInput && rootInput.meta && rootInput.meta.responseStoppedAt || 0
+    if (stoppedAt > lastCompletedAt) lastCompletedAt = stoppedAt
+    if (!graph.active) metrics.completedAt = lastCompletedAt || metrics.startedAt
+    const end = metrics.completedAt || Date.now()
+    if (metrics.startedAt && end >= metrics.startedAt) metrics.durationMs = end - metrics.startedAt
+    if (metrics.outputTokens && metrics.generationMs) {
+      metrics.tokensPerSecond = metrics.outputTokens / Math.max(metrics.generationMs / 1000, 0.001)
+    }
+    if (costAmount > 0) metrics.cost = { currency: 'USD', amount: costAmount }
+    return {
+      metrics: metrics,
+      lastAssistantMessageId: lastAssistantMessageId,
+      relatedAgentIds: relatedAgentIds,
+    }
+  }
+
   function readResponse(agentId, responseId) {
     const graph = responseGraph(agentId, responseId)
     if (!graph) return null
+    const summary = responseSummary(graph)
     const pendingAgents = {}
     for (let i = 0; i < graph.pendingMessages.length; i++) pendingAgents[graph.pendingMessages[i].agentId] = true
     for (let i = 0; i < graph.pendingQuests.length; i++) pendingAgents[graph.pendingQuests[i].agentId] = true
@@ -14656,6 +14869,9 @@
       startedAt: graph.startedAt,
       pendingQuestCount: graph.pendingQuests.length,
       pendingAgentCount: Object.keys(pendingAgents).length,
+      lastAssistantMessageId: summary.lastAssistantMessageId,
+      relatedAgentIds: summary.relatedAgentIds,
+      metrics: summary.metrics,
     }
   }
 
@@ -16287,8 +16503,17 @@
 
   function renderReasoning(part, ctx) {
     const details = ui.h('details', 'aiditor-ai-message-reasoning')
-    details.open = part.collapsed === false
-    details.appendChild(ui.h('summary', 'aiditor-ai-message-reasoning-head', { text: part.title || 'Reasoning' }))
+    const disclosureState = ctx && ctx.disclosureState
+    const disclosureKey = ctx && ctx.message && ctx.message.id
+      ? String(ctx.message.id) + '/' + String(ctx.partKey || 'reasoning')
+      : null
+    details.open = disclosureState && disclosureKey && Object.prototype.hasOwnProperty.call(disclosureState, disclosureKey)
+      ? !!disclosureState[disclosureKey]
+      : part.collapsed === false
+    if (disclosureState && disclosureKey) {
+      details.addEventListener('toggle', function () { disclosureState[disclosureKey] = details.open })
+    }
+    details.appendChild(ui.h('summary', 'aiditor-ai-message-reasoning-head', { text: part.title || 'Thinking' }))
     const body = ui.h('div', 'aiditor-ai-message-reasoning-body')
     body.appendChild(renderText({ text: part.text || part.summary || '' }, ctx))
     details.appendChild(body)
@@ -16390,6 +16615,14 @@
     }
     if (part.type === 'error') {
       el.textContent = readText(part.error || part.text || part.message)
+      return true
+    }
+    if (part.type === 'reasoning') {
+      const body = el.children && el.children[1]
+      const text = body && body.children && body.children[0]
+      if (!text) return false
+      if (ai.messageMarkdown) ai.messageMarkdown.patch(text, part.text || part.summary || '')
+      else setStableText(text, part.text || part.summary || '')
       return true
     }
     return false
@@ -17984,13 +18217,15 @@
     const started = state.startedAt || null
     const ended = state.completedAt || null
     if (started) parts.push(formatDuration((ended || Date.now()) - started))
-    if (state.turn != null) parts.push('turn ' + String(state.turn || 0))
-    if (state.firstTokenAt && started) parts.push('TTFT ' + formatDuration(state.firstTokenAt - started))
+    if (!state.responseMetrics && state.turn != null) parts.push('turn ' + String(state.turn || 0))
+    if (!state.responseMetrics && state.firstTokenAt && started) parts.push('TTFT ' + formatDuration(state.firstTokenAt - started))
     const total = state.totalTokens || usageNumber(state.usage, ['total_tokens', 'totalTokens'])
     const out = state.outputTokens || usageNumber(state.usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
     if (total) parts.push(String(total) + ' tok')
     else if (out) parts.push(String(out) + ' out')
-    const speedMs = state.firstTokenAt ? (ended || Date.now()) - state.firstTokenAt : (started ? (ended || Date.now()) - started : 0)
+    const speedMs = state.responseMetrics
+      ? state.generationMs
+      : (state.firstTokenAt ? (ended || Date.now()) - state.firstTokenAt : (started ? (ended || Date.now()) - started : 0))
     if (out && speedMs > 0) parts.push((out / Math.max(speedMs / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
     if (state.cost && state.cost.amount > 0) parts.push(formatCost(state.cost))
     return parts.join(' · ')
@@ -18290,139 +18525,45 @@
     return (msg.role || msg.type) === 'assistant'
   }
 
-  function isPendingStatus(status) {
-    return status === 'running' || status === 'queued' || status === 'waiting' || status === 'waiting_approval'
-  }
-
-  function messageStartTime(msg) {
-    const stats = msg.stats || {}
-    return msg.createdAt || msg.time || msg.startedAt || stats.startTime || 0
-  }
-
-  function messageEndTime(msg) {
-    const stats = msg.stats || {}
-    return msg.completedAt || stats.completedAt || (isPendingStatus(statusOf(msg)) ? 0 : (msg.time || msg.createdAt || 0))
-  }
-
-  function responseGraphIndex() {
-    const agents = aiditor.ai.agents && aiditor.ai.agents.peek ? aiditor.ai.agents.peek() : []
-    const agentById = {}
-    const questById = {}
-    for (let i = 0; i < agents.length; i++) {
-      agentById[agents[i].id] = agents[i]
-      const quests = agents[i].quests || []
-      for (let j = 0; j < quests.length; j++) questById[questKey(agents[i].id, quests[j].id)] = quests[j]
-    }
-    return { agentById: agentById, questById: questById }
-  }
-
-  function responseMessages(index, agentId, responseId) {
-    const agent = index.agentById[agentId]
-    const messages = agent && agent.messages || []
-    return messages.filter(function (msg) {
-      return (msg.role || msg.type) !== 'tool' && responseIdOf(msg) === responseId
-    })
-  }
-
-  function responseInfo(messages, includeContent) {
-    const info = {
-      lastId: null,
-      content: [],
-      toolCalls: 0,
-      startTime: 0,
-      endTime: 0,
-      duration: 0,
-      totalTokens: 0,
-      outputTokens: 0,
-      cost: 0,
-      complete: true,
-      calls: [],
-    }
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i]
-      const start = messageStartTime(msg)
-      const end = messageEndTime(msg)
-      if (start && (!info.startTime || start < info.startTime)) info.startTime = start
-      if (end > info.endTime) info.endTime = end
-      if (isPendingStatus(statusOf(msg))) info.complete = false
-      if (!isAssistantMessage(msg)) continue
-      info.lastId = msg.id
-      if (includeContent) {
-        const text = messageCopyText(msg).trim()
-        if (text) info.content.push(text)
-      }
-      const calls = toolCallsOf(msg)
-      info.toolCalls += calls.length
-      info.calls.push.apply(info.calls, calls)
-      const usage = usageOf(msg)
-      info.totalTokens += usageNumber(usage, ['total_tokens', 'totalTokens'])
-      info.outputTokens += usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
-      const cost = msg.stats && msg.stats.cost
-      if (cost && cost.amount > 0) info.cost += Number(cost.amount || 0)
-    }
-    return info
-  }
-
-  function mergeResponseInfo(target, source) {
-    target.toolCalls += source.toolCalls
-    target.totalTokens += source.totalTokens
-    target.outputTokens += source.outputTokens
-    target.cost += source.cost
-    target.complete = target.complete && source.complete
-    if (source.endTime > target.endTime) target.endTime = source.endTime
-  }
-
-  function aggregateResponse(index, agentId, responseId, messages, includeContent, seen, relatedAgentIds) {
-    const key = questKey(agentId, responseId)
-    if (seen[key]) return responseInfo([], false)
-    seen[key] = true
-    relatedAgentIds[agentId] = true
-    const info = responseInfo(messages || responseMessages(index, agentId, responseId), includeContent)
-    for (let i = 0; i < info.calls.length; i++) {
-      const call = info.calls[i]
-      if (!isQuestProducingCall(call)) continue
-      const result = call.applyResult || call.result || {}
-      if (!result.agentId || !result.questId) continue
-      const quest = index.questById[questKey(result.agentId, result.questId)]
-      if (quest && isPendingStatus(quest.status)) info.complete = false
-      const childAgent = index.agentById[result.agentId]
-      if (!childAgent) continue
-      const requestMessage = (childAgent.messages || []).find(function (msg) { return msg.id === result.questId })
-      const childResponseId = requestMessage && responseIdOf(requestMessage) || result.questId
-      mergeResponseInfo(info, aggregateResponse(index, result.agentId, childResponseId, null, false, seen, relatedAgentIds))
-    }
-    info.duration = info.startTime && info.endTime >= info.startTime ? info.endTime - info.startTime : 0
-    return info
-  }
-
   function responseFooterInfo(agentId, messages) {
-    const groups = {}
+    const responseIds = {}
     const out = {}
     const relatedAgentIds = {}
-    const index = responseGraphIndex()
     for (let i = 0; i < messages.length; i++) {
       const responseId = responseIdOf(messages[i])
-      if (!responseId) continue
-      if (!groups[responseId]) groups[responseId] = []
-      groups[responseId].push(messages[i])
+      if (responseId) responseIds[responseId] = true
     }
-    Object.keys(groups).forEach(function (responseId) {
-      const info = aggregateResponse(index, agentId, responseId, groups[responseId], true, {}, relatedAgentIds)
-      if (info.lastId) out[info.lastId] = info
+    Object.keys(responseIds).forEach(function (responseId) {
+      const response = aiditor.ai.response && aiditor.ai.response.read
+        ? aiditor.ai.response.read(agentId, responseId)
+        : null
+      if (!response) return
+      const agentIds = response.relatedAgentIds || [agentId]
+      for (let i = 0; i < agentIds.length; i++) relatedAgentIds[agentIds[i]] = true
+      if (response.active || !response.lastAssistantMessageId) return
+      const content = []
+      for (let i = 0; i < messages.length; i++) {
+        if (responseIdOf(messages[i]) !== responseId || !isAssistantMessage(messages[i])) continue
+        const text = messageCopyText(messages[i]).trim()
+        if (text) content.push(text)
+      }
+      out[response.lastAssistantMessageId] = {
+        content: content,
+        metrics: response.metrics || null,
+      }
     })
     return { items: out, agentIds: Object.keys(relatedAgentIds).sort() }
   }
 
   function responseMetricText(info, fallback) {
-    if (!info) return fallback || ''
+    const metrics = info && info.metrics
+    if (!metrics) return fallback || ''
     const parts = []
-    if (info.duration) parts.push(formatDuration(info.duration))
-    if (info.totalTokens) parts.push(String(info.totalTokens) + ' tok')
-    else if (info.outputTokens) parts.push(String(info.outputTokens) + ' out')
-    if (info.outputTokens && info.duration) {
-      parts.push((info.outputTokens / Math.max(info.duration / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
-    }
-    if (info.cost > 0) parts.push(formatCost({ amount: info.cost }))
+    if (metrics.durationMs) parts.push(formatDuration(metrics.durationMs))
+    if (metrics.totalTokens) parts.push(String(metrics.totalTokens) + ' tok')
+    else if (metrics.outputTokens) parts.push(String(metrics.outputTokens) + ' out')
+    if (metrics.tokensPerSecond > 0) parts.push(metrics.tokensPerSecond.toFixed(1).replace(/\.0$/, '') + ' tok/s')
+    if (metrics.cost && metrics.cost.amount > 0) parts.push(formatCost(metrics.cost))
     return parts.join(' · ') || fallback || ''
   }
 
@@ -18854,13 +18995,19 @@
     parent.appendChild(wrap)
   }
 
-  function renderPayload(msg) {
+  function disclosureStateFor(viewState, agentId) {
+    if (!viewState.disclosureStates[agentId]) viewState.disclosureStates[agentId] = {}
+    return viewState.disclosureStates[agentId]
+  }
+
+  function renderPayload(msg, viewState, agentId) {
     const wrap = ui.h('div', 'aiditor-ai-message-content')
     wrap.dataset.messagePayload = 'parts'
     if (aiditor.ai.messageRenderers && aiditor.ai.messageRenderers.renderParts) {
       aiditor.ai.messageRenderers.renderParts(wrap, msg, {
         source: 'transcript',
         message: msg,
+        disclosureState: disclosureStateFor(viewState, agentId),
         options: { includeToolCalls: false, includeRelated: true, includeError: true },
       })
     } else {
@@ -18869,13 +19016,14 @@
     return wrap
   }
 
-  function patchPayload(body, msg) {
+  function patchPayload(body, msg, viewState, agentId) {
     const current = body.querySelector('[data-message-payload]')
     if (current) {
       if (aiditor.ai.messageRenderers && aiditor.ai.messageRenderers.patchParts) {
         aiditor.ai.messageRenderers.patchParts(current, msg, {
           source: 'transcript',
           message: msg,
+          disclosureState: disclosureStateFor(viewState, agentId),
           options: { includeToolCalls: false, includeRelated: true, includeError: true },
         })
         return
@@ -18883,7 +19031,7 @@
       patchTextParts(current, displayText(msg.content != null ? msg.content : msg.text))
       return
     }
-    body.insertBefore(renderPayload(msg), body.firstChild || null)
+    body.insertBefore(renderPayload(msg, viewState, agentId), body.firstChild || null)
   }
 
   function renderEmpty(item) {
@@ -18902,13 +19050,12 @@
     const responseId = responseIdOf(msg)
     const responseFooter = responseId && responseFooters ? responseFooters[msg.id] : null
     if (responseId && isAssistantMessage(msg) && !responseFooter) return null
-    if (responseFooter && !responseFooter.complete) return null
 
     const copyText = responseFooter && responseFooter.content.length ? responseFooter.content.join('\n\n') : messageCopyText(msg)
     const footer = ui.h('div', 'aiditor-ai-message-footer')
     footer.appendChild(ui.copyButton({ text: copyText, title: responseFooter ? 'Copy response' : 'Copy message', size: 'sm' }))
     const calls = toolCallsOf(msg)
-    const callCount = responseFooter ? responseFooter.toolCalls : calls.length
+    const callCount = responseFooter && responseFooter.metrics ? responseFooter.metrics.toolCallCount : calls.length
     if (callCount) footer.appendChild(ui.h('span', 'aiditor-ai-message-metrics', { text: callCount + ' tool call' + (callCount === 1 ? '' : 's') }))
     if (role !== 'user') {
       const metrics = responseFooter ? responseMetricText(responseFooter, metricText(msg)) : metricText(msg)
@@ -18961,7 +19108,7 @@
     const role = msg.role || msg.type || 'message'
     const status = statusOf(msg)
     row.className = messageRowClass(role, status)
-    patchPayload(body, msg)
+    patchPayload(body, msg, viewState, agent.id)
     patchToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
     patchFooter(stack, msg, responseFooters)
     entry.version = version
@@ -18981,7 +19128,7 @@
     const card = ui.h('div', 'aiditor-ai-message')
 
     const body = ui.h('div', 'aiditor-ai-message-body')
-    body.appendChild(renderPayload(msg))
+    body.appendChild(renderPayload(msg, viewState, agent.id))
     renderToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
     card.appendChild(body)
     stack.appendChild(card)
@@ -19029,7 +19176,7 @@
     scroll.appendChild(bottomSpacer)
     scroll.appendChild(liveStrip.el)
 
-    const viewState = { expandedToolCalls: {} }
+    const viewState = { expandedToolCalls: {}, disclosureStates: {} }
     const rows = {}
     const virtualizer = aiditor.ai.createMessageVirtualizer({ estimateHeight: 96, overscanPx: 640 })
     const visibleRevision = aiditor.signal(0)
@@ -19293,23 +19440,33 @@
       if (aiditor.ai.agents) aiditor.ai.agents()
       let state = agentId && aiditor.ai.activeRunState ? aiditor.ai.activeRunState(agentId) : null
       const response = agentId && aiditor.ai.response ? aiditor.ai.response.read(agentId) : null
-      if (response && response.status === 'waiting' && (!state || state.state === 'idle')) {
-        state = {
+      if (response && response.active) {
+        const waiting = response.status === 'waiting'
+        const metrics = response.metrics || {}
+        if (!state || state.state === 'idle') state = {
           agentId: agentId,
-          state: 'waiting',
-          startedAt: response.startedAt,
-          completedAt: null,
-          activityText: response.pendingQuestCount === 1
-            ? 'waiting for 1 delegated task'
-            : 'waiting for ' + response.pendingQuestCount + ' delegated tasks',
+          state: waiting ? 'waiting' : 'connecting',
+          activityText: waiting
+            ? (response.pendingQuestCount === 1
+              ? 'waiting for 1 delegated task'
+              : 'waiting for ' + response.pendingQuestCount + ' delegated tasks')
+            : 'continuing response',
           previewTail: '',
           modelTail: '',
-          turn: null,
-          usage: null,
-          outputTokens: 0,
-          totalTokens: 0,
-          cost: null,
         }
+        state = Object.assign({}, state, {
+          responseMetrics: true,
+          startedAt: metrics.startedAt || response.startedAt || state.startedAt,
+          completedAt: null,
+          generationMs: metrics.generationMs || 0,
+          promptTokens: metrics.promptTokens || 0,
+          outputTokens: metrics.outputTokens || 0,
+          totalTokens: metrics.totalTokens || 0,
+          cost: metrics.cost || null,
+          turn: null,
+          firstTokenAt: null,
+          usage: null,
+        })
       }
       liveStrip.update(state)
     }))

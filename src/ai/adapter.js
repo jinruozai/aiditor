@@ -102,8 +102,65 @@
     })
   }
 
-  function parseJsonArg(text) {
-    try { return text ? JSON.parse(text) : {} } catch (_) { return { value: text } }
+  function hasOwn(value, key) {
+    return !!value && Object.prototype.hasOwnProperty.call(value, key)
+  }
+
+  function decodeToolArguments(value) {
+    if (value === undefined || value === '') return {}
+    if (typeof value !== 'string') return value
+    try {
+      return JSON.parse(value)
+    } catch (cause) {
+      const err = new Error('Provider returned invalid JSON tool arguments')
+      err.code = 'TOOL_ARGUMENTS_INVALID_JSON'
+      err.cause = cause
+      throw err
+    }
+  }
+
+  function toolCallArgs(call) {
+    const fn = call && call.function || null
+    if (hasOwn(call, 'args')) return call.args === undefined ? {} : call.args
+    if (hasOwn(fn, 'arguments')) return decodeToolArguments(fn.arguments)
+    if (hasOwn(call, 'arguments')) return decodeToolArguments(call.arguments)
+    return {}
+  }
+
+  function mergeArgumentDelta(current, delta) {
+    if (typeof delta === 'string') return (typeof current === 'string' ? current : '') + delta
+    return delta
+  }
+
+  function mergeToolCallDeltas(existing, deltas) {
+    const out = (existing || []).slice()
+    for (let i = 0; i < (deltas || []).length; i++) {
+      const delta = deltas[i] || {}
+      const index = delta.index != null ? delta.index : findToolCallIndex(out, delta)
+      const at = index >= 0 ? index : out.length
+      const next = Object.assign({}, out[at] || {})
+      if (delta.id) next.id = delta.id
+      if (delta.type) next.type = delta.type
+      if (delta.toolId) next.toolId = delta.toolId
+      if (delta.name) next.name = delta.name
+      if (hasOwn(delta, 'args')) next.args = delta.args
+      if (hasOwn(delta, 'arguments')) next.arguments = mergeArgumentDelta(next.arguments, delta.arguments)
+      if (delta.function) {
+        const fn = Object.assign({}, next.function || {})
+        if (delta.function.name) fn.name = delta.function.name
+        if (hasOwn(delta.function, 'arguments')) fn.arguments = mergeArgumentDelta(fn.arguments, delta.function.arguments)
+        next.function = fn
+      }
+      out[at] = next
+    }
+    return out
+  }
+
+  function findToolCallIndex(calls, delta) {
+    if (delta.id) {
+      for (let i = 0; i < calls.length; i++) if (calls[i].id === delta.id) return i
+    }
+    return -1
   }
 
   function normalizeOpenAiToolCalls(calls, request) {
@@ -116,7 +173,7 @@
         toolId: id,
         name: id,
         providerName: providerName,
-        args: call.args || parseJsonArg(fn.arguments || call.arguments || ''),
+        args: toolCallArgs(call),
       }
     })
   }
@@ -183,7 +240,7 @@
             type: 'function',
             function: {
               name: call.providerName || toolName(call.toolId || call.name, request),
-              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(call.args || {}) : JSON.stringify(call.args || {}),
+              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(toolCallArgs(call)) : JSON.stringify(toolCallArgs(call)),
             },
           }
         })
@@ -244,7 +301,7 @@
             type: 'tool_use',
             id: toolCallId(call),
             name: call.providerName || toolName(call.toolId || call.name, request),
-            input: call.args || {},
+            input: toolCallArgs(call),
           })
         }
         out.push({ role: role, content: blocks })
@@ -300,7 +357,7 @@
         toolId: id,
         name: id,
         providerName: item.name || '',
-        args: item.input || {},
+        args: hasOwn(item, 'input') ? item.input : {},
       })
     }
     return { content: text.join(''), toolCalls: toolCalls }
@@ -394,7 +451,7 @@
         calls.push({
           toolId: item.toolId || item.name || item.tool || '',
           name: item.toolId || item.name || item.tool || '',
-          args: item.args || item.arguments || {},
+          args: hasOwn(item, 'args') ? item.args : (hasOwn(item, 'arguments') ? item.arguments : {}),
         })
       }
       cleaned = cleaned.replace(match[0], '').trim()
@@ -411,7 +468,7 @@
         calls.push({
           toolId: item.toolId || item.name || item.tool || '',
           name: item.toolId || item.name || item.tool || '',
-          args: item.args || item.arguments || {},
+          args: hasOwn(item, 'args') ? item.args : (hasOwn(item, 'arguments') ? item.arguments : {}),
         })
       }
       cleaned = cleaned.replace(raw, '').trim()
@@ -435,6 +492,10 @@
   }
 
   ai.messageText = ai.messageText || messageText
+  ai.toolArguments = {
+    read: toolCallArgs,
+    mergeDeltas: mergeToolCallDeltas,
+  }
   ai.toolAliasMap = toolAliasMap
   ai.openAiTools = openAiTools
   ai.openAiMessages = openAiMessages

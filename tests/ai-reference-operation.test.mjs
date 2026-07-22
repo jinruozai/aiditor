@@ -7,6 +7,7 @@ vm.runInThisContext(readFileSync('src/core/signal.js', 'utf8'), { filename: 'sig
 vm.runInThisContext(readFileSync('src/core/log.js', 'utf8'), { filename: 'log.js' })
 vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'names.js' })
 vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
+vm.runInThisContext(readFileSync('src/ai/serialize.js', 'utf8'), { filename: 'ai/serialize.js' })
 vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
 vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
 vm.runInThisContext(readFileSync('src/ai/connection.js', 'utf8'), { filename: 'ai/connection.js' })
@@ -21,6 +22,8 @@ ai.registerTransport('reference-test', { toolProtocol: 'native' })
 ai.registerConnection('reference-test', { auth: { type: 'none' }, transport: { type: 'reference-test' }, configDefaults: {} })
 ai.setActiveConnection('reference-test')
 let value = 1
+let previewCalls = 0
+let unavailableOperationEnabled = false
 const tx = []
 
 ai.references.register('case', {
@@ -61,10 +64,16 @@ ai.transactions.configure({
 
 ai.operations.register('case.setValue', {
   title: 'Set Value',
-  schema: { type: 'object', required: ['value'], properties: { value: { type: 'number' } } },
+  exposeToModel: true,
+  inputSchema: {
+    type: 'object',
+    required: ['value'],
+    additionalProperties: false,
+    properties: { value: { type: 'number' } },
+  },
   risk: 'edit',
   preview: function (input) {
-    if (typeof input.value !== 'number') return { ok: false, errors: [{ path: 'value', message: 'value must be number' }] }
+    previewCalls++
     return {
       title: 'Set value',
       summary: `${value} -> ${input.value}`,
@@ -77,6 +86,22 @@ ai.operations.register('case.setValue', {
     return { applied: true, value }
   },
 })
+ai.operations.register('case.hidden', {
+  inputSchema: { type: 'object', properties: {} },
+  preview: function () { return { ok: true } },
+})
+ai.operations.register('case.unavailable', {
+  exposeToModel: true,
+  inputSchema: { type: 'object', properties: {} },
+  available: function () { return unavailableOperationEnabled },
+  preview: function () { return { ok: true } },
+})
+assert.throws(function () {
+  ai.operations.register('case.legacySchema', { schema: { type: 'object' } })
+}, /use inputSchema instead of schema/)
+assert.throws(function () {
+  ai.operations.register('case.missingSchema', { exposeToModel: true })
+}, /model-visible operation requires inputSchema/)
 ai.operations.register('case.extra', {})
 assert.deepEqual(ai.operations.list('case.extra'), ['case.extra'])
 assert.deepEqual(ai.operations.unregisterPrefix('case.extra'), ['case.extra'])
@@ -99,10 +124,14 @@ assert.equal(ai.references.selection()[0].uri, 'case://item/one')
 
 const invalid = ai.operations.preview('case.setValue', { value: 'bad' })
 assert.equal(invalid.ok, false)
+assert.equal(invalid.code, 'OPERATION_INPUT_INVALID')
+assert.equal(invalid.errors[0].path, '$.input.value')
+assert.equal(previewCalls, 0)
 assert.equal(value, 1)
 
 const preview = ai.operations.preview('case.setValue', { value: 7 })
 assert.equal(preview.ok, true)
+assert.equal(previewCalls, 1)
 assert.equal(preview.risk, 'edit')
 assert.equal(preview.changes[0].after, 7)
 const applied = ai.operations.apply(preview)
@@ -120,6 +149,75 @@ const explicitRequest = ai.makeRequest(ai.createAgent({
   toolRefs: ['aiditor.previewOperation', 'aiditor.applyOperation'],
 }), null, 'inspect_explicit', 'user', 0)
 assert.deepEqual(explicitRequest.tools, ['aiditor.previewOperation', 'aiditor.applyOperation'])
+const previewToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'aiditor.previewOperation' })
+const applyToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'aiditor.applyOperation' })
+const previewBranches = previewToolSpec.schema.oneOf
+const applyBranches = applyToolSpec.schema.oneOf
+assert.deepEqual(previewBranches.map(function (branch) { return branch.properties.op.enum[0] }), ['case.setValue'])
+assert.equal(previewBranches[0].properties.input.properties.value.type, 'number')
+assert.equal(previewBranches[0].additionalProperties, false)
+assert.equal(applyBranches[0].properties.previewId.type, 'string')
+assert.deepEqual(applyBranches.slice(1).map(function (branch) { return branch.properties.op.enum[0] }), ['case.setValue'])
+
+const pointSchema = {
+  type: 'object',
+  required: ['x', 'y'],
+  properties: { x: { type: 'number' }, y: { type: 'number' } },
+}
+ai.operations.register('case.sharedSchema', {
+  exposeToModel: true,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      first: { type: 'array', items: pointSchema },
+      second: { type: 'array', items: pointSchema },
+    },
+  },
+  preview: function () { return { ok: true } },
+})
+const sharedSchemaRequest = ai.makeRequest(ai.createAgent({
+  name: 'Shared Schema Agent',
+  toolRefs: ['aiditor.previewOperation'],
+}), null, 'inspect_shared_schema', 'user', 0)
+const sharedSchemaBranch = sharedSchemaRequest.toolSpecs[0].schema.oneOf.find(function (branch) {
+  return branch.properties.op.enum[0] === 'case.sharedSchema'
+})
+assert.deepEqual(sharedSchemaBranch.properties.input.properties.first.items.required, ['x', 'y'])
+assert.deepEqual(sharedSchemaBranch.properties.input.properties.second.items.required, ['x', 'y'])
+ai.operations.unregister('case.sharedSchema')
+
+unavailableOperationEnabled = true
+const requestWithAvailableOperation = ai.makeRequest(ai.createAgent({
+  name: 'Available Operation Agent',
+  toolRefs: ['aiditor.previewOperation'],
+}), null, 'inspect_available', 'user', 0)
+assert.deepEqual(
+  requestWithAvailableOperation.toolSpecs[0].schema.oneOf.map(function (branch) { return branch.properties.op.enum[0] }),
+  ['case.setValue', 'case.unavailable']
+)
+unavailableOperationEnabled = false
+
+const previewGateway = ai.tools.get('aiditor.previewOperation')
+const unknownOperation = previewGateway.run({ op: 'case.missing', input: {} }, { actor: 'user', agent: agent })
+assert.equal(unknownOperation.ok, false)
+assert.equal(unknownOperation.code, 'OPERATION_NOT_FOUND')
+assert.deepEqual(unknownOperation.allowedValues, ['case.setValue'])
+const unavailableOperation = previewGateway.run({ op: 'case.unavailable', input: {} }, { actor: 'user', agent: agent })
+assert.equal(unavailableOperation.code, 'OPERATION_NOT_AVAILABLE')
+assert.deepEqual(unavailableOperation.allowedValues, ['case.setValue'])
+assert.throws(function () {
+  ai.operations.preview('case.missing', {})
+}, /Operation not found/)
+
+const invalidGatewayPreview = previewGateway.run({ op: 'case.setValue', input: { value: 'bad' } }, { actor: 'user', agent: agent })
+assert.equal(invalidGatewayPreview.code, 'OPERATION_INPUT_INVALID')
+assert.equal(previewCalls, 1)
+const missingPreview = ai.tools.get('aiditor.applyOperation').preview({ previewId: 'opv_missing' }, { actor: 'user', agent: agent })
+assert.equal(missingPreview.code, 'OPERATION_PREVIEW_NOT_FOUND')
+assert.equal(missingPreview.previewId, 'opv_missing')
+const hostOnlyPreview = ai.operations.preview('case.unavailable', {})
+const hiddenPreview = ai.tools.get('aiditor.applyOperation').preview({ previewId: hostOnlyPreview.id }, { actor: 'user', agent: agent })
+assert.equal(hiddenPreview.code, 'OPERATION_NOT_AVAILABLE')
 
 const savedCanUseOperation = ai.canUseOperation
 const savedCanUseTool = ai.canUseTool

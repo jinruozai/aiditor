@@ -73,7 +73,16 @@ reported before any registry is mutated.
       { id: 'data', adapter: 'sample.adapter' }
     ],
     operations: [
-      { id: 'patchThing', adapter: 'sample.adapter' }
+      {
+        id: 'patchThing',
+        adapter: 'sample.adapter',
+        exposeToModel: true,
+        inputSchema: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string' } }
+        }
+      }
     ],
     settings: [
       { section: { id: 'sample', title: 'Sample' }, schema: { key: 'sample.display' } }

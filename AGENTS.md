@@ -248,6 +248,7 @@ aiditor/
 - `src/ai/orchestration.js` 的 `agent.create` / `agent.delegate` 共用父链解析:Agent 省略 `parentAgentId` 时默认创建自己的子节点,用户省略时创建根节点;Agent 不可逃逸到根级。`agent.read` 只返回有界 profile/树级摘要,`agent.configure` 只允许用户或父级修改后代的稳定配置,不能改自身或运行状态。Quest 用 `read/result/cancel` 形成精确任务闭环;`agent.stop` 只是当前 run 的紧急停止。模型控制工具用稳定 `outcome` 区分成功、无活动 run 和已终态 Quest,不存在/无权限仍然是错误。
 - `src/ai/message-markdown.js` + `message-renderers.js` 负责安全 Markdown 文本渲染、主流 provider content block 归一化、结构化 message part renderer registry 和一致的复制文本;不执行 raw HTML,不把任意 JSON 猜成 UI。
 - `src/ai/reference.js` 提供 references + operations 协议;`src/ai/change-set.js` 提供 grouped review/apply。
+- Model-facing operation 只通过显式 `exposeToModel:true + inputSchema` 进入通用 preview/apply 网关;request builder 按当前 `available(ctx)` 生成精确 oneOf tool schema,执行前做框架级结构校验,未知/不可用 operation 返回带 `allowedValues` 的结构化诊断。
 - Rich prompt token 存 `refId`,不是 `resourceId`;chat attachments 是 runtime state,不是新的 model-facing registry。
 
 **Extension Runtime(可选层)**:

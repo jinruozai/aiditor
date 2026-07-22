@@ -1158,15 +1158,43 @@
 }
 
 .aiditor-ai-message-reasoning {
+  display: block;
   padding: 0;
   overflow: hidden;
 }
 
 .aiditor-ai-message-reasoning-head {
+  display: flex;
+  align-items: center;
+  min-height: var(--aiditor-size-h-md);
+  box-sizing: border-box;
+  list-style: none;
   cursor: pointer;
-  padding: var(--aiditor-space-1) var(--aiditor-space-2);
+  padding: 0 var(--aiditor-space-2);
   color: var(--aiditor-fg-2);
   font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
+  line-height: var(--aiditor-lh-tight);
+}
+
+.aiditor-ai-message-reasoning-head::-webkit-details-marker {
+  display: none;
+}
+
+.aiditor-ai-message-reasoning-head::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  margin-right: var(--aiditor-space-1);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  transform-origin: 2px 50%;
+  transition: transform var(--aiditor-dur-fast) var(--aiditor-ease);
+}
+
+.aiditor-ai-message-reasoning[open] > .aiditor-ai-message-reasoning-head::before {
+  transform: rotate(90deg);
 }
 
 .aiditor-ai-message-reasoning-body {

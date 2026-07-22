@@ -159,139 +159,45 @@
     return (msg.role || msg.type) === 'assistant'
   }
 
-  function isPendingStatus(status) {
-    return status === 'running' || status === 'queued' || status === 'waiting' || status === 'waiting_approval'
-  }
-
-  function messageStartTime(msg) {
-    const stats = msg.stats || {}
-    return msg.createdAt || msg.time || msg.startedAt || stats.startTime || 0
-  }
-
-  function messageEndTime(msg) {
-    const stats = msg.stats || {}
-    return msg.completedAt || stats.completedAt || (isPendingStatus(statusOf(msg)) ? 0 : (msg.time || msg.createdAt || 0))
-  }
-
-  function responseGraphIndex() {
-    const agents = aiditor.ai.agents && aiditor.ai.agents.peek ? aiditor.ai.agents.peek() : []
-    const agentById = {}
-    const questById = {}
-    for (let i = 0; i < agents.length; i++) {
-      agentById[agents[i].id] = agents[i]
-      const quests = agents[i].quests || []
-      for (let j = 0; j < quests.length; j++) questById[questKey(agents[i].id, quests[j].id)] = quests[j]
-    }
-    return { agentById: agentById, questById: questById }
-  }
-
-  function responseMessages(index, agentId, responseId) {
-    const agent = index.agentById[agentId]
-    const messages = agent && agent.messages || []
-    return messages.filter(function (msg) {
-      return (msg.role || msg.type) !== 'tool' && responseIdOf(msg) === responseId
-    })
-  }
-
-  function responseInfo(messages, includeContent) {
-    const info = {
-      lastId: null,
-      content: [],
-      toolCalls: 0,
-      startTime: 0,
-      endTime: 0,
-      duration: 0,
-      totalTokens: 0,
-      outputTokens: 0,
-      cost: 0,
-      complete: true,
-      calls: [],
-    }
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i]
-      const start = messageStartTime(msg)
-      const end = messageEndTime(msg)
-      if (start && (!info.startTime || start < info.startTime)) info.startTime = start
-      if (end > info.endTime) info.endTime = end
-      if (isPendingStatus(statusOf(msg))) info.complete = false
-      if (!isAssistantMessage(msg)) continue
-      info.lastId = msg.id
-      if (includeContent) {
-        const text = messageCopyText(msg).trim()
-        if (text) info.content.push(text)
-      }
-      const calls = toolCallsOf(msg)
-      info.toolCalls += calls.length
-      info.calls.push.apply(info.calls, calls)
-      const usage = usageOf(msg)
-      info.totalTokens += usageNumber(usage, ['total_tokens', 'totalTokens'])
-      info.outputTokens += usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
-      const cost = msg.stats && msg.stats.cost
-      if (cost && cost.amount > 0) info.cost += Number(cost.amount || 0)
-    }
-    return info
-  }
-
-  function mergeResponseInfo(target, source) {
-    target.toolCalls += source.toolCalls
-    target.totalTokens += source.totalTokens
-    target.outputTokens += source.outputTokens
-    target.cost += source.cost
-    target.complete = target.complete && source.complete
-    if (source.endTime > target.endTime) target.endTime = source.endTime
-  }
-
-  function aggregateResponse(index, agentId, responseId, messages, includeContent, seen, relatedAgentIds) {
-    const key = questKey(agentId, responseId)
-    if (seen[key]) return responseInfo([], false)
-    seen[key] = true
-    relatedAgentIds[agentId] = true
-    const info = responseInfo(messages || responseMessages(index, agentId, responseId), includeContent)
-    for (let i = 0; i < info.calls.length; i++) {
-      const call = info.calls[i]
-      if (!isQuestProducingCall(call)) continue
-      const result = call.applyResult || call.result || {}
-      if (!result.agentId || !result.questId) continue
-      const quest = index.questById[questKey(result.agentId, result.questId)]
-      if (quest && isPendingStatus(quest.status)) info.complete = false
-      const childAgent = index.agentById[result.agentId]
-      if (!childAgent) continue
-      const requestMessage = (childAgent.messages || []).find(function (msg) { return msg.id === result.questId })
-      const childResponseId = requestMessage && responseIdOf(requestMessage) || result.questId
-      mergeResponseInfo(info, aggregateResponse(index, result.agentId, childResponseId, null, false, seen, relatedAgentIds))
-    }
-    info.duration = info.startTime && info.endTime >= info.startTime ? info.endTime - info.startTime : 0
-    return info
-  }
-
   function responseFooterInfo(agentId, messages) {
-    const groups = {}
+    const responseIds = {}
     const out = {}
     const relatedAgentIds = {}
-    const index = responseGraphIndex()
     for (let i = 0; i < messages.length; i++) {
       const responseId = responseIdOf(messages[i])
-      if (!responseId) continue
-      if (!groups[responseId]) groups[responseId] = []
-      groups[responseId].push(messages[i])
+      if (responseId) responseIds[responseId] = true
     }
-    Object.keys(groups).forEach(function (responseId) {
-      const info = aggregateResponse(index, agentId, responseId, groups[responseId], true, {}, relatedAgentIds)
-      if (info.lastId) out[info.lastId] = info
+    Object.keys(responseIds).forEach(function (responseId) {
+      const response = aiditor.ai.response && aiditor.ai.response.read
+        ? aiditor.ai.response.read(agentId, responseId)
+        : null
+      if (!response) return
+      const agentIds = response.relatedAgentIds || [agentId]
+      for (let i = 0; i < agentIds.length; i++) relatedAgentIds[agentIds[i]] = true
+      if (response.active || !response.lastAssistantMessageId) return
+      const content = []
+      for (let i = 0; i < messages.length; i++) {
+        if (responseIdOf(messages[i]) !== responseId || !isAssistantMessage(messages[i])) continue
+        const text = messageCopyText(messages[i]).trim()
+        if (text) content.push(text)
+      }
+      out[response.lastAssistantMessageId] = {
+        content: content,
+        metrics: response.metrics || null,
+      }
     })
     return { items: out, agentIds: Object.keys(relatedAgentIds).sort() }
   }
 
   function responseMetricText(info, fallback) {
-    if (!info) return fallback || ''
+    const metrics = info && info.metrics
+    if (!metrics) return fallback || ''
     const parts = []
-    if (info.duration) parts.push(formatDuration(info.duration))
-    if (info.totalTokens) parts.push(String(info.totalTokens) + ' tok')
-    else if (info.outputTokens) parts.push(String(info.outputTokens) + ' out')
-    if (info.outputTokens && info.duration) {
-      parts.push((info.outputTokens / Math.max(info.duration / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
-    }
-    if (info.cost > 0) parts.push(formatCost({ amount: info.cost }))
+    if (metrics.durationMs) parts.push(formatDuration(metrics.durationMs))
+    if (metrics.totalTokens) parts.push(String(metrics.totalTokens) + ' tok')
+    else if (metrics.outputTokens) parts.push(String(metrics.outputTokens) + ' out')
+    if (metrics.tokensPerSecond > 0) parts.push(metrics.tokensPerSecond.toFixed(1).replace(/\.0$/, '') + ' tok/s')
+    if (metrics.cost && metrics.cost.amount > 0) parts.push(formatCost(metrics.cost))
     return parts.join(' · ') || fallback || ''
   }
 
@@ -723,13 +629,19 @@
     parent.appendChild(wrap)
   }
 
-  function renderPayload(msg) {
+  function disclosureStateFor(viewState, agentId) {
+    if (!viewState.disclosureStates[agentId]) viewState.disclosureStates[agentId] = {}
+    return viewState.disclosureStates[agentId]
+  }
+
+  function renderPayload(msg, viewState, agentId) {
     const wrap = ui.h('div', 'aiditor-ai-message-content')
     wrap.dataset.messagePayload = 'parts'
     if (aiditor.ai.messageRenderers && aiditor.ai.messageRenderers.renderParts) {
       aiditor.ai.messageRenderers.renderParts(wrap, msg, {
         source: 'transcript',
         message: msg,
+        disclosureState: disclosureStateFor(viewState, agentId),
         options: { includeToolCalls: false, includeRelated: true, includeError: true },
       })
     } else {
@@ -738,13 +650,14 @@
     return wrap
   }
 
-  function patchPayload(body, msg) {
+  function patchPayload(body, msg, viewState, agentId) {
     const current = body.querySelector('[data-message-payload]')
     if (current) {
       if (aiditor.ai.messageRenderers && aiditor.ai.messageRenderers.patchParts) {
         aiditor.ai.messageRenderers.patchParts(current, msg, {
           source: 'transcript',
           message: msg,
+          disclosureState: disclosureStateFor(viewState, agentId),
           options: { includeToolCalls: false, includeRelated: true, includeError: true },
         })
         return
@@ -752,7 +665,7 @@
       patchTextParts(current, displayText(msg.content != null ? msg.content : msg.text))
       return
     }
-    body.insertBefore(renderPayload(msg), body.firstChild || null)
+    body.insertBefore(renderPayload(msg, viewState, agentId), body.firstChild || null)
   }
 
   function renderEmpty(item) {
@@ -771,13 +684,12 @@
     const responseId = responseIdOf(msg)
     const responseFooter = responseId && responseFooters ? responseFooters[msg.id] : null
     if (responseId && isAssistantMessage(msg) && !responseFooter) return null
-    if (responseFooter && !responseFooter.complete) return null
 
     const copyText = responseFooter && responseFooter.content.length ? responseFooter.content.join('\n\n') : messageCopyText(msg)
     const footer = ui.h('div', 'aiditor-ai-message-footer')
     footer.appendChild(ui.copyButton({ text: copyText, title: responseFooter ? 'Copy response' : 'Copy message', size: 'sm' }))
     const calls = toolCallsOf(msg)
-    const callCount = responseFooter ? responseFooter.toolCalls : calls.length
+    const callCount = responseFooter && responseFooter.metrics ? responseFooter.metrics.toolCallCount : calls.length
     if (callCount) footer.appendChild(ui.h('span', 'aiditor-ai-message-metrics', { text: callCount + ' tool call' + (callCount === 1 ? '' : 's') }))
     if (role !== 'user') {
       const metrics = responseFooter ? responseMetricText(responseFooter, metricText(msg)) : metricText(msg)
@@ -830,7 +742,7 @@
     const role = msg.role || msg.type || 'message'
     const status = statusOf(msg)
     row.className = messageRowClass(role, status)
-    patchPayload(body, msg)
+    patchPayload(body, msg, viewState, agent.id)
     patchToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
     patchFooter(stack, msg, responseFooters)
     entry.version = version
@@ -850,7 +762,7 @@
     const card = ui.h('div', 'aiditor-ai-message')
 
     const body = ui.h('div', 'aiditor-ai-message-body')
-    body.appendChild(renderPayload(msg))
+    body.appendChild(renderPayload(msg, viewState, agent.id))
     renderToolCalls(body, agent.id, msg.id, toolCallsOf(msg), viewState)
     card.appendChild(body)
     stack.appendChild(card)
@@ -898,7 +810,7 @@
     scroll.appendChild(bottomSpacer)
     scroll.appendChild(liveStrip.el)
 
-    const viewState = { expandedToolCalls: {} }
+    const viewState = { expandedToolCalls: {}, disclosureStates: {} }
     const rows = {}
     const virtualizer = aiditor.ai.createMessageVirtualizer({ estimateHeight: 96, overscanPx: 640 })
     const visibleRevision = aiditor.signal(0)
@@ -1162,23 +1074,33 @@
       if (aiditor.ai.agents) aiditor.ai.agents()
       let state = agentId && aiditor.ai.activeRunState ? aiditor.ai.activeRunState(agentId) : null
       const response = agentId && aiditor.ai.response ? aiditor.ai.response.read(agentId) : null
-      if (response && response.status === 'waiting' && (!state || state.state === 'idle')) {
-        state = {
+      if (response && response.active) {
+        const waiting = response.status === 'waiting'
+        const metrics = response.metrics || {}
+        if (!state || state.state === 'idle') state = {
           agentId: agentId,
-          state: 'waiting',
-          startedAt: response.startedAt,
-          completedAt: null,
-          activityText: response.pendingQuestCount === 1
-            ? 'waiting for 1 delegated task'
-            : 'waiting for ' + response.pendingQuestCount + ' delegated tasks',
+          state: waiting ? 'waiting' : 'connecting',
+          activityText: waiting
+            ? (response.pendingQuestCount === 1
+              ? 'waiting for 1 delegated task'
+              : 'waiting for ' + response.pendingQuestCount + ' delegated tasks')
+            : 'continuing response',
           previewTail: '',
           modelTail: '',
-          turn: null,
-          usage: null,
-          outputTokens: 0,
-          totalTokens: 0,
-          cost: null,
         }
+        state = Object.assign({}, state, {
+          responseMetrics: true,
+          startedAt: metrics.startedAt || response.startedAt || state.startedAt,
+          completedAt: null,
+          generationMs: metrics.generationMs || 0,
+          promptTokens: metrics.promptTokens || 0,
+          outputTokens: metrics.outputTokens || 0,
+          totalTokens: metrics.totalTokens || 0,
+          cost: metrics.cost || null,
+          turn: null,
+          firstTokenAt: null,
+          usage: null,
+        })
       }
       liveStrip.update(state)
     }))

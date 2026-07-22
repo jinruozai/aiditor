@@ -225,8 +225,32 @@ aiditor.ai.response.stop(agentId, responseId?)
 ```
 
 `read` returns the response status (`running`, `waiting`, `completed`, or
-`stopped`), whether it is active/stoppable, and bounded pending Quest counts.
-Omitting `responseId` selects the Agent's latest non-runtime user response.
+`stopped`), whether it is active/stoppable, bounded pending Quest counts, the
+canonical related Agent ids, the last root assistant message id, and one
+response-level metrics snapshot. Omitting `responseId` selects the Agent's latest
+non-runtime user response.
+
+```js
+{
+  metrics: {
+    startedAt,
+    completedAt,
+    durationMs,
+    generationMs,
+    promptTokens,
+    outputTokens,
+    totalTokens,
+    tokensPerSecond,
+    toolCallCount,
+    providerTurnCount,
+    cost: { currency: 'USD', amount }
+  }
+}
+```
+
+The summary walks canonical Quest edges (`fromAgentId` plus
+`meta.sourceResponseId`) and counts each `{agentId, responseId}` once. It never
+reconstructs orchestration ownership from rendered tool cards.
 
 `stop` is the user-facing turn cancellation primitive. It closes the root
 response, stops matching runtime continuations, and recursively cancels pending
@@ -245,12 +269,14 @@ the chain is terminal. Copy and usage metrics aggregate the complete response.
 Internal run completion must never be presented as user-visible response
 completion.
 
-Footer metrics use one consistent response-tree scope. Duration is wall-clock
+Footer metrics use one consistent response-tree scope. `durationMs` is wall-clock
 latency from the root input being queued until the last related continuation
-finishes; parallel child durations are not added together. Token, cost, and tool
-counts include the root response plus recursively delegated response chains, with
-each `{agentId, responseId}` counted once. Copy text remains limited to the visible
-root transcript rather than embedding child transcripts.
+finishes; parallel child durations are not added together. `generationMs` is the
+sum of model generation periods, and `tokensPerSecond` is aggregate output tokens
+divided by that generation time rather than by wall-clock latency. Token, cost,
+tool-call, and provider-turn counts include the root response plus recursively
+delegated response chains. Copy text remains limited to the visible root
+transcript rather than embedding child transcripts.
 
 Transcript display uses the normalized message part pipeline defined in
 [ai-message-rendering.md](./ai-message-rendering.md). Provider-specific content
@@ -681,8 +707,9 @@ the parent transcript to recompute response-tree metrics.
 Rules:
 
 1. The transcript renders only the visible window plus small overscan.
-2. The live strip reads `activeRunState` and updates independently from the full
-   transcript.
+2. The live strip reads phase/preview data from `activeRunState`, but reads elapsed
+   time and cumulative usage from `ai.response.read`; a new provider turn must not
+   reset response-level metrics.
 3. Streaming text, reasoning text, tool deltas, activity text, usage, and errors
    should update live state first.
 4. Expanding a tool card is local UI state and should not be reset by unrelated
@@ -694,8 +721,8 @@ Rules:
    message row.
 
 The live strip is diagnostic UI. It should show the latest model/provider bytes
-as soon as the runtime receives them, then collapse back to idle when the run is
-done.
+as soon as the runtime receives them while retaining response-level cumulative
+metrics, then collapse back to idle only when the response is done.
 
 ## Trace And Audit
 
@@ -738,6 +765,7 @@ PROVIDER_OUTPUT_TRUNCATED
 PROVIDER_CONTENT_BLOCKED
 PROVIDER_INTERRUPTED
 TOOL_PROTOCOL_INVALID
+TOOL_ARGUMENTS_INVALID_JSON
 ```
 
 The raw `finishReason` is preserved in message metadata and trace events. The

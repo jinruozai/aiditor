@@ -85,7 +85,7 @@
         id: refs[i],
         title: tool.title || refs[i],
         description: tool.description || '',
-        schema: tool.schema || null,
+        schema: ai.tools.schema ? ai.tools.schema(refs[i], ctx) : (tool.schema || null),
         permissions: tool.permissions || null,
         capabilities: ai.tools.capabilities ? ai.tools.capabilities(refs[i]) : null,
       })
@@ -260,7 +260,7 @@
       id: call.id || call.providerCallId || null,
       toolId: call.toolId || call.name || call.tool || '',
       name: call.name || call.toolId || call.tool || '',
-      args: compactToolArg(call.args || {}, '', 3),
+      args: compactToolArg(Object.prototype.hasOwnProperty.call(call, 'args') ? call.args : {}, '', 3),
       status: call.status || '',
       error: call.error ? compactString(call.error, 1000) : null,
     }

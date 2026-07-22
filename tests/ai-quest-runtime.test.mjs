@@ -597,16 +597,19 @@ assert.equal(postDelegationRequest.input.meta.responseId, batchResponseId)
 assert.equal(ai.findAgent(batchParent.id).messages.find(function (message) { return message.content === 'local title' }).meta.responseId, batchResponseId)
 assert.equal(ai.findQuest(batchChildA.id, postDelegationRequest.input.meta.delegated[0].questId).meta.sourceResponseId, batchResponseId)
 assert.equal(ai.findAgent(batchParent.id).status, 'idle')
-assert.deepEqual(ai.response.read(batchParent.id, batchResponseId), {
-  agentId: batchParent.id,
-  responseId: batchResponseId,
-  status: 'waiting',
-  active: true,
-  stoppable: true,
-  startedAt: batchRun.message.createdAt,
-  pendingQuestCount: 2,
-  pendingAgentCount: 2,
-})
+const waitingBatchResponse = ai.response.read(batchParent.id, batchResponseId)
+assert.equal(waitingBatchResponse.agentId, batchParent.id)
+assert.equal(waitingBatchResponse.responseId, batchResponseId)
+assert.equal(waitingBatchResponse.status, 'waiting')
+assert.equal(waitingBatchResponse.active, true)
+assert.equal(waitingBatchResponse.stoppable, true)
+assert.equal(waitingBatchResponse.startedAt, batchRun.message.createdAt)
+assert.equal(waitingBatchResponse.pendingQuestCount, 2)
+assert.equal(waitingBatchResponse.pendingAgentCount, 2)
+assert.deepEqual(waitingBatchResponse.relatedAgentIds.sort(), [batchParent.id, batchChildA.id, batchChildB.id].sort())
+assert.equal(waitingBatchResponse.metrics.startedAt, batchRun.message.createdAt)
+assert.equal(waitingBatchResponse.metrics.completedAt, null)
+assert.equal(waitingBatchResponse.metrics.providerTurnCount >= 1, true)
 releaseBatchA('result a')
 await flush(5)
 const firstInbox = batchRequests.find(function (request) {

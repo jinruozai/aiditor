@@ -100,7 +100,7 @@
         id: id,
         toolId: toolId,
         name: call.name || call.toolId || call.tool || '',
-        args: call.args || {},
+        args: ai.toolArguments.read(call),
         status: denied ? 'failed' : (call.status || 'proposed'),
         error: denied ? ('Tool was not available in this request: ' + toolId) : call.error,
         actor: call.actor || who || 'user',
@@ -118,38 +118,6 @@
     for (let i = 0; i < specs.length; i++) map[specs[i].id] = true
     for (let j = 0; j < refs.length; j++) map[refs[j]] = true
     return map
-  }
-
-  function mergeToolCallDeltas(existing, deltas) {
-    const out = existing.slice()
-    for (let i = 0; i < (deltas || []).length; i++) {
-      const delta = deltas[i]
-      const index = delta.index != null ? delta.index : findToolCallIndex(out, delta)
-      const at = index >= 0 ? index : out.length
-      const cur = out[at] || {}
-      const next = Object.assign({}, cur)
-      if (delta.id) next.id = delta.id
-      if (delta.type) next.type = delta.type
-      if (delta.toolId) next.toolId = delta.toolId
-      if (delta.name) next.name = delta.name
-      if (delta.args) next.args = Object.assign({}, next.args || {}, delta.args)
-      if (delta.arguments != null) next.arguments = String(next.arguments || '') + String(delta.arguments)
-      if (delta.function) {
-        const fn = Object.assign({}, next.function || {})
-        if (delta.function.name) fn.name = delta.function.name
-        if (delta.function.arguments != null) fn.arguments = String(fn.arguments || '') + String(delta.function.arguments)
-        next.function = fn
-      }
-      out[at] = next
-    }
-    return out
-  }
-
-  function findToolCallIndex(calls, delta) {
-    if (delta.id) {
-      for (let i = 0; i < calls.length; i++) if (calls[i].id === delta.id) return i
-    }
-    return -1
   }
 
   function appendCapped(target, key, text, max, label) {
@@ -401,7 +369,7 @@
     }
     if (calls.length) {
       pushModelTail(state, toolCallDeltaText(calls))
-      state.toolCalls = mergeToolCallDeltas(state.toolCalls, calls)
+      state.toolCalls = ai.toolArguments.mergeDeltas(state.toolCalls, calls)
       state.activityText = toolActivityText(state.toolCalls)
       state.previewUpdatedAt = Date.now()
       state.runState = 'tool'
@@ -1356,6 +1324,7 @@
     if (!root || !rootResponseId) return null
 
     const nodes = []
+    const responseQuests = []
     const pendingMessages = []
     const pendingQuests = []
     const pendingEvents = []
@@ -1368,7 +1337,7 @@
       const agent = byId[currentAgentId]
       if (!agent) return
       const input = responseInput(agent, currentResponseId)
-      nodes.push({ agentId: currentAgentId, responseId: currentResponseId, input: input, depth: depth })
+      nodes.push({ agentId: currentAgentId, responseId: currentResponseId, input: input, agent: agent, depth: depth })
 
       const messages = agent.messages || []
       for (let i = 0; i < messages.length; i++) {
@@ -1390,6 +1359,7 @@
       for (let q = 0; q < children.length; q++) {
         const target = children[q].agent
         const quest = children[q].quest
+        responseQuests.push({ agentId: target.id, questId: quest.id, quest: quest, depth: depth + 1 })
         if (!terminalQuest(quest)) {
           pendingQuests.push({ agentId: target.id, questId: quest.id, quest: quest, depth: depth + 1 })
         }
@@ -1425,6 +1395,7 @@
       status: status,
       active: active,
       nodes: nodes,
+      quests: responseQuests,
       pendingMessages: pendingMessages,
       pendingQuests: pendingQuests,
       pendingEvents: pendingEvents,
@@ -1432,9 +1403,107 @@
     }
   }
 
+  function responseMessageUsage(message) {
+    return normalizedUsage(message && (message.usage || message.stats && message.stats.usage || message.meta && message.meta.usage))
+  }
+
+  function responseMessageStart(message) {
+    const stats = message && message.stats || {}
+    return message && (message.startedAt || message.createdAt || message.time) || stats.startTime || 0
+  }
+
+  function responseMessageEnd(message) {
+    const stats = message && message.stats || {}
+    return message && (message.completedAt || stats.completedAt || (!pendingExecutionStatus(message.status) && (message.time || message.createdAt))) || 0
+  }
+
+  function responseMessageGenerationMs(message) {
+    const stats = message && message.stats || {}
+    if (stats.generationMs > 0) return stats.generationMs
+    if (stats.firstTokenAt && stats.completedAt > stats.firstTokenAt) return stats.completedAt - stats.firstTokenAt
+    return 0
+  }
+
+  function responseSummary(graph) {
+    const metrics = {
+      startedAt: graph.startedAt || null,
+      completedAt: null,
+      durationMs: 0,
+      generationMs: 0,
+      promptTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      tokensPerSecond: 0,
+      toolCallCount: 0,
+      providerTurnCount: 0,
+      cost: null,
+    }
+    const relatedAgentIds = []
+    let lastAssistantMessageId = null
+    let lastCompletedAt = 0
+    let costAmount = 0
+
+    for (let n = 0; n < graph.nodes.length; n++) {
+      const node = graph.nodes[n]
+      relatedAgentIds.push(node.agentId)
+      const messages = node.agent && node.agent.messages || []
+      for (let i = 0; i < messages.length; i++) {
+        const message = messages[i]
+        if (messageResponseId(message) !== node.responseId) continue
+        const start = responseMessageStart(message)
+        const end = responseMessageEnd(message)
+        if (!metrics.startedAt && start) metrics.startedAt = start
+        if (end > lastCompletedAt) lastCompletedAt = end
+        if (message.role !== 'assistant') continue
+        metrics.providerTurnCount++
+        if (node.depth === 0) lastAssistantMessageId = message.id
+        metrics.toolCallCount += (message.toolCalls || []).length
+        let usage = responseMessageUsage(message)
+        let generationMs = responseMessageGenerationMs(message)
+        let cost = message.stats && message.stats.cost || message.meta && message.meta.cost || null
+        if (pendingExecutionStatus(message.status) && ai.peekActiveRunState) {
+          const live = ai.peekActiveRunState(node.agentId)
+          if (live && live.messageId === message.id) {
+            usage = usage || normalizedUsage(live.usage)
+            if (!generationMs && live.firstTokenAt) generationMs = Math.max(0, Date.now() - live.firstTokenAt)
+            cost = cost || live.cost || null
+          }
+        }
+        if (usage) {
+          metrics.promptTokens += usage.promptTokens
+          metrics.outputTokens += usage.outputTokens
+          metrics.totalTokens += usage.totalTokens
+        }
+        metrics.generationMs += generationMs
+        if (cost && cost.amount > 0) costAmount += Number(cost.amount || 0)
+      }
+    }
+
+    for (let i = 0; i < graph.quests.length; i++) {
+      const completedAt = graph.quests[i].quest.completedAt || 0
+      if (completedAt > lastCompletedAt) lastCompletedAt = completedAt
+    }
+    const rootInput = graph.nodes.length ? graph.nodes[0].input : null
+    const stoppedAt = rootInput && rootInput.meta && rootInput.meta.responseStoppedAt || 0
+    if (stoppedAt > lastCompletedAt) lastCompletedAt = stoppedAt
+    if (!graph.active) metrics.completedAt = lastCompletedAt || metrics.startedAt
+    const end = metrics.completedAt || Date.now()
+    if (metrics.startedAt && end >= metrics.startedAt) metrics.durationMs = end - metrics.startedAt
+    if (metrics.outputTokens && metrics.generationMs) {
+      metrics.tokensPerSecond = metrics.outputTokens / Math.max(metrics.generationMs / 1000, 0.001)
+    }
+    if (costAmount > 0) metrics.cost = { currency: 'USD', amount: costAmount }
+    return {
+      metrics: metrics,
+      lastAssistantMessageId: lastAssistantMessageId,
+      relatedAgentIds: relatedAgentIds,
+    }
+  }
+
   function readResponse(agentId, responseId) {
     const graph = responseGraph(agentId, responseId)
     if (!graph) return null
+    const summary = responseSummary(graph)
     const pendingAgents = {}
     for (let i = 0; i < graph.pendingMessages.length; i++) pendingAgents[graph.pendingMessages[i].agentId] = true
     for (let i = 0; i < graph.pendingQuests.length; i++) pendingAgents[graph.pendingQuests[i].agentId] = true
@@ -1448,6 +1517,9 @@
       startedAt: graph.startedAt,
       pendingQuestCount: graph.pendingQuests.length,
       pendingAgentCount: Object.keys(pendingAgents).length,
+      lastAssistantMessageId: summary.lastAssistantMessageId,
+      relatedAgentIds: summary.relatedAgentIds,
+      metrics: summary.metrics,
     }
   }
 

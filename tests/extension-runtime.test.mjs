@@ -77,9 +77,11 @@ assert.equal(extensionRequest.tools.includes('aiditor.inspectDocks'), true)
 assert.equal(extensionRequest.tools.includes('aiditor.addPanelToDock'), true)
 assert.equal(extensionRequest.tools.includes('aiditor.previewOperation'), false)
 assert.equal(extensionRequest.tools.includes('aiditor.applyOperation'), false)
-assert.throws(function () {
-  ai.tools.get('aiditor.previewOperation').run({ op: 'aiditor.installExtension', input: { manifest: {} } }, { actor: 'user', agent: extensionAgent })
-}, /not available/)
+const hiddenOperation = ai.tools.get('aiditor.previewOperation').run(
+  { op: 'aiditor.installExtension', input: { manifest: {} } },
+  { actor: 'user', agent: extensionAgent }
+)
+assert.equal(hiddenOperation.code, 'OPERATION_NOT_AVAILABLE')
 let tree = aiditor.dock({ name: 'main' })
 let panelTextSamples = {}
 let reloadedPanelId = null
@@ -324,6 +326,12 @@ const manifest = {
       id: 'setValue',
       adapter: 'case.adapter',
       risk: 'edit',
+      exposeToModel: true,
+      inputSchema: {
+        type: 'object',
+        required: ['next'],
+        properties: { next: { type: 'number' } },
+      },
     }],
     commands: [{
       id: 'refresh',
@@ -420,6 +428,8 @@ assert.equal(ai.tools.get('case.read').title, 'Read Case')
 assert.equal(ai.context.get('case.context') != null, true)
 assert.equal(ai.references.list({ owner: 'extension:case' })[0], 'case.data')
 assert.equal(ai.operations.list({ owner: 'extension:case' })[0], 'case.setValue')
+assert.equal(ai.operations.get('case.setValue').exposeToModel, true)
+assert.equal(ai.operations.get('case.setValue').inputSchema.properties.next.type, 'number')
 assert.equal(aiditor.commands.list({ owner: 'extension:case' })[0], 'case.refresh')
 assert.equal(aiditor.commands.menuItems('dock.panel.context')[0].command, 'case.refresh')
 assert.equal(aiditor.settings.schemaMeta('case.enabled').owner, 'extension:case')

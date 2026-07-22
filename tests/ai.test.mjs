@@ -471,6 +471,7 @@ function makeElement(tag) {
     className: '',
     attributes: {},
     dataset: {},
+    events: {},
     children: [],
     parentNode: null,
     textContent: '',
@@ -519,7 +520,10 @@ function makeElement(tag) {
     setAttribute: function (name, value) {
       this.attributes[name] = value
     },
-    addEventListener: function () {},
+    addEventListener: function (type, fn) {
+      if (!this.events[type]) this.events[type] = []
+      this.events[type].push(fn)
+    },
     contains: function (node) {
       if (node === this) return true
       const children = this.children || []
@@ -670,23 +674,31 @@ async function assertGdePatchPreviewRendering() {
 
   const streamAgent = ai.createAgent({
     name: 'Stable Transcript',
-    messages: [{ id: 'stream-1', role: 'assistant', status: 'running', content: 'hello' }],
+    messages: [{ id: 'stream-1', role: 'assistant', status: 'running', content: 'hello', reasoning_content: 'think' }],
   })
   ai.activeAgentId.set(streamAgent.id)
   const streamingRoot = components['ai-messages'].factory(null, {})
   const row = streamingRoot.querySelector('.aiditor-ai-message-row')
   const payload = streamingRoot.querySelector('[data-message-payload]')
   const firstTextPart = streamingRoot.querySelector('.aiditor-ai-message-text')
+  const thinking = streamingRoot.querySelector('.aiditor-ai-message-reasoning')
   assert.ok(row)
   assert.ok(payload)
   assert.ok(firstTextPart)
+  assert.ok(thinking)
+  thinking.open = true
+  const thinkingToggles = thinking.events.toggle || []
+  for (let i = 0; i < thinkingToggles.length; i++) thinkingToggles[i]()
 
-  ai.updateMessage(streamAgent.id, 'stream-1', { content: 'hello\n\nworld', status: 'running' })
+  ai.updateMessage(streamAgent.id, 'stream-1', { content: 'hello\n\nworld', reasoning_content: 'think more', status: 'running' })
   await new Promise(function (resolve) { setTimeout(resolve, 140) })
 
   assert.equal(streamingRoot.querySelector('.aiditor-ai-message-row'), row)
   assert.equal(streamingRoot.querySelector('[data-message-payload]'), payload)
   assert.equal(streamingRoot.querySelector('.aiditor-ai-message-text'), firstTextPart)
+  assert.equal(streamingRoot.querySelector('.aiditor-ai-message-reasoning'), thinking)
+  assert.equal(thinking.open, true)
+  assert.match(collectText(thinking), /think more/)
   assert.match(collectText(streamingRoot), /world/)
 
   const responseAgent = ai.createAgent({
@@ -736,6 +748,8 @@ async function assertGdePatchPreviewRendering() {
         role: 'assistant',
         status: 'done',
         content: '',
+        usage: { total_tokens: 40, output_tokens: 20 },
+        stats: { generationMs: 1000, cost: { amount: 0.001 } },
         meta: { runId: 'run-delegated', responseId: 'delegated-input' },
         toolCalls: [{ toolId: 'agent.delegate', status: 'applied', applyResult: { agentId: pendingChild.id, questId: 'pending-quest' } }],
       },
@@ -749,12 +763,15 @@ async function assertGdePatchPreviewRendering() {
   const delegatedRoot = components['ai-messages'].factory(null, {})
   assert.equal(countClass(delegatedRoot, 'aiditor-ai-message-footer'), 1)
   assert.equal(delegatedRoot.querySelector('.aiditor-ai-live-run').attributes['data-state'], 'waiting')
+  assert.match(collectText(delegatedRoot.querySelector('.aiditor-ai-live-run-metrics')), /40 tok/)
+  assert.match(collectText(delegatedRoot.querySelector('.aiditor-ai-live-run-metrics')), /20 tok\/s/)
   ai.appendMessage(pendingChild.id, {
     id: 'pending-result',
     role: 'assistant',
     status: 'done',
     content: 'pending child done',
     usage: { total_tokens: 25, output_tokens: 10 },
+    stats: { generationMs: 500, cost: { amount: 0.002 } },
     meta: { runId: 'run-pending-child', responseId: 'pending-quest' },
   })
   ai.updateQuest(pendingChild.id, 'pending-quest', { status: 'completed', completedAt: Date.now() })
@@ -775,7 +792,7 @@ async function assertGdePatchPreviewRendering() {
         createdAt: 1600,
         completedAt: 3000,
         usage: { total_tokens: 50, output_tokens: 20 },
-        stats: { completedAt: 3000, cost: { amount: 0.002 } },
+        stats: { completedAt: 3000, generationMs: 1000, cost: { amount: 0.002 } },
         meta: { runId: 'run-child', responseId: 'measured-quest' },
         toolCalls: [{ toolId: 'child.read', status: 'completed', result: { ok: true } }],
       },
@@ -794,7 +811,7 @@ async function assertGdePatchPreviewRendering() {
         createdAt: 1100,
         completedAt: 2000,
         usage: { total_tokens: 100, output_tokens: 40 },
-        stats: { completedAt: 2000, cost: { amount: 0.001 } },
+        stats: { completedAt: 2000, generationMs: 800, cost: { amount: 0.001 } },
         meta: { runId: 'run-parent-first', responseId: 'measured-input' },
         toolCalls: [{ toolId: 'agent.delegate', status: 'applied', applyResult: { agentId: measuredChild.id, questId: 'measured-quest' } }],
       },
@@ -806,19 +823,39 @@ async function assertGdePatchPreviewRendering() {
         createdAt: 3100,
         completedAt: 4000,
         usage: { total_tokens: 70, output_tokens: 30 },
-        stats: { completedAt: 4000, cost: { amount: 0.003 } },
+        stats: { completedAt: 4000, generationMs: 600, cost: { amount: 0.003 } },
         meta: { runId: 'run-parent-final', responseId: 'measured-input' },
       },
     ],
   })
+  ai.updateQuest(measuredChild.id, 'measured-quest', {
+    fromAgentId: measuredParent.id,
+    meta: { sourceResponseId: 'measured-input' },
+  })
+  const measuredSummary = ai.response.read(measuredParent.id, 'measured-input')
+  assert.equal(measuredSummary.status, 'completed')
+  assert.equal(measuredSummary.lastAssistantMessageId, 'measured-parent-final')
+  assert.deepEqual(measuredSummary.relatedAgentIds, [measuredParent.id, measuredChild.id])
+  assert.equal(measuredSummary.metrics.durationMs, 3000)
+  assert.equal(measuredSummary.metrics.generationMs, 2400)
+  assert.equal(measuredSummary.metrics.totalTokens, 220)
+  assert.equal(measuredSummary.metrics.outputTokens, 90)
+  assert.equal(measuredSummary.metrics.tokensPerSecond, 37.5)
+  assert.equal(measuredSummary.metrics.toolCallCount, 2)
+  assert.equal(measuredSummary.metrics.providerTurnCount, 3)
+  assert.equal(measuredSummary.metrics.cost.amount, 0.006)
   ai.activeAgentId.set(measuredParent.id)
   const measuredRoot = components['ai-messages'].factory(null, {})
   const measuredFooters = elementsWithClass(measuredRoot, 'aiditor-ai-message-footer')
+  const measuredAssistantFooters = elementsWithClass(measuredRoot, 'aiditor-ai-message-row-assistant').filter(function (row) {
+    return !!row.querySelector('.aiditor-ai-message-footer')
+  })
+  assert.equal(measuredAssistantFooters.length, 1)
   const measuredText = collectText(measuredFooters[measuredFooters.length - 1])
   assert.match(measuredText, /2 tool calls/)
   assert.match(measuredText, /3 s/)
   assert.match(measuredText, /220 tok/)
-  assert.match(measuredText, /30 tok\/s/)
+  assert.match(measuredText, /37\.5 tok\/s/)
   assert.match(measuredText, /\$0\.006/)
 
   const emptyAgent = ai.createAgent({ name: 'Empty Transcript', messages: [] })

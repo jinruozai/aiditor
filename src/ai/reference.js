@@ -201,7 +201,14 @@
 
   function registerOperation(name, spec, meta) {
     assertFree('ai.operations', operations, name, meta)
-    operations[name] = Object.assign({ id: name }, spec || {})
+    const normalized = Object.assign({ id: name }, spec || {})
+    if (normalized.schema != null)
+      throw new Error('ai.operations.register: use inputSchema instead of schema for "' + name + '"')
+    if (normalized.inputSchema != null)
+      normalized.inputSchema = ai.schema.normalize(normalized.inputSchema, 'operation.' + name + '.inputSchema')
+    if (normalized.exposeToModel === true && !normalized.inputSchema)
+      throw new Error('ai.operations.register: model-visible operation requires inputSchema for "' + name + '"')
+    operations[name] = normalized
     operationMeta[name] = normalizeMeta(meta)
     return operations[name]
   }
@@ -247,7 +254,7 @@
   function operationRisk(op, input, ctx) {
     const spec = getOperation(op)
     if (!spec) return 'edit'
-    if (typeof spec.risk === 'function') return spec.risk(input || {}, withOperationContext(op, ctx))
+    if (typeof spec.risk === 'function') return spec.risk(input === undefined ? {} : input, withOperationContext(op, ctx))
     return spec.risk || 'edit'
   }
 
@@ -262,7 +269,7 @@
     const preview = Object.assign({}, obj, {
       id: id,
       op: op,
-      input: clone(input || {}),
+      input: clone(input === undefined ? {} : input),
       ok: obj.ok !== false,
       risk: risk,
       title: obj.title || (getOperation(op) && getOperation(op).title) || op,
@@ -297,11 +304,31 @@
       ? opOrSpec
       : { op: opOrSpec, input: inputArg }
     const op = specInput.op || specInput.operation
-    const input = specInput.input || specInput.args || {}
+    const input = Object.prototype.hasOwnProperty.call(specInput, 'input')
+      ? specInput.input
+      : (Object.prototype.hasOwnProperty.call(specInput, 'args') ? specInput.args : {})
     const spec = getOperation(op)
     if (!spec) throw new Error('Operation not found: ' + op)
     const fn = spec.preview || spec.plan || spec.run
     if (!fn) throw new Error('Operation has no preview: ' + op)
+    if (spec.inputSchema) {
+      const validation = ai.schema.validate(input, spec.inputSchema)
+      if (!validation.valid) {
+        const errors = validation.errors.map(function (item) {
+          return {
+            code: 'SCHEMA_VALUE_INVALID',
+            path: item.path === '$' ? '$.input' : '$.input' + item.path.slice(1),
+            message: item.message,
+          }
+        })
+        return normalizePreview(op, input, {
+          ok: false,
+          code: 'OPERATION_INPUT_INVALID',
+          error: 'Operation input does not match inputSchema',
+          errors: errors,
+        }, ctx)
+      }
+    }
     const raw = fn(input, withOperationContext(op, ctx))
     return normalizePreview(op, input, raw, ctx)
   }
@@ -309,9 +336,73 @@
   function operationVisibleToModel(op, ctx) {
     const spec = getOperation(op)
     if (!spec) return false
-    if (spec.exposeToModel === false) return false
+    if (spec.exposeToModel !== true) return false
     if (typeof spec.available === 'function' && spec.available(withOperationContext(op, ctx)) === false) return false
     return true
+  }
+
+  function modelOperationNames(ctx) {
+    return keys(operations).filter(function (name) {
+      return operationVisibleToModel(name, ctx)
+    }).sort()
+  }
+
+  function operationSchemaBranch(name) {
+    const spec = getOperation(name)
+    return {
+      type: 'object',
+      required: ['op', 'input'],
+      additionalProperties: false,
+      properties: {
+        op: {
+          type: 'string',
+          enum: [name],
+          description: spec.description || spec.title || name,
+        },
+        input: clone(spec.inputSchema),
+      },
+    }
+  }
+
+  function operationGatewaySchema(ctx, includePreviewId) {
+    const variants = modelOperationNames(ctx).map(operationSchemaBranch)
+    if (includePreviewId) {
+      variants.unshift({
+        type: 'object',
+        required: ['previewId'],
+        additionalProperties: false,
+        properties: {
+          previewId: { type: 'string', description: 'A preview id returned by aiditor.previewOperation.' },
+        },
+      })
+    }
+    if (!variants.length) {
+      return {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+        description: 'No editor operations are available in the current request context.',
+      }
+    }
+    return { type: 'object', oneOf: variants }
+  }
+
+  function operationGatewayError(code, message, op, ctx, details) {
+    return Object.assign({
+      ok: false,
+      code: code,
+      error: message,
+      op: op || null,
+      allowedValues: modelOperationNames(ctx),
+    }, details || {})
+  }
+
+  function unavailableOperationResult(args, ctx) {
+    const op = args && args.op
+    if (!op) return operationGatewayError('OPERATION_REQUIRED', 'Operation id is required', null, ctx)
+    if (!getOperation(op)) return operationGatewayError('OPERATION_NOT_FOUND', 'Operation is not registered: ' + op, op, ctx)
+    if (!operationVisibleToModel(op, ctx)) return operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + op, op, ctx)
+    return null
   }
 
   function resolvePreview(spec) {
@@ -417,19 +508,15 @@
       title: 'Preview Editor Operation',
       description: 'Preview a registered editor operation. Never apply invalid previews; repair input from returned validation errors.',
       exposeToModel: false,
-      schema: {
-        type: 'object',
-        required: ['op', 'input'],
-        properties: {
-          op: { type: 'string' },
-          input: { type: 'object' },
-        },
-      },
+      schema: { type: 'object', properties: {}, additionalProperties: false },
+      resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
+      available: function (ctx) { return modelOperationNames(ctx).length > 0 },
       run: function (args, ctx) {
-        const op = args && (args.op || args.operation)
-        if (!operationVisibleToModel(op, ctx)) throw new Error('Operation is not available to the model: ' + op)
+        const unavailable = unavailableOperationResult(args, ctx)
+        if (unavailable) return unavailable
+        const op = args.op
         if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'preview', { input: args && args.input })) {
-          throw new Error('Operation preview not allowed: ' + op)
+          return operationGatewayError('OPERATION_PREVIEW_DENIED', 'Operation preview not allowed: ' + op, op, ctx)
         }
         return previewOperation(args, null, ctx)
       },
@@ -438,26 +525,33 @@
       title: 'Apply Editor Operation',
       description: 'Preview and apply a registered editor operation through the host transaction bridge.',
       exposeToModel: false,
-      schema: {
-        type: 'object',
-        required: ['op', 'input'],
-        properties: {
-          op: { type: 'string' },
-          input: { type: 'object' },
-          previewId: { type: 'string' },
-        },
-      },
+      schema: { type: 'object', properties: {}, additionalProperties: false },
+      resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
       preview: function (args, ctx) {
-        const op = args && (args.op || args.operation)
-        if (args && args.previewId && previews[args.previewId]) return previews[args.previewId]
-        if (!operationVisibleToModel(op, ctx)) return { ok: false, op: op, error: 'Operation is not available to the model: ' + op }
+        if (args && args.previewId && previews[args.previewId]) {
+          const resolved = previews[args.previewId]
+          if (!operationVisibleToModel(resolved.op, ctx)) {
+            return operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + resolved.op, resolved.op, ctx, { previewId: args.previewId })
+          }
+          return resolved
+        }
+        if (args && args.previewId) {
+          return operationGatewayError('OPERATION_PREVIEW_NOT_FOUND', 'Operation preview not found: ' + args.previewId, null, ctx, { previewId: args.previewId })
+        }
+        const unavailable = unavailableOperationResult(args, ctx)
+        if (unavailable) return unavailable
+        const op = args.op
         if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'preview', { input: args && args.input })) {
-          return { ok: false, op: op, error: 'Operation preview not allowed: ' + op }
+          return operationGatewayError('OPERATION_PREVIEW_DENIED', 'Operation preview not allowed: ' + op, op, ctx)
         }
         return previewOperation(args, null, ctx)
       },
       apply: function (preview, ctx) {
+        if (preview && preview.ok === false) return { applied: false, ok: false, error: preview.error || 'Preview is not valid', preview: preview }
         const op = preview && (preview.op || preview.operation)
+        if (!operationVisibleToModel(op, ctx)) {
+          return Object.assign({ applied: false, preview: preview }, operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + op, op, ctx))
+        }
         if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'apply', { preview: preview, risk: preview && preview.risk })) {
           return { applied: false, ok: false, error: 'Operation apply not allowed: ' + op, preview: preview }
         }

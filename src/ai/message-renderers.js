@@ -286,8 +286,17 @@
 
   function renderReasoning(part, ctx) {
     const details = ui.h('details', 'aiditor-ai-message-reasoning')
-    details.open = part.collapsed === false
-    details.appendChild(ui.h('summary', 'aiditor-ai-message-reasoning-head', { text: part.title || 'Reasoning' }))
+    const disclosureState = ctx && ctx.disclosureState
+    const disclosureKey = ctx && ctx.message && ctx.message.id
+      ? String(ctx.message.id) + '/' + String(ctx.partKey || 'reasoning')
+      : null
+    details.open = disclosureState && disclosureKey && Object.prototype.hasOwnProperty.call(disclosureState, disclosureKey)
+      ? !!disclosureState[disclosureKey]
+      : part.collapsed === false
+    if (disclosureState && disclosureKey) {
+      details.addEventListener('toggle', function () { disclosureState[disclosureKey] = details.open })
+    }
+    details.appendChild(ui.h('summary', 'aiditor-ai-message-reasoning-head', { text: part.title || 'Thinking' }))
     const body = ui.h('div', 'aiditor-ai-message-reasoning-body')
     body.appendChild(renderText({ text: part.text || part.summary || '' }, ctx))
     details.appendChild(body)
@@ -389,6 +398,14 @@
     }
     if (part.type === 'error') {
       el.textContent = readText(part.error || part.text || part.message)
+      return true
+    }
+    if (part.type === 'reasoning') {
+      const body = el.children && el.children[1]
+      const text = body && body.children && body.children[0]
+      if (!text) return false
+      if (ai.messageMarkdown) ai.messageMarkdown.patch(text, part.text || part.summary || '')
+      else setStableText(text, part.text || part.summary || '')
       return true
     }
     return false

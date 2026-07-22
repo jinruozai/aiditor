@@ -147,8 +147,39 @@ function assertToolCopyIncludesStructuredData() {
   assert.match(text, /ok/)
 }
 
+function assertReasoningUsesThinkingLabel() {
+  const ai = load()
+  const root = document.createElement('div')
+  ai.messageRenderers.renderParts(root, { parts: [{ type: 'reasoning', text: 'work' }] }, {})
+  assert.match(collectText(root), /Thinking/)
+}
+
+function assertReasoningPatchesWithoutResettingDisclosure() {
+  const ai = load()
+  const disclosureState = {}
+  const first = { id: 'streaming-message', parts: [{ type: 'reasoning', text: 'first' }] }
+  const root = document.createElement('div')
+  ai.messageRenderers.renderParts(root, first, { message: first, disclosureState: disclosureState })
+  const details = root.children[0]
+  details.open = true
+  const toggles = details.events.toggle || []
+  for (let i = 0; i < toggles.length; i++) toggles[i]()
+
+  const next = { id: 'streaming-message', parts: [{ type: 'reasoning', text: 'first second' }] }
+  ai.messageRenderers.patchParts(root, next, { message: next, disclosureState: disclosureState })
+  assert.equal(root.children[0], details)
+  assert.equal(details.open, true)
+  assert.match(collectText(details), /first second/)
+
+  const remounted = document.createElement('div')
+  ai.messageRenderers.renderParts(remounted, next, { message: next, disclosureState: disclosureState })
+  assert.equal(remounted.children[0].open, true)
+}
+
 assertProviderPartsNormalizeAndRender()
 assertCustomCardRenderer()
 assertToolCopyIncludesStructuredData()
+assertReasoningUsesThinkingLabel()
+assertReasoningPatchesWithoutResettingDisclosure()
 
 console.log('ai message renderer tests ok')

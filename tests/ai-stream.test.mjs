@@ -196,6 +196,55 @@ assert.equal(byId(ai.agents(), streamingTool.id).messages.some(function (message
   return message.content === 'stream tool continued'
 }), true)
 
+const structuredBridgeArgs = {
+  enabled: true,
+  count: 0,
+  nothing: null,
+  rows: [[1, 2], [3, 4]],
+  jsonLiteral: '{"keep":"string"}',
+  nested: { values: [false, null, '[1,2]'] },
+}
+let receivedStructuredBridgeArgs = null
+let structuredBridgeRequests = 0
+ai.tools.register('structured-bridge-tool', {
+  run: function (args) {
+    receivedStructuredBridgeArgs = args
+    return { ok: true }
+  },
+})
+ai.registerTransport('structured-bridge-flow', {
+  toolProtocol: 'native',
+  send: function () {
+    structuredBridgeRequests += 1
+    if (structuredBridgeRequests === 1) {
+      return {
+        deltas: (async function* () {
+          yield {
+            toolCalls: [{
+              index: 0,
+              id: 'call_structured_bridge',
+              type: 'function',
+              function: { name: 'structured-bridge-tool', arguments: structuredBridgeArgs },
+            }],
+          }
+        })(),
+      }
+    }
+    return { role: 'assistant', content: 'structured bridge complete' }
+  },
+})
+ai.registerConnection('structured-bridge-flow', { auth: { type: 'none' }, transport: { type: 'structured-bridge-flow' }, configDefaults: {} })
+const structuredBridgeAgent = ai.createAgent({
+  name: 'Structured Bridge',
+  connection: 'structured-bridge-flow',
+  permissionMode: 'full',
+  toolRefs: ['structured-bridge-tool'],
+})
+await ai.message.send(structuredBridgeAgent.id, { content: 'preserve structured arguments' }, 'user').promise
+assert.deepEqual(receivedStructuredBridgeArgs, structuredBridgeArgs)
+assert.equal(receivedStructuredBridgeArgs.jsonLiteral, '{"keep":"string"}')
+assert.equal(structuredBridgeRequests, 2)
+
 ai.tools.register('stream-hidden-tool', {
   exposeToModel: false,
   run: function () { hiddenToolExecuted += 1; throw new Error('hidden tool must not run') },

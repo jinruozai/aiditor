@@ -203,6 +203,9 @@
       const adapterId = o.adapter
       const spec = {
         title: o.title || o.id,
+        description: o.description || '',
+        inputSchema: o.inputSchema || null,
+        exposeToModel: o.exposeToModel === true,
         risk: o.risk || 'edit',
         preview: o.preview || (adapterId ? makeAdapterCall(adapters, adapterId, 'preview') : null),
         apply: o.apply || (adapterId ? makeAdapterCall(adapters, adapterId, 'apply') : null),

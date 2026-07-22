@@ -109,6 +109,29 @@ aiditor.ai.tools.register('workspace.readText', {
 Low-level host escape hatches can stay registered for framework code while being
 kept out of normal model requests with `exposeToModel: false`.
 
+### Tool Argument Transport
+
+`ToolCall.args` is the canonical structured JSON value. Provider adapters decode
+the wire protocol exactly once:
+
+- OpenAI-compatible string `function.arguments` values are parsed once as JSON.
+- Already structured `args` or `arguments` values pass through unchanged.
+- Text-tool envelopes are parsed once; their nested `args` value is not parsed
+  again.
+- Streaming string fragments are concatenated. A structured streaming value is
+  a complete snapshot and replaces the previous value.
+
+Adapters and bridges must not recursively parse JSON-looking strings, coerce
+values according to field names, wrap malformed input in guessed objects, or add
+domain-specific conversions. JSON strings remain strings even when their content
+looks like an object or array. Invalid wire JSON fails with
+`TOOL_ARGUMENTS_INVALID_JSON`, and the Tool is not executed.
+
+The local bridge transports the request and response envelopes through ordinary
+JSON serialization. It may adapt the provider envelope, but it does not interpret
+fields inside Tool arguments. Business validation remains with the registered
+Tool schema and Tool implementation.
+
 ## Context References
 
 Context references are stable pointers plus provider-backed readers.
@@ -166,6 +189,50 @@ aiditor.ai.operations.apply(preview)
 
 Operations are for changes that need validation, preview, review UI, host
 history integration, or resource-version checks.
+
+An operation has one stable input contract:
+
+```js
+aiditor.ai.operations.register('game.patch', {
+  title: 'Patch game data',
+  exposeToModel: true,
+  available: function (ctx) { return !!ctx.workspace },
+  inputSchema: {
+    type: 'object',
+    required: ['target', 'patch'],
+    additionalProperties: false,
+    properties: {
+      target: { type: 'string' },
+      patch: { type: 'object' },
+    },
+  },
+  preview: function (input, ctx) {},
+  apply: function (preview, ctx) {},
+})
+```
+
+`inputSchema` is the only operation-input schema field. Model exposure is an
+explicit opt-in: `exposeToModel: true` requires `inputSchema`; operations without
+that flag remain available to trusted host code but never enter the model
+gateway.
+
+`aiditor.previewOperation` and `aiditor.applyOperation` are model gateways, not
+operation catalogs. For each provider request, the request builder derives their
+schema from operations that are both model-exposed and currently available. Each
+operation becomes an exact `oneOf` branch with a single-value `op` enum and its
+registered `inputSchema`. `applyOperation` additionally accepts the `previewId`
+returned by an earlier preview. Registration changes and `available(ctx)` changes
+therefore take effect on the next request without mutating a global tool schema.
+Resolving or applying a `previewId` rechecks current model visibility and apply
+permission; a preview id never widens the model's capability surface.
+
+The framework validates operation input against `inputSchema` before calling the
+host preview function. This is structural JSON Schema validation only; domain
+rules, resource versions, permissions, history, and transaction policy remain
+host responsibilities. Unknown or unavailable model operations return bounded
+structured results with a stable code and `allowedValues`; low-level
+`aiditor.ai.operations.preview()` still throws for an unregistered operation,
+because that path is a trusted developer API.
 
 AI registries reject duplicate names by default. Use `{ replace: true }` in the
 registration metadata only when replacing an existing contribution is deliberate.

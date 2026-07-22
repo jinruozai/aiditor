@@ -100,6 +100,7 @@ aiditor.ai.tools.visible(name, requestContext, explicit)
 aiditor.ai.tools.visibleList(names, requestContext, explicit)
 aiditor.ai.tools.list(prefix)
 aiditor.ai.tools.meta(name)
+aiditor.ai.tools.schema(name, requestContext)
 ```
 
 Do not create a second tool registry. New framework code should use
@@ -136,6 +137,25 @@ Tool specs may also expose two model-visibility fields:
   exposeToModel: false,
 }
 ```
+
+A tool whose input contract depends on request-scoped capabilities may provide a
+schema resolver:
+
+```js
+{
+  schema: { type: 'object', properties: {} },
+  resolveSchema: function (requestContext) {
+    return currentInputSchema(requestContext)
+  },
+}
+```
+
+The registry keeps `schema` as the stable fallback. The request builder resolves
+and normalizes the request-local schema into that request's `toolSpecs`; it never
+mutates the registered fallback. This primitive exists for capability gateways
+such as `aiditor.previewOperation`, whose exact
+operation branches depend on `available(requestContext)`. Ordinary tools should
+continue to use a static `schema`.
 
 `available` is for runtime state such as "a workspace is currently open".
 `exposeToModel: false` is for low-level host escape hatches that remain callable

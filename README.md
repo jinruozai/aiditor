@@ -13,6 +13,9 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-2ea44f.svg)](./package.json)
 [![build](https://img.shields.io/badge/build-zero--build-555.svg)](./dist)
 
+> [!WARNING]
+> AIditor is in early development. Expect significant API and architecture changes between releases; production use is not recommended yet.
+
 AIditor gives host applications the shared foundation most serious editor UIs
 need: a Blender-style dock layout, panel/component runtime, themeable UI
 controls, command/menu/shortcut infrastructure, history and settings services,

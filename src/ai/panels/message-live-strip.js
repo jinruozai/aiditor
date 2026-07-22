@@ -60,13 +60,15 @@
     const started = state.startedAt || null
     const ended = state.completedAt || null
     if (started) parts.push(formatDuration((ended || Date.now()) - started))
-    if (state.turn != null) parts.push('turn ' + String(state.turn || 0))
-    if (state.firstTokenAt && started) parts.push('TTFT ' + formatDuration(state.firstTokenAt - started))
+    if (!state.responseMetrics && state.turn != null) parts.push('turn ' + String(state.turn || 0))
+    if (!state.responseMetrics && state.firstTokenAt && started) parts.push('TTFT ' + formatDuration(state.firstTokenAt - started))
     const total = state.totalTokens || usageNumber(state.usage, ['total_tokens', 'totalTokens'])
     const out = state.outputTokens || usageNumber(state.usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
     if (total) parts.push(String(total) + ' tok')
     else if (out) parts.push(String(out) + ' out')
-    const speedMs = state.firstTokenAt ? (ended || Date.now()) - state.firstTokenAt : (started ? (ended || Date.now()) - started : 0)
+    const speedMs = state.responseMetrics
+      ? state.generationMs
+      : (state.firstTokenAt ? (ended || Date.now()) - state.firstTokenAt : (started ? (ended || Date.now()) - started : 0))
     if (out && speedMs > 0) parts.push((out / Math.max(speedMs / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
     if (state.cost && state.cost.amount > 0) parts.push(formatCost(state.cost))
     return parts.join(' · ')

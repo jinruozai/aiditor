@@ -13,7 +13,7 @@
       providerName: spec.providerName || null,
       toolId: spec.toolId || spec.name || spec.tool || '',
       name: spec.name || spec.toolId || spec.tool || '',
-      args: spec.args || {},
+      args: Object.prototype.hasOwnProperty.call(spec, 'args') ? spec.args : {},
       status: spec.status || 'proposed',
       actor: actor || spec.actor || 'user',
       messageId: spec.messageId || null,
