@@ -11,9 +11,13 @@
       id: spec.id || 'tc_' + Date.now().toString(36) + '_' + nextToolCallId++,
       providerCallId: spec.providerCallId || null,
       providerName: spec.providerName || null,
+      providerToolId: spec.providerToolId || null,
+      providerArgs: Object.prototype.hasOwnProperty.call(spec, 'providerArgs') ? spec.providerArgs : null,
       toolId: spec.toolId || spec.name || spec.tool || '',
       name: spec.name || spec.toolId || spec.tool || '',
       args: Object.prototype.hasOwnProperty.call(spec, 'args') ? spec.args : {},
+      executorToolId: spec.executorToolId || null,
+      executorArgs: Object.prototype.hasOwnProperty.call(spec, 'executorArgs') ? spec.executorArgs : null,
       status: spec.status || 'proposed',
       actor: actor || spec.actor || 'user',
       messageId: spec.messageId || null,
@@ -134,13 +138,23 @@
     }
   }
 
+  function toolExecutorId(call) {
+    return call.executorToolId || call.toolId
+  }
+
+  function toolExecutorArgs(call) {
+    return call.executorArgs == null ? call.args : call.executorArgs
+  }
+
   function callToolPhase(agentId, callId, actor, phase) {
     const found = findToolCall(agentId, callId)
-    const tool = found && ai.tools.get(found.toolCall.toolId)
+    const tool = found && ai.tools.get(toolExecutorId(found.toolCall))
     const fn = tool && tool[phase]
     if (!fn) return null
     const ctx = createToolContext(found, actor)
-    const input = phase === 'apply' ? (found.toolCall.result || found.toolCall.preview || found.toolCall.args) : found.toolCall.args
+    const input = phase === 'apply'
+      ? (found.toolCall.result || found.toolCall.preview || toolExecutorArgs(found.toolCall))
+      : toolExecutorArgs(found.toolCall)
     return fn(input, ctx)
   }
 
@@ -262,9 +276,10 @@
     const found = findToolCall(agentId, callId)
     if (!found) return null
     const call = found.toolCall
-    const tool = ai.tools.get(call.toolId)
+    const executorId = toolExecutorId(call)
+    const tool = ai.tools.get(executorId)
     const who = actor || call.actor || 'user'
-    const capabilities = ai.tools.capabilities ? ai.tools.capabilities(call.toolId) : null
+    const capabilities = ai.tools.capabilities ? ai.tools.capabilities(executorId) : null
     const runId = found.message && found.message.meta && found.message.meta.runId || null
     const permissionDetails = {
       runId: runId,
@@ -272,6 +287,7 @@
       messageId: found.message && found.message.id || null,
       risk: capabilities && capabilities.risk || null,
       capabilities: capabilities,
+      executorToolId: executorId,
     }
     const canCall = ai.canUseTool(who, agentId, call.toolId, 'call', permissionDetails)
     const canApply = ai.canUseTool(who, agentId, call.toolId, 'apply', permissionDetails)

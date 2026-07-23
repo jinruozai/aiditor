@@ -65,7 +65,7 @@
       capabilities: Object.keys(props).map(function (prop) {
         return { op: 'demo.setProp', risk: 'edit', input: { componentId: entry.id, prop: prop } }
       }),
-      tools: ['aiditor.readReference', 'aiditor.applyOperation', 'demo.setProp'],
+      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -85,7 +85,7 @@
         options: optionsOf(spec),
       },
       capabilities: [{ op: 'demo.setProp', risk: 'edit' }],
-      tools: ['aiditor.readReference', 'aiditor.applyOperation', 'demo.setProp'],
+      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -209,7 +209,7 @@
         mode: themeMode(),
       },
       capabilities: [{ op: 'demo.setThemeToken', risk: 'edit' }, { op: 'demo.setThemeMode', risk: 'edit' }],
-      tools: ['aiditor.readReference', 'aiditor.applyOperation', 'demo.setThemeToken', 'demo.setThemeMode'],
+      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -225,7 +225,7 @@
         options: themeModes(),
       },
       capabilities: [{ op: 'demo.setThemeMode', risk: 'edit' }],
-      tools: ['aiditor.readReference', 'aiditor.applyOperation', 'demo.setThemeMode'],
+      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -559,48 +559,4 @@
     apply: applySetThemeMode,
   })
 
-  aiditor.ai.tools.register('demo.setProp', {
-    title: 'Set Demo Property',
-    description: 'Change an editable property in the AIditor component explorer demo. Use only prop keys returned by demo.property refs or by component meta.props; never invent keys such as children if they are not listed.',
-    schema: {
-      type: 'object',
-      required: ['componentId', 'prop', 'value'],
-      properties: {
-        componentId: { type: 'string', description: 'Demo component id, for example button or numberInput.' },
-        prop: { type: 'string', description: 'Editable property key from the property form.' },
-        value: { description: 'New JSON-serializable property value. Must match options for enum properties.' },
-      },
-    },
-    preview: previewSetProp,
-    apply: applySetProp,
-  })
-
-  aiditor.ai.tools.register('demo.setThemeToken', {
-    title: 'Set Demo Theme Token',
-    description: 'Change an AIditor component explorer theme token such as --aiditor-brand or --aiditor-surface-panel.',
-    schema: {
-      type: 'object',
-      required: ['token', 'value'],
-      properties: {
-        token: { type: 'string', description: 'CSS custom property name, for example --aiditor-brand.' },
-        value: { description: 'New token value. Use hex colors for palette tokens, numbers for px/ms tokens, or strings for font tokens.' },
-      },
-    },
-    preview: previewSetThemeToken,
-    apply: applySetThemeToken,
-  })
-
-  aiditor.ai.tools.register('demo.setThemeMode', {
-    title: 'Set Demo Theme Mode',
-    description: 'Switch the AIditor component explorer theme mode.',
-    schema: {
-      type: 'object',
-      required: ['mode'],
-      properties: {
-        mode: { type: 'string', enum: themeModes() },
-      },
-    },
-    preview: previewSetThemeMode,
-    apply: applySetThemeMode,
-  })
 })()

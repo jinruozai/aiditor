@@ -26,4 +26,8 @@ const circular = { id: 'root' }
 circular.self = circular
 assert.deepEqual(serialize.clone(circular), { id: 'root', self: '[Circular]' })
 
+assert.equal(serialize.stableStringify({ z: 1, nested: { b: 2, a: 1 } }), '{"nested":{"a":1,"b":2},"z":1}')
+assert.equal(serialize.hash({ value: 1, type: 'sample' }), serialize.hash({ type: 'sample', value: 1 }))
+assert.notEqual(serialize.hash({ value: 1 }), serialize.hash({ value: 2 }))
+
 console.log('ai serialize tests ok')

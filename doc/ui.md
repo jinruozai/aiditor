@@ -359,6 +359,13 @@ ai-messages
 ai-chat
 ```
 
+`ai-chatinput` defaults to its multiline `standard` layout. Set
+`props.layout: "inline"` for a compact single-row composer; when used through
+`ai-chat`, pass the same setting as `props.input.layout`. The inline layout keeps
+the existing rich references and all Agent controls, while its prompt accepts no
+line breaks. The underlying UI primitive is
+`aiditor.ui.richPromptInput({ singleLine: true })`.
+
 ## UI Library
 
 The UI library provides reusable components and primitive constructors. Generic

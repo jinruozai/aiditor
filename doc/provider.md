@@ -62,6 +62,8 @@ The default shape is:
 stream
 toolProtocol       native | text | none
 toolCalling
+toolArguments      strict | structured | json | none
+toolArgumentsFallback  structured | json | none
 outputProtocol     native | text
 reasoning
 multimodal
@@ -74,6 +76,33 @@ name. `toolCalling` is derived from it and is true unless the protocol is `none`
 `native` means the transport maps the provider's structured function/tool blocks
 to AIditor's canonical tool-call shape. `text` is the explicit JSON envelope
 fallback. `none` means no model-facing tools are exposed.
+
+`toolArguments` is independent from `toolProtocol`:
+
+```text
+strict       the connection can constrain generation with each registered Tool schema
+structured   the transport returns an already structured args value
+json         the transport returns a JSON string parsed once by its adapter
+none         Tool arguments are unavailable because Tool calling is unavailable
+```
+
+`toolProtocol: native` does not imply reliable arguments. A native envelope may
+still carry best-effort JSON strings. A connection may declare `strict` only when
+its transport implements schema-constrained Tool generation. The underlying
+transport also declares its honest fallback (`structured` or `json`). A Tool
+whose schema cannot be represented by the portable strict subset uses that
+fallback for the request and exposes the actual mode on its request-local Tool
+spec. No provider or model name is inspected at runtime to guess support.
+
+Gateway Tools may produce multiple request-local model specs, but every
+projection is forced to use that gateway as its internal executor. Model-facing
+operation specs use the operation id and direct `inputSchema`; the hidden route
+constructs the canonical `{ op, input }` executor arguments only after direct
+validation. This lets each operation strict-compile independently without a
+second registry or a wider permission surface. Runtime records the operation id
+and direct input as the semantic ToolCall, while `executorToolId` and
+`executorArgs` remain internal. Provider aliases are retained only to replay the
+assistant Tool call in the original wire shape.
 
 This is capability metadata, not a routing engine. The request builder includes
 it on provider requests so tools, UI, and diagnostics can inspect the selected
@@ -126,8 +155,9 @@ local-bridge
 codex-bridge
 ```
 
-Transport drivers declare one `toolProtocol` and send normalized requests. They
-return one canonical assistant shape regardless of the provider:
+Transport drivers declare `toolProtocol`, their argument representation, and
+whether they implement strict Tool schemas. They return one canonical assistant
+shape regardless of the provider:
 
 ```js
 {
@@ -142,6 +172,18 @@ return one canonical assistant shape regardless of the provider:
 
 OpenAI-compatible and Anthropic wire formats are adapter details. They must not
 leak into the Agent Runtime.
+
+The Runtime decodes every call in a response before it validates the batch and
+executes nothing until every call is valid. Parseable failed arguments stay on
+the semantic ToolCall for exact Provider replay. Diagnostics expose only a
+bounded canonical summary and stable hash. Union-schema details are expanded
+only for a uniquely tagged `const` or single-value `enum` branch; adapters do
+not infer fields or repair argument JSON.
+
+Streaming transports must classify Tool argument updates as `delta` or
+`snapshot` before handing them to the shared merger. Prefix comparison is not a
+protocol and must not be used to guess whether a provider sent an incremental
+fragment or a cumulative snapshot.
 
 ## Reliability Contract
 
@@ -230,6 +272,14 @@ public tool id.
 Tool schemas are normalized and validated when tools are registered. An object
 schema with `required` entries must define matching `properties`; invalid schemas
 are rejected before a provider request is made.
+
+For a strict-capable connection, the request adapter derives a provider schema
+from the registered Tool schema. Object properties are closed, optional
+properties use a nullable wire representation where required by strict APIs,
+and discriminated object unions remain constrained alternatives. The adapter
+removes only the nullable wire placeholders it introduced; it does not coerce or
+recursively parse field values. The Runtime then validates canonical `args`
+against the original registered schema before any Tool executes.
 
 ## Structured Final Output
 

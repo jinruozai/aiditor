@@ -57,12 +57,13 @@ preserved or deliberately replaced.
 | Source | Document | Notes |
 | --- | --- | --- |
 | `src/ai/name-generator.js` | [ai-runtime.md](./ai-runtime.md) | Agent name generation. |
-| `src/ai/schema.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | Shared JSON-schema normalization, validation, and structured-output parsing. |
+| `src/ai/schema.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | Shared JSON-schema normalization, concrete tagged-union diagnostics, strict Tool wire-schema compilation, and structured-output parsing. |
+| `src/ai/serialize.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | JSON-safe cloning plus canonical summaries and stable hashes for bounded AI diagnostics. |
 | `src/ai/permission.js` | [ai-permission-policy.md](./ai-permission-policy.md), [ai-runtime.md](./ai-runtime.md) | Permission resolver, default hierarchy policy, path rules, and audit log. |
 | `src/ai/store.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Complete in-memory Agent/message/quest state, JSON-safe snapshots, mutation version, attachments, and permission-scoped read facades. |
 | `src/ai/persistence.js` | [ai-persistence.md](./ai-persistence.md) | Complete IndexedDB transcript persistence, bootstrap manifest, async hydration merge, serialized saves, and storage adapters. |
 | `src/ai/compaction.js` | [ai-context-compaction.md](./ai-context-compaction.md), [ai-runtime.md](./ai-runtime.md) | Semantic compaction records, safe range planning, request filtering, and compaction context messages. |
-| `src/ai/runtime.js` | [ai-runtime.md](./ai-runtime.md) | Scheduler, runs, resume, tool approval flow. |
+| `src/ai/runtime.js` | [ai-runtime.md](./ai-runtime.md) | Scheduler, runs, resume, Tool approval, canonical projection routing, batch argument fidelity, and bounded same-run correction. |
 | `src/ai/checkpoints.js` | [ai-persistence.md](./ai-persistence.md) | Optional runtime checkpoint policy using the shared async storage adapter contract. |
 | `src/ai/evals.js` | [ai-evals.md](./ai-evals.md) | Sequential deterministic eval cases, evaluators, reports, and trace association. |
 | `src/ai/orchestration.js` | [ai-runtime.md](./ai-runtime.md) | Agent, quest, message tools. |
@@ -73,7 +74,7 @@ preserved or deliberately replaced.
 | `src/ai/context.js` | [ai-runtime.md](./ai-runtime.md) | Tool-call lifecycle and run context helpers. |
 | `src/ai/skills.js` | [ai-runtime.md](./ai-runtime.md) | Built-in framework skills, including runtime and library AIditor authoring skills. |
 | `src/ai/skill-packages.js` | [ai-skills.md](./ai-skills.md) | Bounded workspace `SKILL.md` package loading and on-demand resource access. |
-| `src/ai/reference.js` | [ai-registries.md](./ai-registries.md) | Reference provider and operation protocol with owner cleanup and dotted-prefix helpers. |
+| `src/ai/reference.js` | [ai-registries.md](./ai-registries.md), [ai.md](./ai.md) | Reference/operation protocol and direct request-local Operation Tool projections routed through the canonical preview/apply lifecycle. |
 | `src/ai/target.js` | [ai-registries.md](./ai-registries.md) | Add-to-chat targets, drag/drop, file targets. |
 | `src/ai/rich-prompt.js` | [ai-registries.md](./ai-registries.md) | Inline references in prompt text. |
 | `src/ai/change-set.js` | [ai-registries.md](./ai-registries.md) | Grouped review and apply/reject. |
@@ -90,7 +91,7 @@ preserved or deliberately replaced.
 | Source | Document | Notes |
 | --- | --- | --- |
 | `src/ai/provider.js` | [provider.md](./provider.md) | Provider helper utilities and usage cost. |
-| `src/ai/adapter.js` | [provider.md](./provider.md) | Provider message/tool formatting and text tool protocol. |
+| `src/ai/adapter.js` | [provider.md](./provider.md) | Provider message/tool formatting, one-time wire argument decoding, bounded diagnostics, and text Tool protocol. |
 | `src/ai/connection.js` | [provider.md](./provider.md) | Connection, auth driver, transport driver registries. |
 | `src/ai/provider-auth.js` | [provider.md](./provider.md) | Built-in auth drivers. |
 | `src/ai/provider-transports.js` | [provider.md](./provider.md) | Built-in transport drivers. |

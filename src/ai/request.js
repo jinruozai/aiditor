@@ -79,16 +79,36 @@
   function resolveTools(agent, ctx, toolRefs) {
     const refs = toolRefs || resolveToolRefs(agent, ctx, [], [])
     const out = []
+    const seen = {}
+    function append(spec) {
+      const id = spec && spec.id
+      if (seen[id]) throw new Error('Model Tool id conflict: ' + id)
+      seen[id] = true
+      out.push(spec)
+    }
     for (let i = 0; i < refs.length; i++) {
       const tool = ai.tools.get(refs[i])
-      out.push({
+      const base = {
         id: refs[i],
         title: tool.title || refs[i],
         description: tool.description || '',
-        schema: ai.tools.schema ? ai.tools.schema(refs[i], ctx) : (tool.schema || null),
         permissions: tool.permissions || null,
         capabilities: ai.tools.capabilities ? ai.tools.capabilities(refs[i]) : null,
-      })
+      }
+      const projections = typeof tool.resolveModelSpecs === 'function'
+        ? tool.resolveModelSpecs(ctx || {})
+        : null
+      if (projections) {
+        for (let j = 0; j < projections.length; j++) {
+          append(Object.assign({}, base, projections[j], {
+            route: Object.assign({}, projections[j].route || {}, { toolId: refs[i] }),
+          }))
+        }
+      } else {
+        append(Object.assign({}, base, {
+          schema: ai.tools.schema ? ai.tools.schema(refs[i], ctx) : (tool.schema || null),
+        }))
+      }
     }
     return out
   }
@@ -601,7 +621,7 @@
       lines.push('CURRENT_REQUEST_BLOCKED: Workspace-backed UI authoring requires the user to open or select a workspace.')
     }
     if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
-    if (!requestCtx || !(requestCtx.toolRefs || []).length) {
+    if (!requestCtx || !(requestCtx.modelToolIds || []).length) {
       lines.push('AVAILABLE_TOOLS: none. Report that the required capability is unavailable instead of imitating a tool call.')
     }
     const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
@@ -701,7 +721,7 @@
     const out = [runtimeGuideMessage(agent, requestCtx)]
     const output = outputSchemaMessage(requestCtx)
     const workspace = workspaceContextMessage(requestCtx, toolRefs)
-    const task = taskStateContextMessage(agent, input, requestCtx, toolRefs)
+    const task = taskStateContextMessage(agent, input, requestCtx, requestCtx && requestCtx.modelToolIds || toolRefs)
     const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
@@ -782,7 +802,10 @@
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
     const tools = connectionCapabilities.toolCalling ? resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext) : []
     baseCtx.toolRefs = tools
-    const toolSpecs = resolveTools(agent, baseCtx, tools)
+    const toolSpecs = ai.toolArguments && ai.toolArguments.prepareSpecs
+      ? ai.toolArguments.prepareSpecs(resolveTools(agent, baseCtx, tools), connectionCapabilities)
+      : resolveTools(agent, baseCtx, tools)
+    baseCtx.modelToolIds = toolSpecs.map(function (tool) { return tool.id })
     const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
@@ -814,11 +837,15 @@
         summary: 'provider request built',
         meta: {
           messageCount: messages.length,
-          toolCount: tools.length,
+          toolCount: toolSpecs.length,
+          gatewayCount: tools.length,
           toolRefs: tools.slice(),
           skillRefs: skillRefs.slice(),
           skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
           toolProtocol: connectionCapabilities.toolProtocol || 'none',
+          toolArguments: connectionCapabilities.toolArguments || 'none',
+          strictToolCount: toolSpecs.filter(function (tool) { return tool.argumentMode === 'strict' }).length,
+          bestEffortToolCount: toolSpecs.filter(function (tool) { return tool.argumentMode !== 'strict' }).length,
           stream: stream,
           contextItems: contextPack ? contextPack.items.length : 0,
           contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
@@ -843,6 +870,7 @@
       runtimeContext: baseCtx.runtimeContext,
       tools: tools,
       toolSpecs: toolSpecs,
+      modelToolIds: baseCtx.modelToolIds.slice(),
       skills: skillRefs,
       skillSpecs: skillSpecs,
       skillActivations: skillActivations,

@@ -462,6 +462,39 @@
   pointer-events: none;
 }
 
+.aiditor-richprompt-single-line {
+  height: var(--aiditor-size-h-lg);
+  min-height: var(--aiditor-size-h-lg);
+  overflow: hidden;
+  background: var(--aiditor-bg-2);
+  border: var(--aiditor-control-border-w) solid var(--aiditor-border-input);
+  border-radius: var(--aiditor-radius-control);
+  box-sizing: border-box;
+  transition: border-color var(--aiditor-dur-fast) var(--aiditor-ease),
+              box-shadow var(--aiditor-dur-med) var(--aiditor-ease),
+              background var(--aiditor-dur-fast) var(--aiditor-ease);
+}
+
+.aiditor-richprompt-single-line:hover {
+  border-color: var(--aiditor-border-hover);
+}
+
+.aiditor-richprompt-single-line:focus-within {
+  border-color: var(--aiditor-accent);
+  background: color-mix(in srgb, var(--aiditor-bg-2) 92%, var(--aiditor-accent));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aiditor-accent) 22%, transparent);
+}
+
+.aiditor-richprompt-editor-single-line {
+  height: 100%;
+  min-height: 0;
+  padding: 5px var(--aiditor-control-px);
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overflow-wrap: normal;
+}
+
 .aiditor-richprompt-token {
   display: inline-flex;
   align-items: center;

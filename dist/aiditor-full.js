@@ -5000,11 +5000,44 @@
     return out
   }
 
+  function stableStringify(value) {
+    return JSON.stringify(stableValue(value))
+  }
+
+  function stableValue(value) {
+    if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+    if (typeof value === 'bigint') return String(value)
+    if (typeof value === 'function') return '[Function]'
+    if (isDomLike(value)) return domLabel(value)
+    if (Array.isArray(value)) return value.map(function (item) {
+      return item === undefined ? null : stableValue(item)
+    })
+    const out = {}
+    const keys = Object.keys(value).sort()
+    for (let i = 0; i < keys.length; i++) {
+      const item = value[keys[i]]
+      if (item !== undefined) out[keys[i]] = stableValue(item)
+    }
+    return out
+  }
+
+  function hash(value) {
+    const text = stableStringify(value)
+    let valueHash = 2166136261
+    for (let i = 0; i < text.length; i++) {
+      valueHash ^= text.charCodeAt(i)
+      valueHash = Math.imul(valueHash, 16777619)
+    }
+    return 'fnv1a32:' + (valueHash >>> 0).toString(16).padStart(8, '0')
+  }
+
   ai.serialize = {
     stringify: stringify,
     clone: parseClone,
     compactString: compactString,
     compactValue: compactValue,
+    stableStringify: stableStringify,
+    hash: hash,
   }
 })(window.aiditor = window.aiditor || {})
 
@@ -5028,7 +5061,7 @@
       if (!properties || typeof properties !== 'object' || Array.isArray(properties)) throw schemaError('SCHEMA_INVALID_PROPERTIES', path + '.properties', 'Schema properties must be an object')
       out.properties = {}
       Object.keys(properties).forEach(function (key) {
-        out.properties[key] = normalize(properties[key] || {}, path + '.properties.' + key)
+        setOwn(out.properties, key, normalize(properties[key] || {}, path + '.properties.' + key))
       })
       const required = out.required || []
       for (let i = 0; i < required.length; i++) {
@@ -5061,14 +5094,15 @@
     const normalized = normalize(schema)
     const errors = []
     validateNode(value, normalized, '$', errors)
-    return { valid: !errors.length, errors: errors }
+    return { valid: !errors.length, errors: errors, error: bestError(errors) }
   }
 
   function assertValue(value, schema) {
     const result = validate(value, schema)
     if (result.valid) return value
-    const first = result.errors[0]
+    const first = result.error
     const err = schemaError('SCHEMA_VALUE_INVALID', first.path, first.message)
+    err.keyword = first.keyword
     err.errors = result.errors
     throw err
   }
@@ -5083,12 +5117,217 @@
     }
     const result = validate(value, schema)
     if (!result.valid) {
-      const first = result.errors[0]
+      const first = result.error
       const err = schemaError('OUTPUT_SCHEMA_INVALID', first.path, first.message)
+      err.keyword = first.keyword
       err.errors = result.errors
       throw err
     }
     return value
+  }
+
+  function strictTool(schema) {
+    const normalized = normalize(schema)
+    const types = schemaTypes(normalized.type)
+    if (!hasType(types, 'object')) throw strictSchemaError('schema', 'Tool arguments must use an object schema')
+    return strictNode(normalized, 'schema', true)
+  }
+
+  function strictNode(schema, path, root) {
+    assertStrictKeywords(schema, path)
+    if (schema.oneOf) return strictObjectUnion(schema, path)
+    if (schema.allOf || schema.not) throw strictSchemaError(path, 'allOf and not cannot be represented by the portable strict Tool schema')
+    const types = schemaTypes(schema.type)
+    const nullable = hasType(types, 'null')
+    const valueTypes = types.filter(function (type) { return type !== 'null' })
+    const pureNull = nullable && valueTypes.length === 0
+    if (valueTypes.length > 1) throw strictSchemaError(path + '.type', 'Multiple non-null types require an explicit anyOf')
+    const out = {}
+    copyStrictAnnotations(schema, out)
+    copyStrictConstraints(schema, out, path)
+    if (schema.enum) out.enum = schema.enum.slice()
+    if (Object.prototype.hasOwnProperty.call(schema, 'const')) out.enum = [schema.const]
+    if (schema.anyOf) {
+      out.anyOf = schema.anyOf.map(function (item, index) {
+        return strictNode(item, path + '.anyOf[' + index + ']', false)
+      })
+    }
+    const type = valueTypes[0]
+    if (pureNull) out.type = 'null'
+    if (!type && !pureNull && !schema.anyOf && !schema.enum && !Object.prototype.hasOwnProperty.call(schema, 'const')) {
+      throw strictSchemaError(path, 'Unconstrained values cannot be schema-constrained')
+    }
+    if (type === 'object') {
+      if (schema.additionalProperties && schema.additionalProperties !== false) {
+        throw strictSchemaError(path + '.additionalProperties', 'Open-ended object properties cannot be schema-constrained')
+      }
+      const properties = schema.properties || {}
+      const keys = Object.keys(properties)
+      if (!root && !keys.length && schema.additionalProperties !== false) {
+        throw strictSchemaError(path, 'Open-ended objects cannot be schema-constrained')
+      }
+      const required = schema.required || []
+      out.type = 'object'
+      out.properties = {}
+      out.required = keys.slice()
+      out.additionalProperties = false
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i]
+        const child = strictNode(properties[key], path + '.properties.' + key, false)
+        setOwn(out.properties, key, required.indexOf(key) >= 0 || acceptsNull(properties[key]) ? child : nullableSchema(child))
+      }
+    } else if (type === 'array') {
+      if (!schema.items) throw strictSchemaError(path + '.items', 'Array items must be defined for schema-constrained generation')
+      out.type = 'array'
+      out.items = strictNode(schema.items, path + '.items', false)
+    } else if (type) {
+      out.type = type
+    }
+    return nullable && !pureNull ? nullableSchema(out) : out
+  }
+
+  function strictObjectUnion(schema, path) {
+    const baseTypes = schemaTypes(schema.type)
+    if (baseTypes.length && !hasType(baseTypes, 'object')) throw strictSchemaError(path + '.oneOf', 'oneOf Tool alternatives must be objects')
+    const branches = schema.oneOf.map(function (branch, index) {
+      return strictNode(mergeObjectAlternative(schema, branch, path + '.oneOf[' + index + ']'), path + '.oneOf[' + index + ']', false)
+    })
+    const keys = []
+    for (let i = 0; i < branches.length; i++) {
+      if (branches[i].type !== 'object') throw strictSchemaError(path + '.oneOf[' + i + ']', 'oneOf Tool alternatives must be objects')
+      const branchKeys = Object.keys(branches[i].properties || {})
+      for (let j = 0; j < branchKeys.length; j++) if (keys.indexOf(branchKeys[j]) < 0) keys.push(branchKeys[j])
+    }
+    for (let k = 0; k < branches.length; k++) {
+      for (let m = 0; m < keys.length; m++) {
+        if (!Object.prototype.hasOwnProperty.call(branches[k].properties, keys[m])) setOwn(branches[k].properties, keys[m], { type: 'null' })
+      }
+      branches[k].required = keys.slice()
+      branches[k].additionalProperties = false
+    }
+    const out = { type: 'object', properties: {}, required: keys.slice(), additionalProperties: false, anyOf: branches }
+    copyStrictAnnotations(schema, out)
+    for (let n = 0; n < keys.length; n++) {
+      const alternatives = uniqueSchemas(branches.map(function (branch) { return branch.properties[keys[n]] }))
+      setOwn(out.properties, keys[n], alternatives.length === 1 ? alternatives[0] : { anyOf: alternatives })
+    }
+    return out
+  }
+
+  function mergeObjectAlternative(base, branch, path) {
+    const branchTypes = schemaTypes(branch.type)
+    if (branchTypes.length && !hasType(branchTypes, 'object')) throw strictSchemaError(path, 'oneOf Tool alternatives must be objects')
+    const out = Object.assign({}, branch, {
+      type: 'object',
+      properties: mergeProperties(base.properties, branch.properties),
+      required: uniqueStrings((base.required || []).concat(branch.required || [])),
+      additionalProperties: false,
+    })
+    delete out.oneOf
+    return out
+  }
+
+  function uniqueStrings(values) {
+    const out = []
+    for (let i = 0; i < values.length; i++) if (out.indexOf(values[i]) < 0) out.push(values[i])
+    return out
+  }
+
+  function uniqueSchemas(values) {
+    const out = []
+    const seen = {}
+    for (let i = 0; i < values.length; i++) {
+      const key = JSON.stringify(values[i])
+      if (seen[key]) continue
+      seen[key] = true
+      out.push(values[i])
+    }
+    return out
+  }
+
+  function restoreStrictTool(value, schema) {
+    return restoreStrictNode(value, normalize(schema))
+  }
+
+  function restoreStrictNode(value, schema) {
+    if (value == null) return value
+    if (schema.oneOf) {
+      const strict = strictObjectUnion(schema, 'schema')
+      for (let i = 0; i < schema.oneOf.length; i++) {
+        if (!validate(value, strict.anyOf[i]).valid) continue
+        return restoreStrictNode(value, mergeObjectAlternative(schema, schema.oneOf[i], 'schema.oneOf[' + i + ']'))
+      }
+    }
+    if (schema.anyOf) {
+      for (let i = 0; i < schema.anyOf.length; i++) {
+        const strict = strictNode(schema.anyOf[i], 'schema.anyOf[' + i + ']', false)
+        if (validate(value, strict).valid) return restoreStrictNode(value, schema.anyOf[i])
+      }
+    }
+    const types = schemaTypes(schema.type)
+    if (hasType(types, 'array') && Array.isArray(value) && schema.items) {
+      return value.map(function (item) { return restoreStrictNode(item, schema.items) })
+    }
+    if (hasType(types, 'object') && isObject(value)) {
+      const out = {}
+      const properties = schema.properties || {}
+      const required = schema.required || []
+      const keys = Object.keys(value)
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i]
+        const child = Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : null
+        if (child && value[key] === null && required.indexOf(key) < 0 && !acceptsNull(child)) continue
+        if (!child && value[key] === null) continue
+        setOwn(out, key, child ? restoreStrictNode(value[key], child) : value[key])
+      }
+      return out
+    }
+    return value
+  }
+
+  function nullableSchema(schema) {
+    if (schema.type && typeof schema.type === 'string') {
+      const out = Object.assign({}, schema)
+      out.type = [schema.type, 'null']
+      if (out.enum && out.enum.indexOf(null) < 0) out.enum = out.enum.concat([null])
+      return out
+    }
+    return { anyOf: [schema, { type: 'null' }] }
+  }
+
+  function acceptsNull(schema) {
+    const errors = []
+    validateNode(null, schema, '$', errors)
+    return !errors.length
+  }
+
+  function copyStrictAnnotations(source, target) {
+    if (source.title != null) target.title = source.title
+    if (source.description != null) target.description = source.description
+  }
+
+  function copyStrictConstraints(source, target, path) {
+    const keys = ['pattern', 'minLength', 'maxLength', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minItems', 'maxItems']
+    for (let i = 0; i < keys.length; i++) if (source[keys[i]] != null) target[keys[i]] = source[keys[i]]
+    if (source.uniqueItems) throw strictSchemaError(path + '.uniqueItems', 'uniqueItems is not supported by the portable strict Tool schema')
+  }
+
+  function assertStrictKeywords(schema, path) {
+    const allowed = {
+      type: true, enum: true, const: true, required: true, properties: true, additionalProperties: true,
+      items: true, anyOf: true, oneOf: true, allOf: true, not: true, pattern: true,
+      minLength: true, maxLength: true, minimum: true, maximum: true,
+      exclusiveMinimum: true, exclusiveMaximum: true, minItems: true, maxItems: true,
+      uniqueItems: true, title: true, description: true, default: true,
+    }
+    const keys = Object.keys(schema)
+    for (let i = 0; i < keys.length; i++) {
+      if (!allowed[keys[i]]) throw strictSchemaError(path + '.' + keys[i], 'Unsupported JSON Schema keyword for strict Tool generation')
+    }
+  }
+
+  function strictSchemaError(path, message) {
+    return schemaError('TOOL_SCHEMA_STRICT_UNSUPPORTED', path, message)
   }
 
   function unwrapJsonFence(text) {
@@ -5099,20 +5338,20 @@
 
   function validateNode(value, schema, path, errors) {
     if (schema.anyOf) {
-      if (!matchesCount(value, schema.anyOf, 1)) addError(errors, path, 'Value does not match any allowed schema')
+      validateUnion(value, schema.anyOf, path, errors, 'anyOf')
     }
     if (schema.oneOf) {
-      if (matchesCount(value, schema.oneOf) !== 1) addError(errors, path, 'Value must match exactly one schema')
+      validateUnion(value, schema.oneOf, path, errors, 'oneOf')
     }
     if (schema.allOf) {
       for (let i = 0; i < schema.allOf.length; i++) validateNode(value, schema.allOf[i], path, errors)
     }
-    if (schema.not && matchesCount(value, [schema.not])) addError(errors, path, 'Value matches a forbidden schema')
-    if (Object.prototype.hasOwnProperty.call(schema, 'const') && !sameValue(value, schema.const)) addError(errors, path, 'Value does not match const')
-    if (schema.enum && !schema.enum.some(function (item) { return sameValue(value, item) })) addError(errors, path, 'Value is not in enum')
+    if (schema.not && matchesCount(value, [schema.not])) addError(errors, path, 'Value matches a forbidden schema', 'not')
+    if (Object.prototype.hasOwnProperty.call(schema, 'const') && !sameValue(value, schema.const)) addError(errors, path, 'Value does not match const', 'const')
+    if (schema.enum && !schema.enum.some(function (item) { return sameValue(value, item) })) addError(errors, path, 'Value is not in enum', 'enum')
     const types = schemaTypes(schema.type)
     if (types.length && !types.some(function (type) { return matchesType(value, type) })) {
-      addError(errors, path, 'Expected ' + types.join(' or '))
+      addError(errors, path, 'Expected ' + types.join(' or '), 'type')
       return
     }
     if (value == null) return
@@ -5120,6 +5359,64 @@
     if (typeof value === 'number') validateNumber(value, schema, path, errors)
     if (Array.isArray(value)) validateArray(value, schema, path, errors)
     if (isObject(value)) validateObject(value, schema, path, errors)
+  }
+
+  function validateUnion(value, schemas, path, errors, keyword) {
+    const results = schemas.map(function (branch) {
+      const branchErrors = []
+      validateNode(value, branch, path, branchErrors)
+      return branchErrors
+    })
+    const matches = results.filter(function (branchErrors) { return !branchErrors.length }).length
+    if (keyword === 'anyOf' && matches) return
+    if (keyword === 'oneOf' && matches === 1) return
+    if (keyword === 'oneOf' && matches > 1) {
+      addError(errors, path, 'Value matches multiple oneOf branches', 'oneOf')
+      return
+    }
+    const branchIndex = discriminatedBranch(value, schemas)
+    if (branchIndex >= 0) {
+      for (let i = 0; i < results[branchIndex].length; i++) errors.push(results[branchIndex][i])
+      return
+    }
+    addError(errors, path, keyword === 'oneOf' ? 'Value does not match any oneOf branch' : 'Value does not match any allowed schema', keyword)
+  }
+
+  function discriminatedBranch(value, schemas) {
+    if (!isObject(value)) return -1
+    const keys = Object.keys(schemas[0].properties || {})
+    for (let i = 0; i < keys.length; i++) {
+      if (!Object.prototype.hasOwnProperty.call(value, keys[i])) continue
+      const literals = []
+      let complete = true
+      for (let j = 0; j < schemas.length; j++) {
+        const properties = schemas[j].properties
+        const property = properties && Object.prototype.hasOwnProperty.call(properties, keys[i]) ? properties[keys[i]] : null
+        const literal = discriminatorLiteral(property)
+        if (!literal) {
+          complete = false
+          break
+        }
+        literals.push(literal.value)
+      }
+      if (!complete || !uniqueValues(literals)) continue
+      for (let k = 0; k < literals.length; k++) if (sameValue(value[keys[i]], literals[k])) return k
+    }
+    return -1
+  }
+
+  function discriminatorLiteral(schema) {
+    if (!schema) return null
+    if (Object.prototype.hasOwnProperty.call(schema, 'const')) return { value: schema.const }
+    if (schema.enum && schema.enum.length === 1) return { value: schema.enum[0] }
+    return null
+  }
+
+  function uniqueValues(values) {
+    for (let i = 0; i < values.length; i++) {
+      for (let j = i + 1; j < values.length; j++) if (sameValue(values[i], values[j])) return false
+    }
+    return true
   }
 
   function matchesCount(value, schemas, stopAt) {
@@ -5134,24 +5431,24 @@
   }
 
   function validateString(value, schema, path, errors) {
-    if (schema.minLength != null && value.length < schema.minLength) addError(errors, path, 'String is shorter than minLength')
-    if (schema.maxLength != null && value.length > schema.maxLength) addError(errors, path, 'String is longer than maxLength')
-    if (schema.pattern != null && !(new RegExp(schema.pattern).test(value))) addError(errors, path, 'String does not match pattern')
+    if (schema.minLength != null && value.length < schema.minLength) addError(errors, path, 'String is shorter than minLength', 'minLength')
+    if (schema.maxLength != null && value.length > schema.maxLength) addError(errors, path, 'String is longer than maxLength', 'maxLength')
+    if (schema.pattern != null && !(new RegExp(schema.pattern).test(value))) addError(errors, path, 'String does not match pattern', 'pattern')
   }
 
   function validateNumber(value, schema, path, errors) {
-    if (schema.minimum != null && value < schema.minimum) addError(errors, path, 'Number is below minimum')
-    if (schema.maximum != null && value > schema.maximum) addError(errors, path, 'Number is above maximum')
-    if (schema.exclusiveMinimum != null && value <= schema.exclusiveMinimum) addError(errors, path, 'Number is not above exclusiveMinimum')
-    if (schema.exclusiveMaximum != null && value >= schema.exclusiveMaximum) addError(errors, path, 'Number is not below exclusiveMaximum')
+    if (schema.minimum != null && value < schema.minimum) addError(errors, path, 'Number is below minimum', 'minimum')
+    if (schema.maximum != null && value > schema.maximum) addError(errors, path, 'Number is above maximum', 'maximum')
+    if (schema.exclusiveMinimum != null && value <= schema.exclusiveMinimum) addError(errors, path, 'Number is not above exclusiveMinimum', 'exclusiveMinimum')
+    if (schema.exclusiveMaximum != null && value >= schema.exclusiveMaximum) addError(errors, path, 'Number is not below exclusiveMaximum', 'exclusiveMaximum')
   }
 
   function validateArray(value, schema, path, errors) {
-    if (schema.minItems != null && value.length < schema.minItems) addError(errors, path, 'Array has fewer than minItems')
-    if (schema.maxItems != null && value.length > schema.maxItems) addError(errors, path, 'Array has more than maxItems')
+    if (schema.minItems != null && value.length < schema.minItems) addError(errors, path, 'Array has fewer than minItems', 'minItems')
+    if (schema.maxItems != null && value.length > schema.maxItems) addError(errors, path, 'Array has more than maxItems', 'maxItems')
     if (schema.uniqueItems) {
       for (let i = 0; i < value.length; i++) {
-        for (let j = i + 1; j < value.length; j++) if (sameValue(value[i], value[j])) addError(errors, path, 'Array items must be unique')
+        for (let j = i + 1; j < value.length; j++) if (sameValue(value[i], value[j])) addError(errors, path, 'Array items must be unique', 'uniqueItems')
       }
     }
     if (schema.items) for (let k = 0; k < value.length; k++) validateNode(value[k], schema.items, path + '[' + k + ']', errors)
@@ -5161,13 +5458,13 @@
     const properties = schema.properties || {}
     const required = schema.required || []
     for (let i = 0; i < required.length; i++) {
-      if (!Object.prototype.hasOwnProperty.call(value, required[i])) addError(errors, path + '.' + required[i], 'Required property is missing')
+      if (!Object.prototype.hasOwnProperty.call(value, required[i])) addError(errors, path + '.' + required[i], 'Required property is missing', 'required')
     }
     const keys = Object.keys(value)
     for (let j = 0; j < keys.length; j++) {
       const key = keys[j]
-      if (properties[key]) validateNode(value[key], properties[key], path + '.' + key, errors)
-      else if (schema.additionalProperties === false) addError(errors, path + '.' + key, 'Additional property is not allowed')
+      if (Object.prototype.hasOwnProperty.call(properties, key)) validateNode(value[key], properties[key], path + '.' + key, errors)
+      else if (schema.additionalProperties === false) addError(errors, path + '.' + key, 'Additional property is not allowed', 'additionalProperties')
       else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') validateNode(value[key], schema.additionalProperties, path + '.' + key, errors)
     }
   }
@@ -5192,6 +5489,23 @@
   }
 
   function hasType(types, type) { return types.indexOf(type) >= 0 }
+  function setOwn(target, key, value) {
+    Object.defineProperty(target, key, {
+      value: value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+  }
+  function mergeProperties() {
+    const out = {}
+    for (let i = 0; i < arguments.length; i++) {
+      const source = arguments[i] || {}
+      const keys = Object.keys(source)
+      for (let j = 0; j < keys.length; j++) setOwn(out, keys[j], source[keys[j]])
+    }
+    return out
+  }
   function isObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value) }
   function matchesType(value, type) {
     if (type === 'null') return value === null
@@ -5217,7 +5531,36 @@
     }
     return true
   }
-  function addError(errors, path, message) { errors.push({ path: path, message: message }) }
+  function bestError(errors) {
+    let best = null
+    let bestScore = -Infinity
+    for (let i = 0; i < errors.length; i++) {
+      const error = errors[i]
+      const score = errorScore(error)
+      if (score > bestScore) {
+        best = error
+        bestScore = score
+      }
+    }
+    return best
+  }
+
+  function errorScore(error) {
+    const weak = error.keyword === 'oneOf' || error.keyword === 'anyOf' ? -1000 : 0
+    const depth = (String(error.path || '').match(/\.|\[/g) || []).length * 10
+    const priority = {
+      required: 9,
+      enum: 8,
+      const: 8,
+      minItems: 7,
+      maxItems: 7,
+      type: 6,
+      additionalProperties: 5,
+    }[error.keyword] || 0
+    return weak + depth + priority
+  }
+
+  function addError(errors, path, message, keyword) { errors.push({ path: path, message: message, keyword: keyword }) }
   function schemaError(code, path, message) {
     const err = new Error(message + ' at ' + path)
     err.code = code
@@ -5230,6 +5573,8 @@
     validate: validate,
     assert: assertValue,
     parse: parse,
+    strictTool: strictTool,
+    restoreStrictTool: restoreStrictTool,
   }
 })(window.aiditor = window.aiditor || {})
 
@@ -7797,15 +8142,27 @@
     const defaults = spec && spec.configDefaults || {}
     const transport = transportDrivers[spec && spec.transport && spec.transport.type] || {}
     const toolProtocol = caps.toolProtocol || transport.toolProtocol || 'none'
+    const toolArgumentsFallback = transport.toolArguments || (toolProtocol === 'none' ? 'none' : 'json')
+    const toolArguments = caps.toolArguments || toolArgumentsFallback
     const outputProtocol = caps.outputProtocol || transport.outputProtocol || 'text'
     if (toolProtocol !== 'native' && toolProtocol !== 'text' && toolProtocol !== 'none') {
       throw new Error('Unknown AI tool protocol: ' + toolProtocol)
     }
     if (outputProtocol !== 'native' && outputProtocol !== 'text') throw new Error('Unknown AI output protocol: ' + outputProtocol)
+    if (toolArguments !== 'strict' && toolArguments !== 'structured' && toolArguments !== 'json' && toolArguments !== 'none') {
+      throw new Error('Unknown AI Tool argument mode: ' + toolArguments)
+    }
+    if (toolProtocol === 'none' && toolArguments !== 'none') throw new Error('Tool argument mode requires a Tool protocol')
+    if (toolProtocol !== 'none' && toolArguments === 'none') throw new Error('Tool protocol requires a Tool argument mode')
+    if (toolArguments === 'strict' && transport.strictToolArguments !== true) {
+      throw new Error('Transport does not support strict Tool arguments: ' + (spec.transport && spec.transport.type || 'unknown'))
+    }
     return {
       stream: caps.stream != null ? !!caps.stream : defaults.stream !== false,
       toolProtocol: toolProtocol,
       toolCalling: toolProtocol !== 'none',
+      toolArguments: toolArguments,
+      toolArgumentsFallback: toolArguments === 'strict' ? toolArgumentsFallback : toolArguments,
       outputProtocol: outputProtocol,
       reasoning: !!caps.reasoning,
       multimodal: !!caps.multimodal,
@@ -8186,7 +8543,7 @@
       }, failed)
     }
     function failed(err) {
-      recordFailure(c.id, err)
+      if (!err || err.connectionNeutral !== true) recordFailure(c.id, err)
       if (!err || !err.retryable || attempt >= policy.maxAttempts || (signal && signal.aborted)) return Promise.reject(err)
       const delay = retryDelay(policy, attempt, err)
       if (ai.trace && ai.trace.append) {
@@ -8330,15 +8687,46 @@
   function openAiTools(request) {
     const specs = request.toolSpecs || []
     return specs.map(function (tool) {
-      return {
+      const out = {
         type: 'function',
         function: {
           name: toolName(tool.id, request),
           description: toolDescription(tool),
-          parameters: ai.normalizeToolSchema(tool.schema),
+          parameters: tool.providerSchema || ai.normalizeToolSchema(tool.schema),
         },
       }
+      if (tool.argumentMode === 'strict') out.function.strict = true
+      return out
     })
+  }
+
+  function prepareToolSpecs(specs, capabilities) {
+    const mode = capabilities && capabilities.toolArguments || 'none'
+    const fallback = capabilities && capabilities.toolArgumentsFallback || mode
+    return (specs || []).map(function (tool) {
+      const normalized = ai.normalizeToolSchema(tool.schema)
+      if (mode !== 'strict') return Object.assign({}, tool, { schema: normalized, argumentMode: mode })
+      try {
+        return Object.assign({}, tool, {
+          schema: normalized,
+          providerSchema: ai.schema.strictTool(normalized),
+          argumentMode: 'strict',
+        })
+      } catch (error) {
+        if (!error || error.code !== 'TOOL_SCHEMA_STRICT_UNSUPPORTED') throw error
+        return Object.assign({}, tool, {
+          schema: normalized,
+          argumentMode: fallback,
+          strictUnavailable: { code: error.code, path: error.path, message: error.message },
+        })
+      }
+    })
+  }
+
+  function toolSpec(request, id) {
+    const specs = request && request.toolSpecs || []
+    for (let i = 0; i < specs.length; i++) if (specs[i].id === id) return specs[i]
+    return null
   }
 
   function hasOwn(value, key) {
@@ -8351,23 +8739,100 @@
     try {
       return JSON.parse(value)
     } catch (cause) {
+      const position = jsonErrorPosition(cause, value)
+      const snippet = argumentSnippet(value, position)
       const err = new Error('Provider returned invalid JSON tool arguments')
       err.code = 'TOOL_ARGUMENTS_INVALID_JSON'
       err.cause = cause
+      err.argumentLength = value.length
+      err.parsePosition = position
+      err.argumentSnippet = snippet.text
+      err.snippetStart = snippet.start
+      err.connectionNeutral = true
       throw err
     }
   }
 
-  function toolCallArgs(call) {
+  function jsonErrorPosition(error, source) {
+    const message = String(error && error.message || '')
+    const match = message.match(/position\s+(\d+)/i)
+    if (match) return Number(match[1])
+    const lineColumn = message.match(/line\s+(\d+)\s+column\s+(\d+)/i)
+    if (lineColumn) {
+      const lines = String(source).split('\n')
+      let position = 0
+      const line = Math.max(1, Number(lineColumn[1]))
+      for (let i = 1; i < line && i <= lines.length; i++) position += lines[i - 1].length + 1
+      return position + Math.max(0, Number(lineColumn[2]) - 1)
+    }
+    return /(end of (json|data|input)|unexpected end|unterminated)/i.test(message) ? String(source).length : null
+  }
+
+  function argumentSnippet(value, position) {
+    const max = 160
+    const center = position == null ? 0 : position
+    const start = Math.max(0, Math.min(value.length, center) - Math.floor(max / 2))
+    return { start: start, text: value.slice(start, start + max) }
+  }
+
+  function decorateToolArgumentError(error, call, toolName) {
+    if (!error || error.code !== 'TOOL_ARGUMENTS_INVALID_JSON') return error
+    const fn = call && call.function || {}
+    error.toolName = toolName || call && (call.toolId || call.name || call.tool) || fn.name || ''
+    error.callId = call && (call.id || call.providerCallId) || null
+    const at = error.parsePosition == null ? 'unknown position' : 'position ' + error.parsePosition
+    const id = error.callId ? ' (' + error.callId + ')' : ''
+    error.message = 'Invalid JSON arguments for tool "' + (error.toolName || 'unknown') + '"' + id +
+      ' at ' + at + '; length ' + error.argumentLength + '; near ' + JSON.stringify(error.argumentSnippet)
+    return error
+  }
+
+  function toolArgumentErrorDetails(error) {
+    if (!error || (error.code !== 'TOOL_ARGUMENTS_INVALID_JSON' && error.code !== 'TOOL_ARGUMENTS_SCHEMA_INVALID')) return null
+    const details = {
+      code: error.code,
+      toolName: error.toolName || '',
+      callId: error.callId || null,
+      argumentMode: error.argumentMode || 'json',
+      recoveryAttempted: error.recoveryAttempted === true,
+      message: String(error.message || 'Tool arguments are invalid'),
+      retryable: error.retryable !== false,
+    }
+    if (error.code === 'TOOL_ARGUMENTS_INVALID_JSON') {
+      details.argumentLength = error.argumentLength
+      details.parsePosition = error.parsePosition
+      details.snippetStart = error.snippetStart
+      details.argumentSnippet = error.argumentSnippet || ''
+    } else {
+      details.path = error.path || '$'
+      details.keyword = error.keyword || null
+      details.schemaMessage = error.schemaMessage || error.message
+      details.argumentHash = error.argumentHash || null
+      details.argumentSummary = error.argumentSummary || ''
+    }
+    if (error.correctionAttempts != null) details.correctionAttempts = error.correctionAttempts
+    if (error.correctionReason) details.correctionReason = error.correctionReason
+    return details
+  }
+
+  function toolCallArgs(call, toolName) {
     const fn = call && call.function || null
     if (hasOwn(call, 'args')) return call.args === undefined ? {} : call.args
-    if (hasOwn(fn, 'arguments')) return decodeToolArguments(fn.arguments)
-    if (hasOwn(call, 'arguments')) return decodeToolArguments(call.arguments)
+    try {
+      if (hasOwn(fn, 'arguments')) return decodeToolArguments(fn.arguments)
+      if (hasOwn(call, 'arguments')) return decodeToolArguments(call.arguments)
+    } catch (error) {
+      throw decorateToolArgumentError(error, call, toolName)
+    }
     return {}
   }
 
-  function mergeArgumentDelta(current, delta) {
-    if (typeof delta === 'string') return (typeof current === 'string' ? current : '') + delta
+  function providerToolCallArgs(call) {
+    return hasOwn(call, 'providerArgs') && call.providerArgs != null ? call.providerArgs : toolCallArgs(call)
+  }
+
+  function mergeArgumentDelta(current, delta, update) {
+    if (typeof delta === 'string') return update === 'snapshot' ? delta : (typeof current === 'string' ? current : '') + delta
     return delta
   }
 
@@ -8383,11 +8848,11 @@
       if (delta.toolId) next.toolId = delta.toolId
       if (delta.name) next.name = delta.name
       if (hasOwn(delta, 'args')) next.args = delta.args
-      if (hasOwn(delta, 'arguments')) next.arguments = mergeArgumentDelta(next.arguments, delta.arguments)
+      if (hasOwn(delta, 'arguments')) next.arguments = mergeArgumentDelta(next.arguments, delta.arguments, delta.argumentUpdate)
       if (delta.function) {
         const fn = Object.assign({}, next.function || {})
         if (delta.function.name) fn.name = delta.function.name
-        if (hasOwn(delta.function, 'arguments')) fn.arguments = mergeArgumentDelta(fn.arguments, delta.function.arguments)
+        if (hasOwn(delta.function, 'arguments')) fn.arguments = mergeArgumentDelta(fn.arguments, delta.function.arguments, delta.argumentUpdate)
         next.function = fn
       }
       out[at] = next
@@ -8403,18 +8868,44 @@
   }
 
   function normalizeOpenAiToolCalls(calls, request) {
-    return (calls || []).map(function (call) {
+    const list = calls || []
+    const names = list.map(function (call) {
       const fn = call.function || {}
-      const providerName = fn.name || call.providerName || call.name || call.toolId || call.id
-      const id = toolIdFromName(providerName, request)
-      return {
-        id: call.id || null,
-        toolId: id,
-        name: id,
-        providerName: providerName,
-        args: toolCallArgs(call),
-      }
+      return toolIdFromName(fn.name || call.providerName || call.name || call.toolId || call.id, request)
     })
+    try {
+      return list.map(function (call, index) {
+        const fn = call.function || {}
+        const providerName = fn.name || call.providerName || call.name || call.toolId || call.id
+        const id = names[index]
+        const spec = toolSpec(request, id)
+        let args = toolCallArgs(call, id)
+        if (spec && spec.argumentMode === 'strict') args = ai.schema.restoreStrictTool(args, spec.schema)
+        return {
+          id: call.id || null,
+          toolId: id,
+          name: id,
+          providerName: providerName,
+          args: args,
+          argumentMode: spec && spec.argumentMode || 'json',
+        }
+      })
+    } catch (error) {
+      if (error && error.code === 'TOOL_ARGUMENTS_INVALID_JSON') {
+        const spec = toolSpec(request, error.toolName)
+        error.argumentMode = spec && spec.argumentMode || 'json'
+        error.expectedToolNames = names.slice()
+        error.toolCallBatch = list.map(function (call, index) {
+          const fn = call.function || {}
+          return {
+            callId: call.id || call.providerCallId || null,
+            providerName: fn.name || call.providerName || call.name || call.toolId || '',
+            toolId: names[index] || '',
+          }
+        })
+      }
+      throw error
+    }
   }
 
   function toolCallId(call) {
@@ -8479,7 +8970,7 @@
             type: 'function',
             function: {
               name: call.providerName || toolName(call.toolId || call.name, request),
-              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(toolCallArgs(call)) : JSON.stringify(toolCallArgs(call)),
+              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(providerToolCallArgs(call)) : JSON.stringify(providerToolCallArgs(call)),
             },
           }
         })
@@ -8540,7 +9031,7 @@
             type: 'tool_use',
             id: toolCallId(call),
             name: call.providerName || toolName(call.toolId || call.name, request),
-            input: toolCallArgs(call),
+            input: providerToolCallArgs(call),
           })
         }
         out.push({ role: role, content: blocks })
@@ -8574,11 +9065,13 @@
   function anthropicTools(request) {
     const specs = request.toolSpecs || []
     return specs.map(function (tool) {
-      return {
+      const out = {
         name: toolName(tool.id, request),
         description: toolDescription(tool),
-        input_schema: ai.normalizeToolSchema(tool.schema),
+        input_schema: tool.providerSchema || ai.normalizeToolSchema(tool.schema),
       }
+      if (tool.argumentMode === 'strict') out.strict = true
+      return out
     })
   }
 
@@ -8591,12 +9084,16 @@
       if (item.type === 'text' && item.text) text.push(item.text)
       if (item.type !== 'tool_use') continue
       const id = toolIdFromName(item.name || '', request)
+      const spec = toolSpec(request, id)
+      let args = hasOwn(item, 'input') ? item.input : {}
+      if (spec && spec.argumentMode === 'strict') args = ai.schema.restoreStrictTool(args, spec.schema)
       toolCalls.push({
         id: item.id || null,
         toolId: id,
         name: id,
         providerName: item.name || '',
-        args: hasOwn(item, 'input') ? item.input : {},
+        args: args,
+        argumentMode: spec && spec.argumentMode || 'structured',
       })
     }
     return { content: text.join(''), toolCalls: toolCalls }
@@ -8734,6 +9231,8 @@
   ai.toolArguments = {
     read: toolCallArgs,
     mergeDeltas: mergeToolCallDeltas,
+    errorDetails: toolArgumentErrorDetails,
+    prepareSpecs: prepareToolSpecs,
   }
   ai.toolAliasMap = toolAliasMap
   ai.openAiTools = openAiTools
@@ -9063,8 +9562,29 @@
     return n > 0 ? n : fallback
   }
 
+  function forcedToolIds(request) {
+    return request.toolChoice && request.toolChoice.mode === 'required' ? (request.toolChoice.tools || []) : []
+  }
+
+  function openAiToolChoice(request) {
+    const ids = forcedToolIds(request)
+    if (ids.length !== 1) return ids.length ? 'required' : 'auto'
+    return { type: 'function', function: { name: ai.toolAliasMap(request).byId[ids[0]] } }
+  }
+
+  function anthropicToolChoice(request) {
+    const ids = forcedToolIds(request)
+    if (ids.length !== 1) return ids.length ? { type: 'any' } : null
+    return { type: 'tool', name: ai.toolAliasMap(request).byId[ids[0]] }
+  }
+
+  function toolArgumentUpdates(calls, update) {
+    return (calls || []).map(function (call) { return Object.assign({}, call, { argumentUpdate: update }) })
+  }
+
   ai.registerTransport('mock', {
     toolProtocol: 'none',
+    toolArguments: 'none',
     outputProtocol: 'text',
     send: function (connection, request, ctx) {
       const config = ai.getConnectionConfig(connection.id)
@@ -9080,6 +9600,8 @@
 
   ai.registerTransport('openai-compatible', {
     toolProtocol: 'native',
+    toolArguments: 'json',
+    strictToolArguments: true,
     outputProtocol: 'text',
     models: function (connection, config) {
       return http.requestJson(http.joinUrl(config.baseUrl, '/models'), {
@@ -9103,7 +9625,7 @@
       }
       if (tools.length) {
         body.tools = tools
-        body.tool_choice = 'auto'
+        body.tool_choice = openAiToolChoice(request)
       }
       if (request.outputSchema && request.connectionCapabilities && request.connectionCapabilities.outputProtocol === 'native') {
         body.response_format = {
@@ -9124,7 +9646,7 @@
         const out = {
           text: ai.messageText(delta.content),
           reasoning_content: delta.reasoning_content || delta.reasoningContent || '',
-          toolCalls: delta.tool_calls || delta.toolCalls || [],
+          toolCalls: toolArgumentUpdates(delta.tool_calls || delta.toolCalls || [], hasDelta ? 'delta' : 'snapshot'),
           usage: data.usage || null,
           finishReason: choice.finish_reason || choice.finishReason || null,
         }
@@ -9162,6 +9684,8 @@
 
   ai.registerTransport('anthropic', {
     toolProtocol: 'native',
+    toolArguments: 'structured',
+    strictToolArguments: true,
     outputProtocol: 'text',
     models: function (connection, config) {
       const headers = http.authHeaders(config, 'anthropic')
@@ -9183,7 +9707,11 @@
         stream: !!(request.stream && config.stream),
       }
       const tools = ai.anthropicTools(request)
-      if (tools.length) body.tools = tools
+      if (tools.length) {
+        body.tools = tools
+        const toolChoice = anthropicToolChoice(request)
+        if (toolChoice) body.tool_choice = toolChoice
+      }
       headers['anthropic-version'] = '2023-06-01'
       const system = ai.anthropicSystem(request.messages)
       if (system) body.system = system
@@ -9195,7 +9723,7 @@
       }, function (data) {
         if (data.type === 'content_block_delta' && data.delta) {
           if (data.delta.type === 'input_json_delta') {
-            return { toolCalls: [{ index: data.index, function: { arguments: data.delta.partial_json || '' } }] }
+            return { toolCalls: [{ index: data.index, argumentUpdate: 'delta', function: { arguments: data.delta.partial_json || '' } }] }
           }
           return data.delta.text || ''
         }
@@ -9206,6 +9734,7 @@
                 index: data.index,
                 id: data.content_block.id,
                 type: 'function',
+                argumentUpdate: 'snapshot',
                 function: {
                   name: data.content_block.name,
                   arguments: Object.keys(data.content_block.input || {}).length ? JSON.stringify(data.content_block.input) : '',
@@ -9235,6 +9764,7 @@
 
   ai.registerTransport('local-bridge', {
     toolProtocol: 'native',
+    toolArguments: 'structured',
     outputProtocol: 'text',
     models: function (connection, config) {
       return http.requestJson(http.joinUrl(config.baseUrl, '/models'), {
@@ -9270,6 +9800,7 @@
 
   ai.registerTransport('codex-bridge', {
     toolProtocol: 'text',
+    toolArguments: 'json',
     outputProtocol: 'text',
     models: function (connection, config) {
       return http.requestJson(http.joinUrl(config.baseUrl, '/connections/' + connection.id + '/models'), { method: 'GET' })
@@ -9342,7 +9873,7 @@
   }
 
   connection('mock', 'Mock', 'mock', 'none', 'mock', { responsePrefix: 'Echo:', defaultModel: '', stream: false }, [], 10)
-  connection('openai-api', 'OpenAI API', 'openai', 'apiKey', 'openai-compatible', openAiDefaults, ['gpt-5.1', 'gpt-4.1'], 110, { outputProtocol: 'native' })
+  connection('openai-api', 'OpenAI API', 'openai', 'apiKey', 'openai-compatible', openAiDefaults, ['gpt-5.1', 'gpt-4.1'], 110, { outputProtocol: 'native', toolArguments: 'strict' })
   connection('openai-codex', 'ChatGPT / Codex Auth', 'openai', 'subscriptionBridge', 'codex-bridge', { baseUrl: 'http://127.0.0.1:8787', defaultModel: 'gpt-5.5', stream: true }, ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.3-codex', 'gpt-5.3-codex-spark'], 115)
   connection('openrouter', 'OpenRouter', 'openrouter', 'apiKey', 'openai-compatible', { baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', defaultModel: '', stream: true }, ['anthropic/claude-sonnet-4.5', 'openai/gpt-5', 'google/gemini-2.5-pro'], 130)
   connection('groq', 'Groq', 'groq', 'apiKey', 'openai-compatible', { baseUrl: 'https://api.groq.com/openai/v1', apiKey: '', defaultModel: '', stream: true }, ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile'], 140)
@@ -9351,7 +9882,7 @@
   connection('deepseek', 'DeepSeek', 'deepseek', 'apiKey', 'openai-compatible', { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', defaultModel: '', stream: true }, ['deepseek-v4-flash', 'deepseek-v4-pro'], 170)
   connection('ollama', 'Ollama', 'ollama', 'none', 'openai-compatible', { baseUrl: 'http://127.0.0.1:11434/v1', apiKey: '', defaultModel: '', stream: true }, ['llama3.2', 'qwen2.5-coder', 'deepseek-r1'], 180)
   connection('custom-openai', 'Custom OpenAI Compatible', 'custom', 'apiKey', 'openai-compatible', { baseUrl: '', apiKey: '', defaultModel: '', stream: true }, [], 190)
-  connection('anthropic-api', 'Anthropic API', 'anthropic', 'apiKey', 'anthropic', anthropicDefaults, ['claude-sonnet-4-5', 'claude-opus-4-1'], 210)
+  connection('anthropic-api', 'Anthropic API', 'anthropic', 'apiKey', 'anthropic', anthropicDefaults, ['claude-sonnet-4-5', 'claude-opus-4-1'], 210, { toolArguments: 'strict' })
   connection('claude-code', 'Claude Code Auth', 'anthropic', 'subscriptionBridge', 'local-bridge', { baseUrl: 'http://127.0.0.1:8787', apiKey: '', defaultModel: '', stream: true }, ['claude-sonnet-4-5', 'claude-opus-4-1'], 220)
   connection('local-bridge', 'Local Bridge', 'bridge', 'localBridge', 'local-bridge', localBridgeDefaults, [], 300)
 
@@ -9428,6 +9959,8 @@
     assertFree('ai.tools', tools, name, meta)
     if (tool.resolveSchema != null && typeof tool.resolveSchema !== 'function')
       throw new Error('ai.tools.register: resolveSchema must be a function for "' + name + '"')
+    if (tool.resolveModelSpecs != null && typeof tool.resolveModelSpecs !== 'function')
+      throw new Error('ai.tools.register: resolveModelSpecs must be a function for "' + name + '"')
     tool.schema = normalizeToolSchema(tool.schema)
     tools[name] = tool
     toolMeta[name] = normalizeMeta(meta)
@@ -9889,9 +10422,13 @@
       id: spec.id || 'tc_' + Date.now().toString(36) + '_' + nextToolCallId++,
       providerCallId: spec.providerCallId || null,
       providerName: spec.providerName || null,
+      providerToolId: spec.providerToolId || null,
+      providerArgs: Object.prototype.hasOwnProperty.call(spec, 'providerArgs') ? spec.providerArgs : null,
       toolId: spec.toolId || spec.name || spec.tool || '',
       name: spec.name || spec.toolId || spec.tool || '',
       args: Object.prototype.hasOwnProperty.call(spec, 'args') ? spec.args : {},
+      executorToolId: spec.executorToolId || null,
+      executorArgs: Object.prototype.hasOwnProperty.call(spec, 'executorArgs') ? spec.executorArgs : null,
       status: spec.status || 'proposed',
       actor: actor || spec.actor || 'user',
       messageId: spec.messageId || null,
@@ -10012,13 +10549,23 @@
     }
   }
 
+  function toolExecutorId(call) {
+    return call.executorToolId || call.toolId
+  }
+
+  function toolExecutorArgs(call) {
+    return call.executorArgs == null ? call.args : call.executorArgs
+  }
+
   function callToolPhase(agentId, callId, actor, phase) {
     const found = findToolCall(agentId, callId)
-    const tool = found && ai.tools.get(found.toolCall.toolId)
+    const tool = found && ai.tools.get(toolExecutorId(found.toolCall))
     const fn = tool && tool[phase]
     if (!fn) return null
     const ctx = createToolContext(found, actor)
-    const input = phase === 'apply' ? (found.toolCall.result || found.toolCall.preview || found.toolCall.args) : found.toolCall.args
+    const input = phase === 'apply'
+      ? (found.toolCall.result || found.toolCall.preview || toolExecutorArgs(found.toolCall))
+      : toolExecutorArgs(found.toolCall)
     return fn(input, ctx)
   }
 
@@ -10140,9 +10687,10 @@
     const found = findToolCall(agentId, callId)
     if (!found) return null
     const call = found.toolCall
-    const tool = ai.tools.get(call.toolId)
+    const executorId = toolExecutorId(call)
+    const tool = ai.tools.get(executorId)
     const who = actor || call.actor || 'user'
-    const capabilities = ai.tools.capabilities ? ai.tools.capabilities(call.toolId) : null
+    const capabilities = ai.tools.capabilities ? ai.tools.capabilities(executorId) : null
     const runId = found.message && found.message.meta && found.message.meta.runId || null
     const permissionDetails = {
       runId: runId,
@@ -10150,6 +10698,7 @@
       messageId: found.message && found.message.id || null,
       risk: capabilities && capabilities.risk || null,
       capabilities: capabilities,
+      executorToolId: executorId,
     }
     const canCall = ai.canUseTool(who, agentId, call.toolId, 'call', permissionDetails)
     const canApply = ai.canUseTool(who, agentId, call.toolId, 'apply', permissionDetails)
@@ -11755,6 +12304,10 @@
       normalized.inputSchema = ai.schema.normalize(normalized.inputSchema, 'operation.' + name + '.inputSchema')
     if (normalized.exposeToModel === true && !normalized.inputSchema)
       throw new Error('ai.operations.register: model-visible operation requires inputSchema for "' + name + '"')
+    if (normalized.exposeToModel === true && typeof (normalized.preview || normalized.plan || normalized.run) !== 'function')
+      throw new Error('ai.operations.register: model-visible operation requires preview for "' + name + '"')
+    if (normalized.exposeToModel === true && typeof normalized.apply !== 'function')
+      throw new Error('ai.operations.register: model-visible operation requires apply for "' + name + '"')
     operations[name] = normalized
     operationMeta[name] = normalizeMeta(meta)
     return operations[name]
@@ -11864,7 +12417,7 @@
         const errors = validation.errors.map(function (item) {
           return {
             code: 'SCHEMA_VALUE_INVALID',
-            path: item.path === '$' ? '$.input' : '$.input' + item.path.slice(1),
+            path: item.path,
             message: item.message,
           }
         })
@@ -11932,6 +12485,26 @@
       }
     }
     return { type: 'object', oneOf: variants }
+  }
+
+  function operationModelSpecs(ctx) {
+    const out = []
+    const names = modelOperationNames(ctx)
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i]
+      const spec = getOperation(name)
+      out.push({
+        id: name,
+        title: spec.title || name,
+        description: spec.description || ('Preview, review, and apply editor operation "' + name + '".'),
+        schema: clone(spec.inputSchema),
+        route: {
+          inputKey: 'input',
+          args: { op: name },
+        },
+      })
+    }
+    return out
   }
 
   function operationGatewayError(code, message, op, ctx, details) {
@@ -12057,6 +12630,7 @@
       exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
+      resolveModelSpecs: function () { return [] },
       available: function (ctx) { return modelOperationNames(ctx).length > 0 },
       run: function (args, ctx) {
         const unavailable = unavailableOperationResult(args, ctx)
@@ -12074,6 +12648,7 @@
       exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
+      resolveModelSpecs: function (ctx) { return operationModelSpecs(ctx) },
       preview: function (args, ctx) {
         if (args && args.previewId && previews[args.previewId]) {
           const resolved = previews[args.previewId]
@@ -17423,16 +17998,36 @@
   function resolveTools(agent, ctx, toolRefs) {
     const refs = toolRefs || resolveToolRefs(agent, ctx, [], [])
     const out = []
+    const seen = {}
+    function append(spec) {
+      const id = spec && spec.id
+      if (seen[id]) throw new Error('Model Tool id conflict: ' + id)
+      seen[id] = true
+      out.push(spec)
+    }
     for (let i = 0; i < refs.length; i++) {
       const tool = ai.tools.get(refs[i])
-      out.push({
+      const base = {
         id: refs[i],
         title: tool.title || refs[i],
         description: tool.description || '',
-        schema: ai.tools.schema ? ai.tools.schema(refs[i], ctx) : (tool.schema || null),
         permissions: tool.permissions || null,
         capabilities: ai.tools.capabilities ? ai.tools.capabilities(refs[i]) : null,
-      })
+      }
+      const projections = typeof tool.resolveModelSpecs === 'function'
+        ? tool.resolveModelSpecs(ctx || {})
+        : null
+      if (projections) {
+        for (let j = 0; j < projections.length; j++) {
+          append(Object.assign({}, base, projections[j], {
+            route: Object.assign({}, projections[j].route || {}, { toolId: refs[i] }),
+          }))
+        }
+      } else {
+        append(Object.assign({}, base, {
+          schema: ai.tools.schema ? ai.tools.schema(refs[i], ctx) : (tool.schema || null),
+        }))
+      }
     }
     return out
   }
@@ -17945,7 +18540,7 @@
       lines.push('CURRENT_REQUEST_BLOCKED: Workspace-backed UI authoring requires the user to open or select a workspace.')
     }
     if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
-    if (!requestCtx || !(requestCtx.toolRefs || []).length) {
+    if (!requestCtx || !(requestCtx.modelToolIds || []).length) {
       lines.push('AVAILABLE_TOOLS: none. Report that the required capability is unavailable instead of imitating a tool call.')
     }
     const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
@@ -18045,7 +18640,7 @@
     const out = [runtimeGuideMessage(agent, requestCtx)]
     const output = outputSchemaMessage(requestCtx)
     const workspace = workspaceContextMessage(requestCtx, toolRefs)
-    const task = taskStateContextMessage(agent, input, requestCtx, toolRefs)
+    const task = taskStateContextMessage(agent, input, requestCtx, requestCtx && requestCtx.modelToolIds || toolRefs)
     const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
@@ -18126,7 +18721,10 @@
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
     const tools = connectionCapabilities.toolCalling ? resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext) : []
     baseCtx.toolRefs = tools
-    const toolSpecs = resolveTools(agent, baseCtx, tools)
+    const toolSpecs = ai.toolArguments && ai.toolArguments.prepareSpecs
+      ? ai.toolArguments.prepareSpecs(resolveTools(agent, baseCtx, tools), connectionCapabilities)
+      : resolveTools(agent, baseCtx, tools)
+    baseCtx.modelToolIds = toolSpecs.map(function (tool) { return tool.id })
     const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
@@ -18158,11 +18756,15 @@
         summary: 'provider request built',
         meta: {
           messageCount: messages.length,
-          toolCount: tools.length,
+          toolCount: toolSpecs.length,
+          gatewayCount: tools.length,
           toolRefs: tools.slice(),
           skillRefs: skillRefs.slice(),
           skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
           toolProtocol: connectionCapabilities.toolProtocol || 'none',
+          toolArguments: connectionCapabilities.toolArguments || 'none',
+          strictToolCount: toolSpecs.filter(function (tool) { return tool.argumentMode === 'strict' }).length,
+          bestEffortToolCount: toolSpecs.filter(function (tool) { return tool.argumentMode !== 'strict' }).length,
           stream: stream,
           contextItems: contextPack ? contextPack.items.length : 0,
           contextTokens: contextPack ? contextPack.totalTokenEstimate : 0,
@@ -18187,6 +18789,7 @@
       runtimeContext: baseCtx.runtimeContext,
       tools: tools,
       toolSpecs: toolSpecs,
+      modelToolIds: baseCtx.modelToolIds.slice(),
       skills: skillRefs,
       skillSpecs: skillSpecs,
       skillActivations: skillActivations,
@@ -18215,6 +18818,7 @@
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
     maxDelegationDepth: 4,
+    maxToolArgumentCorrections: 2,
     limits: {
       maxTurns: 32,
       timeoutMs: 600000,
@@ -18294,25 +18898,120 @@
     const request = actor && actor.toolSpecs ? actor : null
     const who = request ? request.actor : actor
     const allowed = requestToolMap(request)
-    return (calls || []).map(function (call) {
-      if (!call.toolId && !call.tool && (call.function || call.arguments != null) && ai.normalizeOpenAiToolCalls) {
-        call = ai.normalizeOpenAiToolCalls([call], request || {})[0]
-      }
-      const id = call.id || call.providerCallId || ('tc_provider_' + Date.now().toString(36) + '_' + nextProviderToolCallId++)
-      const toolId = call.toolId || call.name || call.tool || ''
-      const denied = allowed && !allowed[toolId]
-      return Object.assign({}, call, {
-        id: id,
-        toolId: toolId,
-        name: call.name || call.toolId || call.tool || '',
-        args: ai.toolArguments.read(call),
-        status: denied ? 'failed' : (call.status || 'proposed'),
-        error: denied ? ('Tool was not available in this request: ' + toolId) : call.error,
-        actor: call.actor || who || 'user',
-        createdAt: call.createdAt || Date.now(),
-        updatedAt: call.updatedAt || Date.now(),
-      })
+    const list = calls || []
+    const aliases = request && ai.toolAliasMap ? ai.toolAliasMap(request) : { byName: {} }
+    const expectedNames = list.map(function (call) {
+      const providerName = call && call.function && call.function.name
+      return call.toolId || call.name || call.tool || aliases.byName[providerName] || providerName || ''
     })
+    const normalized = []
+    const batch = []
+    let firstError = null
+    for (let i = 0; i < list.length; i++) {
+      let call = list[i]
+      let id = call.id || call.providerCallId || ('tc_provider_' + Date.now().toString(36) + '_' + nextProviderToolCallId++)
+      let providerName = call && call.function && call.function.name || call.providerName || call.name || call.toolId || call.tool || ''
+      let providerToolId = expectedNames[i]
+      let spec = requestToolSpec(request, providerToolId)
+      let argumentMode = call.argumentMode || spec && spec.argumentMode || request && request.connectionCapabilities && request.connectionCapabilities.toolArguments || 'json'
+      let providerArgs = null
+      let hasArgs = false
+      try {
+        if (!call.toolId && !call.tool && (call.function || call.arguments != null) && ai.normalizeOpenAiToolCalls) {
+          call = ai.normalizeOpenAiToolCalls([call], request || {})[0]
+        }
+        id = call.id || call.providerCallId || id
+        providerName = call.providerName || providerName
+        providerToolId = call.toolId || call.name || call.tool || providerToolId
+        const denied = allowed && !allowed[providerToolId]
+        spec = requestToolSpec(request, providerToolId)
+        argumentMode = call.argumentMode || spec && spec.argumentMode || argumentMode
+        providerArgs = ai.toolArguments.read(call, providerToolId)
+        hasArgs = true
+        if (spec) assertToolArguments(providerArgs, spec, id, argumentMode)
+        const route = spec && spec.route
+        const executorToolId = route && route.toolId || null
+        const executorArgs = routeToolArguments(providerArgs, route)
+        normalized.push(Object.assign({}, call, {
+          id: id,
+          toolId: providerToolId,
+          name: providerToolId,
+          providerToolId: route ? providerToolId : null,
+          providerArgs: route ? providerArgs : null,
+          args: providerArgs,
+          executorToolId: executorToolId,
+          executorArgs: route ? executorArgs : null,
+          argumentMode: argumentMode,
+          status: denied ? 'failed' : (call.status || 'proposed'),
+          error: denied ? ('Tool was not available in this request: ' + providerToolId) : call.error,
+          actor: call.actor || who || 'user',
+          createdAt: call.createdAt || Date.now(),
+          updatedAt: call.updatedAt || Date.now(),
+        }))
+      } catch (error) {
+        if (!isToolArgumentError(error)) throw error
+        if (!firstError) firstError = error
+      }
+      batch.push({
+        callId: id,
+        providerName: providerName,
+        toolId: providerToolId,
+        argumentMode: argumentMode,
+        hasArgs: hasArgs,
+        args: hasArgs ? providerArgs : null,
+      })
+    }
+    if (firstError) {
+      const failedSpec = requestToolSpec(request, firstError.toolName)
+      if (!firstError.argumentMode) firstError.argumentMode = failedSpec && failedSpec.argumentMode || 'json'
+      firstError.expectedToolNames = expectedNames
+      Object.defineProperty(firstError, 'toolCallBatch', { value: batch, configurable: true })
+      throw firstError
+    }
+    return normalized
+  }
+
+  function routeToolArguments(args, route) {
+    if (!route) return args
+    if (route.inputKey) {
+      const out = Object.assign({}, route.args || {})
+      out[route.inputKey] = args
+      return out
+    }
+    return route.args ? Object.assign({}, args, route.args) : args
+  }
+
+  function requestToolSpec(request, id) {
+    const specs = request && request.toolSpecs || []
+    for (let i = 0; i < specs.length; i++) if (specs[i].id === id) return specs[i]
+    return null
+  }
+
+  function assertToolArguments(args, spec, callId, argumentMode) {
+    const result = ai.schema.validate(args, spec.schema)
+    if (result.valid) return
+    const first = result.error
+    const err = new Error('Tool arguments do not match the schema for "' + spec.id + '" at ' + first.path + ': ' + first.message)
+    err.code = 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+    err.toolName = spec.id
+    err.callId = callId || null
+    err.argumentMode = argumentMode
+    err.path = first.path
+    err.keyword = first.keyword
+    err.schemaMessage = first.message
+    err.schemaErrors = result.errors
+    err.argumentHash = toolArgumentHash(args)
+    err.argumentSummary = toolArgumentSummary(args)
+    err.connectionNeutral = true
+    throw err
+  }
+
+  function toolArgumentHash(args) {
+    return ai.serialize.hash(args)
+  }
+
+  function toolArgumentSummary(args) {
+    return ai.serialize.compactString(ai.serialize.stableStringify(args), 320)
   }
 
   function requestToolMap(request) {
@@ -18321,7 +19020,7 @@
     const specs = request.toolSpecs || []
     const refs = request.tools || []
     for (let i = 0; i < specs.length; i++) map[specs[i].id] = true
-    for (let j = 0; j < refs.length; j++) map[refs[j]] = true
+    if (!specs.length) for (let j = 0; j < refs.length; j++) map[refs[j]] = true
     return map
   }
 
@@ -18589,12 +19288,23 @@
     return shouldPublishStreamState(state, !!(delta && delta.usage)) ? publishStreamState(agentId, messageId, state, request) : ai.readMessage(agentId, messageId)
   }
 
-  function finishStreamingMessage(agentId, messageId, state, result, request) {
+  function finishStreamingMessage(agentId, messageId, state, result, request, normalizedToolCalls) {
     const message = normalizeProviderMessage(result || {}, request)
     const storedMessage = ai.readMessage(agentId, messageId)
     let content = message.content != null && (message.content !== '' || !state.content) ? message.content : state.content
     const reasoning = message.reasoning_content != null ? message.reasoning_content : (message.reasoningContent != null ? message.reasoningContent : state.reasoning_content)
-    const toolCalls = normalizeToolCalls(message.toolCalls || state.toolCalls, request)
+    let toolCalls = normalizedToolCalls
+    if (toolCalls == null) {
+      try {
+        toolCalls = normalizeToolCalls(message.toolCalls || state.toolCalls, request)
+      } catch (error) {
+        error.providerContent = content || ''
+        error.providerReasoning = reasoning || null
+        error.providerUsage = message.usage || result && result.usage || state.usage || null
+        error.providerFinishReason = resultFinishReason(message) || resultFinishReason(result) || state.finishReason || null
+        throw error
+      }
+    }
     const output = structuredOutput(content, toolCalls, request)
     const actionNote = content && hasActionBoundary(toolCalls) ? content : null
     if (actionNote) content = ''
@@ -18971,7 +19681,8 @@
     calls = calls || []
     for (let i = 0; i < calls.length; i++) {
       const id = calls[i] && (calls[i].toolId || calls[i].name)
-      if (id === 'agent.delegate' || id === 'agent.send') return true
+      const status = calls[i] && calls[i].status
+      if ((id === 'agent.delegate' || id === 'agent.send') && status !== 'failed' && status !== 'rejected') return true
     }
     return false
   }
@@ -19031,7 +19742,8 @@
   }
 
   function executeOneToolCall(agentId, call, actor) {
-    const tool = ai.tools.get(call.toolId)
+    const executorToolId = call.executorToolId || call.toolId
+    const tool = ai.tools.get(executorToolId)
     if (!tool) {
       trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_missing', status: 'failed', summary: 'tool not found' }))
       appendToolResult(agentId, call, { error: 'Tool not found: ' + call.toolId }, 'error')
@@ -19085,6 +19797,231 @@
     })
   }
 
+  function toolArgumentRecoveryMessage(error) {
+    const expected = error.expectedToolNames && error.expectedToolNames.length
+      ? error.expectedToolNames.join(', ')
+      : (error.toolName || 'unknown')
+    return {
+      id: 'system-tool-arguments-recovery-' + Date.now().toString(36),
+      from: 'system',
+      role: 'system',
+      status: 'done',
+      content: [
+        'TOOL_CALL_RECOVERY: The previous response selected Tool calls [' + expected + '] but emitted invalid JSON arguments for "' + (error.toolName || 'unknown') + '".',
+        'No Tool from that response was executed.',
+        'Regenerate exactly the same Tool-call set for the same user intent once, using the provider Tool interface and its strict schemas.',
+        'Do not add prose, omit a call, add a call, or claim that the previous calls ran.',
+      ].join('\n'),
+      meta: {
+        contextLayer: 'runtime',
+        contextCardId: 'tool-arguments-recovery',
+        contextPriority: 110,
+      },
+    }
+  }
+
+  function toolArgumentRecoveryRequest(request, error, correction) {
+    const names = uniqueToolNames(error.expectedToolNames && error.expectedToolNames.length ? error.expectedToolNames : [error.toolName])
+    return Object.assign({}, request, {
+      messages: (request.messages || []).concat([toolArgumentRecoveryMessage(error)]),
+      tools: (request.tools || []).slice(),
+      toolSpecs: (request.toolSpecs || []).filter(function (tool) { return names.indexOf(tool.id) >= 0 }),
+      toolChoice: { mode: 'required', tools: names.slice() },
+      toolArgumentRecoveryAttempt: correction.count,
+      toolArgumentCorrection: correction,
+    })
+  }
+
+  function uniqueToolNames(names) {
+    const out = []
+    for (let i = 0; i < (names || []).length; i++) if (names[i] && out.indexOf(names[i]) < 0) out.push(names[i])
+    return out
+  }
+
+  function canRecoverToolArguments(request, error) {
+    if (!request.connectionCapabilities || request.connectionCapabilities.toolArguments !== 'strict') return false
+    const names = uniqueToolNames(error.expectedToolNames && error.expectedToolNames.length ? error.expectedToolNames : [error.toolName])
+    if (!names.length) return false
+    for (let i = 0; i < names.length; i++) {
+      const spec = requestToolSpec(request, names[i])
+      if (!spec || spec.argumentMode !== 'strict' || !spec.providerSchema) return false
+    }
+    return true
+  }
+
+  function isToolArgumentError(error) {
+    return !!(error && (error.code === 'TOOL_ARGUMENTS_INVALID_JSON' || error.code === 'TOOL_ARGUMENTS_SCHEMA_INVALID'))
+  }
+
+  function toolArgumentFingerprint(error) {
+    return [
+      error.code || '',
+      error.toolName || '',
+      error.argumentHash || '',
+      error.path || '',
+      error.keyword || '',
+      error.parsePosition == null ? '' : error.parsePosition,
+      error.argumentLength == null ? '' : error.argumentLength,
+      error.argumentSnippet || '',
+      error.schemaMessage || '',
+    ].join('|')
+  }
+
+  function toolArgumentCorrectionDecision(request, error) {
+    const current = request.toolArgumentCorrection || { count: 0, fingerprints: [], hiddenUsed: false }
+    const fingerprint = toolArgumentFingerprint(error)
+    if (current.fingerprints.indexOf(fingerprint) >= 0) {
+      return { allowed: false, reason: 'repeated', state: current }
+    }
+    if (current.count >= runtimeConfig.maxToolArgumentCorrections) {
+      return { allowed: false, reason: 'budget', state: current }
+    }
+    return {
+      allowed: true,
+      reason: null,
+      state: {
+        count: current.count + 1,
+        fingerprints: current.fingerprints.concat([fingerprint]),
+        hiddenUsed: current.hiddenUsed,
+      },
+    }
+  }
+
+  function finalToolArgumentError(error, decision) {
+    error.retryable = false
+    error.correctionReason = decision.reason
+    error.correctionAttempts = decision.state.count
+    error.recoveryAttempted = decision.state.hiddenUsed
+    return error
+  }
+
+  function toolArgumentFailureCalls(error, request) {
+    const batch = error.toolCallBatch && error.toolCallBatch.length
+      ? error.toolCallBatch
+      : uniqueToolNames(error.expectedToolNames && error.expectedToolNames.length ? error.expectedToolNames : [error.toolName]).map(function (toolId) {
+        return { callId: null, providerName: '', toolId: toolId }
+      })
+    const details = Object.assign({}, ai.toolArguments.errorDetails(error), {
+      retryable: true,
+      correctionAttempt: request.toolArgumentCorrection.count,
+    })
+    return batch.map(function (item, index) {
+      const providerToolId = item.toolId || error.expectedToolNames && error.expectedToolNames[index] || error.toolName || ''
+      const spec = requestToolSpec(request, providerToolId)
+      const route = spec && spec.route
+      const callId = item.callId || 'tc_invalid_' + Date.now().toString(36) + '_' + nextProviderToolCallId++
+      const failed = error.callId ? callId === error.callId : providerToolId === error.toolName
+      const providerArgs = item.hasArgs ? item.args : {}
+      const payload = failed ? details : {
+        code: 'TOOL_BATCH_ABORTED',
+        toolName: providerToolId,
+        callId: callId,
+        argumentMode: spec && spec.argumentMode || error.argumentMode || 'json',
+        message: 'No Tool was executed because another call in the same batch had invalid arguments.',
+        retryable: true,
+        causedBy: error.toolName || null,
+        correctionAttempt: request.toolArgumentCorrection.count,
+      }
+      return {
+        id: callId,
+        providerCallId: callId,
+        providerName: item.providerName || '',
+        providerToolId: providerToolId,
+        providerArgs: providerArgs,
+        toolId: providerToolId,
+        name: providerToolId,
+        args: providerArgs,
+        executorToolId: route && route.toolId || null,
+        executorArgs: route ? routeToolArguments(providerArgs, route) : null,
+        argumentMode: spec && spec.argumentMode || error.argumentMode || 'json',
+        status: 'failed',
+        error: payload.message,
+        errorDetails: payload,
+        actor: request.actor || 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+    })
+  }
+
+  function finishToolArgumentCorrection(agentId, messageId, state, request, error) {
+    const calls = toolArgumentFailureCalls(error, request)
+    const result = {
+      role: 'assistant',
+      content: error.providerContent || state.content || '',
+      reasoning_content: error.providerReasoning || state.reasoning_content || null,
+      usage: error.providerUsage || state.usage || null,
+      finishReason: error.providerFinishReason || state.finishReason || 'tool_calls',
+    }
+    const message = finishStreamingMessage(agentId, messageId, state, result, request, calls)
+    trace({
+      type: 'tool_arguments_correction_requested',
+      runId: request.runId,
+      traceId: request.runId,
+      agentId: agentId,
+      messageId: messageId,
+      questId: request.input && request.input.questId || null,
+      phase: 'provider',
+      entry: error.toolName || '',
+      status: 'retrying',
+      summary: 'returning invalid Tool arguments to the model for correction',
+      meta: Object.assign({}, ai.toolArguments.errorDetails(error), {
+        correctionAttempt: request.toolArgumentCorrection.count,
+      }),
+    })
+    return { message: message, result: result, request: request }
+  }
+
+  function resetToolArgumentAttempt(agentId, messageId, state, request) {
+    state.content = ''
+    state.toolCalls = []
+    state.reasoning_content = ''
+    state.previewTail = ''
+    state.modelTail = ''
+    state.activityText = ''
+    state.previewUpdatedAt = null
+    state.firstTokenAt = null
+    state.usage = null
+    state.finishReason = null
+    state.runState = 'connecting'
+    state.publishedFirstPreview = false
+    state.publishedFirstTool = false
+    ai.updateMessage(agentId, messageId, {
+      content: '',
+      reasoning_content: null,
+      toolCalls: [],
+      status: 'running',
+    })
+    publishRunState(agentId, state, request, 'connecting', true)
+  }
+
+  function recoveryResultError(error) {
+    const out = new Error('Tool argument recovery did not reproduce the complete Tool-call batch for the original intent')
+    out.code = 'TOOL_ARGUMENTS_RECOVERY_FAILED'
+    out.connectionNeutral = true
+    out.recoveryAttempted = true
+    out.recoveryFor = ai.toolArguments.errorDetails(error)
+    return out
+  }
+
+  function recoveredToolBatch(error, calls) {
+    const expected = error.expectedToolNames && error.expectedToolNames.length
+      ? error.expectedToolNames
+      : [error.toolName || '']
+    if (calls.length !== expected.length) return false
+    const counts = {}
+    for (let i = 0; i < calls.length; i++) {
+      const name = calls[i].providerToolId || calls[i].toolId || calls[i].name || ''
+      counts[name] = (counts[name] || 0) + 1
+    }
+    for (let j = 0; j < expected.length; j++) {
+      const name = expected[j]
+      if (!name || !counts[name]) return false
+      counts[name]--
+    }
+    return true
+  }
+
   function runChatTurn(agentId, provider, request, ctx, controller, actor) {
     const inputMessage = request.input && request.input.id ? request.input : null
     const responseId = inputMessage && inputMessage.meta && inputMessage.meta.responseId || (inputMessage && inputMessage.id) || request.runId
@@ -19124,18 +20061,23 @@
       status: 'running',
       summary: 'assistant response started',
     })
+    let recoveryError = null
+    let recoveryCompleted = false
     function failTurn(err) {
       if (controller.signal.aborted) return null
       const completedAt = Date.now()
       const currentMessage = ai.readMessage(agentId, assistant.id) || assistant
+      const argumentDetails = ai.toolArguments.errorDetails(err) || err && err.recoveryFor || null
+      const errorMeta = {
+        error: String(err && err.message ? err.message : err),
+        errorCode: err && err.code || null,
+        finishReason: err && err.reason || state.finishReason || null,
+      }
+      if (argumentDetails) errorMeta.toolArguments = argumentDetails
       ai.updateMessage(agentId, assistant.id, {
         content: err && err.providerContent || currentMessage.content || '',
         status: 'error',
-        meta: Object.assign({}, currentMessage.meta || {}, {
-          error: String(err && err.message ? err.message : err),
-          errorCode: err && err.code || null,
-          finishReason: err && err.reason || state.finishReason || null,
-        }),
+        meta: Object.assign({}, currentMessage.meta || {}, errorMeta),
         stats: {
           runId: request.runId,
           startTime: state.startTime,
@@ -19146,15 +20088,39 @@
       state.completedAt = completedAt
       state.error = String(err && err.message ? err.message : err)
       publishRunState(agentId, state, request, 'error', true)
-      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error, meta: { code: err && err.code || null, finishReason: err && err.reason || state.finishReason || null } })
+      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error, meta: { code: err && err.code || null, finishReason: err && err.reason || state.finishReason || null, toolArguments: argumentDetails } })
       throw err
     }
-    return Promise.resolve().then(function () {
-      request.stream = request.stream || !!provider.stream
+    function completeProviderAttempt(attemptRequest, result, providerResult) {
+      assertProviderCompleted(state, result, attemptRequest)
+      const done = finishStreamingMessage(agentId, assistant.id, state, result, attemptRequest)
+      if (recoveryError && !recoveryCompleted) {
+        const expected = recoveryError.toolName || ''
+        const calls = done.toolCalls || []
+        if (!recoveredToolBatch(recoveryError, calls)) throw recoveryResultError(recoveryError)
+        recoveryCompleted = true
+        trace({
+          type: 'tool_arguments_recovery_completed',
+          runId: request.runId,
+          traceId: request.runId,
+          agentId: agentId,
+          messageId: assistant.id,
+          questId: inputMessage && inputMessage.questId || null,
+          phase: 'provider',
+          entry: expected,
+          status: 'completed',
+          summary: 'tool arguments recovered',
+          meta: { attempt: 1, toolName: expected },
+        })
+      }
+      return { message: done, result: providerResult || result, request: attemptRequest }
+    }
+    function sendAttempt(attemptRequest) {
+      attemptRequest.stream = attemptRequest.stream || !!provider.stream
       trace({
         type: 'provider_request_started',
-        runId: request.runId,
-        traceId: request.runId,
+        runId: attemptRequest.runId,
+        traceId: attemptRequest.runId,
         agentId: agentId,
         messageId: assistant.id,
         questId: inputMessage && inputMessage.questId || null,
@@ -19163,36 +20129,76 @@
         status: 'running',
         summary: request.connectionName + ' / ' + (request.agent.model || request.model || ''),
         meta: {
-          messageCount: request.messages ? request.messages.length : 0,
-          toolCount: request.tools ? request.tools.length : 0,
-          toolProtocol: request.connectionCapabilities && request.connectionCapabilities.toolProtocol || 'none',
+          messageCount: attemptRequest.messages ? attemptRequest.messages.length : 0,
+          toolCount: attemptRequest.tools ? attemptRequest.tools.length : 0,
+          toolProtocol: attemptRequest.connectionCapabilities && attemptRequest.connectionCapabilities.toolProtocol || 'none',
+          toolArguments: attemptRequest.connectionCapabilities && attemptRequest.connectionCapabilities.toolArguments || 'none',
+          toolArgumentRecoveryAttempt: attemptRequest.toolArgumentRecoveryAttempt || 0,
         },
       })
-      return provider.stream ? provider.stream(request, ctx) : provider.send(request, ctx)
-    }).then(function (result) {
-      if (controller.signal.aborted) return null
-      if (isIterable(result)) {
-        return consumeDeltas(agentId, assistant.id, state, result, request, controller).then(function () {
-          if (controller.signal.aborted) return null
-          const completed = completedStreamResult(state, null, request)
-          assertProviderCompleted(state, completed, request)
-          const done = finishStreamingMessage(agentId, assistant.id, state, completed, request)
-          return continueAfterTools(agentId, provider, done, done, request, controller, actor)
+      return Promise.resolve().then(function () {
+        return provider.stream ? provider.stream(attemptRequest, ctx) : provider.send(attemptRequest, ctx)
+      }).then(function (result) {
+        if (controller.signal.aborted) return null
+        if (isIterable(result)) {
+          return consumeDeltas(agentId, assistant.id, state, result, attemptRequest, controller).then(function () {
+            if (controller.signal.aborted) return null
+            const completed = completedStreamResult(state, null, attemptRequest)
+            return completeProviderAttempt(attemptRequest, completed, completed)
+          })
+        }
+        if (result && result.deltas && isIterable(result.deltas)) {
+          return consumeDeltas(agentId, assistant.id, state, result.deltas, attemptRequest, controller).then(function () {
+            if (controller.signal.aborted) return null
+            const completed = completedStreamResult(state, result, attemptRequest)
+            return completeProviderAttempt(attemptRequest, completed, result)
+          })
+        }
+        if (controller.signal.aborted) return null
+        return completeProviderAttempt(attemptRequest, result, result)
+      })
+    }
+    function handleToolArgumentError(err, attemptRequest) {
+      if (!isToolArgumentError(err)) throw err
+      const decision = toolArgumentCorrectionDecision(attemptRequest, err)
+      if (!decision.allowed) throw finalToolArgumentError(err, decision)
+      const useHiddenRecovery = canRecoverToolArguments(attemptRequest, err) && !decision.state.hiddenUsed
+      if (useHiddenRecovery) {
+        const correction = Object.assign({}, decision.state, { hiddenUsed: true })
+        const recoveryRequest = toolArgumentRecoveryRequest(attemptRequest, err, correction)
+        err.retryable = true
+        err.recoveryAttempted = true
+        recoveryError = err
+        trace({
+          type: 'tool_arguments_recovery_started',
+          runId: request.runId,
+          traceId: request.runId,
+          agentId: agentId,
+          messageId: assistant.id,
+          questId: inputMessage && inputMessage.questId || null,
+          phase: 'provider',
+          entry: err.toolName || '',
+          status: 'retrying',
+          summary: 'retrying invalid tool arguments with strict schemas',
+          meta: Object.assign({}, ai.toolArguments.errorDetails(err), { correctionAttempt: correction.count }),
         })
+        resetToolArgumentAttempt(agentId, assistant.id, state, attemptRequest)
+        return runAttempt(recoveryRequest)
       }
-      if (result && result.deltas && isIterable(result.deltas)) {
-        return consumeDeltas(agentId, assistant.id, state, result.deltas, request, controller).then(function () {
-          if (controller.signal.aborted) return null
-          const completed = completedStreamResult(state, result, request)
-          assertProviderCompleted(state, completed, request)
-          const done = finishStreamingMessage(agentId, assistant.id, state, completed, request)
-          return continueAfterTools(agentId, provider, done, result, request, controller, actor)
-        })
-      }
-      assertProviderCompleted(state, result, request)
-      const done = finishStreamingMessage(agentId, assistant.id, state, result, request)
-      return continueAfterTools(agentId, provider, done, result, request, controller, actor)
-    }).catch(failTurn)
+      err.retryable = true
+      err.recoveryAttempted = decision.state.hiddenUsed
+      const correctionRequest = Object.assign({}, attemptRequest, { toolArgumentCorrection: decision.state })
+      return finishToolArgumentCorrection(agentId, assistant.id, state, correctionRequest, err)
+    }
+    function runAttempt(attemptRequest) {
+      return sendAttempt(attemptRequest).catch(function (err) {
+        return handleToolArgumentError(err, attemptRequest)
+      })
+    }
+    return runAttempt(request).then(function (completed) {
+      if (!completed || controller.signal.aborted) return null
+      return continueAfterTools(agentId, provider, completed.message, completed.result, completed.request, controller, actor)
+    }, failTurn)
   }
 
   function continueAfterTools(agentId, provider, message, result, request, controller, actor) {
@@ -19242,6 +20248,7 @@
       nextRequest.input = request.input
       nextRequest.budget = request.budget
       nextRequest.startedAt = request.startedAt
+      nextRequest.toolArgumentCorrection = request.toolArgumentCorrection || null
       const nextCtx = ai.createRunContext(nextRequest, controller)
       return runChatTurn(agentId, provider, nextRequest, nextCtx, controller, actor)
     })
@@ -20264,6 +21271,7 @@
     if (next.maxConcurrentAgents != null) runtimeConfig.maxConcurrentAgents = next.maxConcurrentAgents
     if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
     if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
+    if (next.maxToolArgumentCorrections != null) runtimeConfig.maxToolArgumentCorrections = next.maxToolArgumentCorrections
     if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)
     scheduleQueuedAgents()
     return ai.runtimeConfig()
@@ -37634,6 +38642,15 @@
     return !aiditor.ai.richPrompt.refs(d).length && !d.text.trim()
   }
 
+  function singleLineDraft(draft) {
+    const d = aiditor.ai.richPrompt.normalize(draft)
+    if (d.text.indexOf('\n') < 0) return d
+    return aiditor.ai.richPrompt.normalize({
+      text: d.text.replace(/\n/g, ' '),
+      tokens: d.tokens,
+    })
+  }
+
   function indexOfNode(editor, targetNode, targetOffset) {
     let index = 0
     let found = false
@@ -37896,11 +38913,12 @@
     opts = opts || {}
     const value = ui.asSig(opts.value || aiditor.ai.richPrompt.empty())
     const disabled = ui.asSig(opts.disabled || false)
-    const root = ui.h('div', 'aiditor-richprompt')
-    const editor = ui.h('div', 'aiditor-richprompt-editor', {
+    const singleLine = opts.singleLine === true
+    const root = ui.h('div', 'aiditor-richprompt' + (singleLine ? ' aiditor-richprompt-single-line' : ''))
+    const editor = ui.h('div', 'aiditor-richprompt-editor' + (singleLine ? ' aiditor-richprompt-editor-single-line' : ''), {
       contenteditable: disabled() ? 'false' : 'true',
       role: 'textbox',
-      'aria-multiline': 'true',
+      'aria-multiline': singleLine ? 'false' : 'true',
       spellcheck: 'false',
     })
     if (opts.placeholder) editor.dataset.placeholder = opts.placeholder
@@ -37912,8 +38930,9 @@
     function commitFromDom() {
       if (composing) return
       const at = selectionIndex(editor, value.peek())
-      const shouldFlatten = hasDomNoise(editor)
-      const next = serialize(editor, value.peek())
+      const serialized = serialize(editor, value.peek())
+      const next = singleLine ? singleLineDraft(serialized) : serialized
+      const shouldFlatten = hasDomNoise(editor) || serialized.text !== next.text
       const clean = isBlankDraft(next) ? aiditor.ai.richPrompt.empty() : next
       lastKey = draftKey(clean)
       value.set(clean)
@@ -37924,7 +38943,8 @@
     }
 
     function renderExternal() {
-      const d = aiditor.ai.richPrompt.normalize(read(value))
+      const source = aiditor.ai.richPrompt.normalize(read(value))
+      const d = singleLine ? singleLineDraft(source) : source
       const key = draftKey(d)
       if (key === lastKey) return
       lastKey = key
@@ -37954,6 +38974,12 @@
       }
     })
     editor.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && (composing || ev.isComposing)) return
+      if (ev.key === 'Enter' && singleLine) {
+        ev.preventDefault()
+        if (opts.onSubmit) opts.onSubmit(ev)
+        return
+      }
       if (ev.key === 'Enter' && !ev.shiftKey && opts.onSubmit) {
         ev.preventDefault()
         opts.onSubmit(ev)
@@ -37964,11 +38990,11 @@
         insertDraftText('\n')
         return
       }
-      if (ev.key === 'ArrowUp' && moveCaretVertical(editor, -1)) {
+      if (!singleLine && ev.key === 'ArrowUp' && moveCaretVertical(editor, -1)) {
         ev.preventDefault()
         return
       }
-      if (ev.key === 'ArrowDown' && moveCaretVertical(editor, 1)) {
+      if (!singleLine && ev.key === 'ArrowDown' && moveCaretVertical(editor, 1)) {
         ev.preventDefault()
         return
       }
@@ -38006,7 +39032,8 @@
 
     root.__aiditorRichPromptEditor = editor
     root.__aiditorRichPromptInsertRefs = function (references) {
-      const d = isBlankDraft(value.peek()) ? aiditor.ai.richPrompt.empty() : value.peek()
+      const current = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const d = isBlankDraft(current) ? aiditor.ai.richPrompt.empty() : current
       const list = references || []
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
@@ -38023,20 +39050,22 @@
     }
 
     function replaceSelectionWithText(text) {
-      const d = value.peek()
+      const d = singleLine ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
-      const next = aiditor.ai.richPrompt.insertText(base, r.start, text)
+      const inserted = singleLine ? String(text || '').replace(/\r\n?|\n/g, ' ') : text
+      const next = aiditor.ai.richPrompt.insertText(base, r.start, inserted)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)
-      setCaret(editor, r.start + aiditor.ai.richPrompt.normalize({ text: text, tokens: {} }).text.length)
+      setCaret(editor, r.start + aiditor.ai.richPrompt.normalize({ text: inserted, tokens: {} }).text.length)
     }
 
     function replaceSelectionWithDraft(fragment) {
-      const d = value.peek()
+      const d = singleLine ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
-      const f = aiditor.ai.richPrompt.normalize(fragment)
+      const normalized = aiditor.ai.richPrompt.normalize(fragment)
+      const f = singleLine ? singleLineDraft(normalized) : normalized
       const next = aiditor.ai.richPrompt.insertDraft(base, r.start, f)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)
@@ -38345,6 +39374,8 @@
 
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
+    const layout = props.layout === 'inline' ? 'inline' : 'standard'
+    const inline = layout === 'inline'
     const connection = aiditor.signal(props.connection || defaultConnection())
     const model = aiditor.signal(props.model || defaultModel(connection.peek()))
     const permissionMode = aiditor.signal(props.permissionMode || 'full')
@@ -38368,7 +39399,7 @@
     const sendDisabled = aiditor.derived(function () { return !hasTarget() || (aiditor.ai.richPrompt.isEmpty(draft()) && !stoppable()) })
     const sendIcon = aiditor.derived(function () { return stoppable() && aiditor.ai.richPrompt.isEmpty(draft()) ? 'square' : 'arrow-up' })
 
-    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat' })
+    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat aiditor-ai-chat-' + layout })
     ui.collect(root, hasTarget.dispose)
     ui.collect(root, responseState.dispose)
     ui.collect(root, busy.dispose)
@@ -38377,7 +39408,7 @@
     ui.collect(root, sendDisabled.dispose)
     ui.collect(root, sendIcon.dispose)
 
-    const composer = ui.h('div', 'aiditor-ai-composer')
+    const composer = ui.h('div', 'aiditor-ai-composer aiditor-ai-composer-' + layout)
     if (aiditor.ai.installTargetDrop) {
       aiditor.ai.installTargetDrop(composer, {
         onDrop: function (targets) { insertTargets(targets) },
@@ -38395,11 +39426,11 @@
       value: draft,
       placeholder: 'Message current agent...',
       disabled: controlDisabled,
+      singleLine: inline,
       onSubmit: sendClick,
     })
     editor.classList.add('aiditor-ai-chat-input')
     editorWrap.appendChild(editor)
-    composer.appendChild(editorWrap)
 
     const actions = ui.h('div', 'aiditor-ai-chat-actions')
     const leftActions = ui.h('div', 'aiditor-ai-chat-actions-left')
@@ -38487,8 +39518,15 @@
     rightActions.appendChild(contextMeter)
     rightActions.appendChild(modelSlot)
     rightActions.appendChild(send)
-    actions.appendChild(leftActions)
-    actions.appendChild(rightActions)
+    if (inline) {
+      actions.appendChild(leftActions)
+      actions.appendChild(editorWrap)
+      actions.appendChild(rightActions)
+    } else {
+      composer.appendChild(editorWrap)
+      actions.appendChild(leftActions)
+      actions.appendChild(rightActions)
+    }
     composer.appendChild(actions)
     root.appendChild(composer)
 
@@ -39943,64 +40981,69 @@
 
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
-    const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-chat-combined')
+    const inputProps = props.input || {}
+    const inline = inputProps.layout === 'inline'
+    const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-chat-combined' + (inline ? ' aiditor-ai-chat-combined-inline' : ''))
     const messagesPane = ui.h('div', 'aiditor-ai-chat-combined-messages')
-    const splitter = ui.h('div', 'aiditor-ai-chat-combined-splitter', {
-      role: 'separator',
-      'aria-orientation': 'horizontal',
-      tabindex: '0',
-    })
     const inputPane = ui.h('div', 'aiditor-ai-chat-combined-input')
     const messageSpec = aiditor.resolveComponent('ai-messages')
     const inputSpec = aiditor.resolveComponent('ai-chatinput')
-    const inputSize = Number(props.inputSize || 230)
 
-    root.style.setProperty('--aiditor-ai-chat-input-size', inputSize + 'px')
     messagesPane.appendChild(messageSpec.factory(aiditor.signal(props.messages || {}), ctx))
-    inputPane.appendChild(inputSpec.factory(aiditor.signal(props.input || {}), ctx))
+    inputPane.appendChild(inputSpec.factory(aiditor.signal(inputProps), ctx))
     root.appendChild(messagesPane)
-    root.appendChild(splitter)
+    if (!inline) root.appendChild(createSplitter())
     root.appendChild(inputPane)
 
-    splitter.addEventListener('pointerdown', function (ev) {
-      if (ev.button !== 0) return
-      ev.preventDefault()
-      splitter.setPointerCapture(ev.pointerId)
-      root.classList.add('aiditor-ai-chat-combined-resizing')
-      const startY = ev.clientY
-      const startInput = inputPane.getBoundingClientRect().height
-      const move = function (moveEv) {
+    if (!inline) root.style.setProperty('--aiditor-ai-chat-input-size', Number(props.inputSize || 230) + 'px')
+
+    return root
+
+    function createSplitter() {
+      const splitter = ui.h('div', 'aiditor-ai-chat-combined-splitter', {
+        role: 'separator',
+        'aria-orientation': 'horizontal',
+        tabindex: '0',
+      })
+      splitter.addEventListener('pointerdown', function (ev) {
+        if (ev.button !== 0) return
+        ev.preventDefault()
+        splitter.setPointerCapture(ev.pointerId)
+        root.classList.add('aiditor-ai-chat-combined-resizing')
+        const startY = ev.clientY
+        const startInput = inputPane.getBoundingClientRect().height
+        const move = function (moveEv) {
+          const total = root.getBoundingClientRect().height
+          const minInput = Number(props.minInputSize || 140)
+          const minMessages = Number(props.minMessagesSize || 160)
+          const next = clamp(startInput - (moveEv.clientY - startY), minInput, Math.max(minInput, total - minMessages))
+          root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
+        }
+        const up = function (upEv) {
+          if (splitter.releasePointerCapture) splitter.releasePointerCapture(upEv.pointerId)
+          root.classList.remove('aiditor-ai-chat-combined-resizing')
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', up)
+          window.removeEventListener('pointercancel', up)
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+        window.addEventListener('pointercancel', up)
+      })
+
+      splitter.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return
+        ev.preventDefault()
+        const current = inputPane.getBoundingClientRect().height
         const total = root.getBoundingClientRect().height
         const minInput = Number(props.minInputSize || 140)
         const minMessages = Number(props.minMessagesSize || 160)
-        const next = clamp(startInput - (moveEv.clientY - startY), minInput, Math.max(minInput, total - minMessages))
+        const dir = ev.key === 'ArrowUp' ? 1 : -1
+        const next = clamp(current + dir * 24, minInput, Math.max(minInput, total - minMessages))
         root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
-      }
-      const up = function (upEv) {
-        if (splitter.releasePointerCapture) splitter.releasePointerCapture(upEv.pointerId)
-        root.classList.remove('aiditor-ai-chat-combined-resizing')
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', up)
-        window.removeEventListener('pointercancel', up)
-      }
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', up)
-      window.addEventListener('pointercancel', up)
-    })
-
-    splitter.addEventListener('keydown', function (ev) {
-      if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return
-      ev.preventDefault()
-      const current = inputPane.getBoundingClientRect().height
-      const total = root.getBoundingClientRect().height
-      const minInput = Number(props.minInputSize || 140)
-      const minMessages = Number(props.minMessagesSize || 160)
-      const dir = ev.key === 'ArrowUp' ? 1 : -1
-      const next = clamp(current + dir * 24, minInput, Math.max(minInput, total - minMessages))
-      root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
-    })
-
-    return root
+      })
+      return splitter
+    }
   }
 
   aiditor.registerComponent('ai-chat', {

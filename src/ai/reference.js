@@ -208,6 +208,10 @@
       normalized.inputSchema = ai.schema.normalize(normalized.inputSchema, 'operation.' + name + '.inputSchema')
     if (normalized.exposeToModel === true && !normalized.inputSchema)
       throw new Error('ai.operations.register: model-visible operation requires inputSchema for "' + name + '"')
+    if (normalized.exposeToModel === true && typeof (normalized.preview || normalized.plan || normalized.run) !== 'function')
+      throw new Error('ai.operations.register: model-visible operation requires preview for "' + name + '"')
+    if (normalized.exposeToModel === true && typeof normalized.apply !== 'function')
+      throw new Error('ai.operations.register: model-visible operation requires apply for "' + name + '"')
     operations[name] = normalized
     operationMeta[name] = normalizeMeta(meta)
     return operations[name]
@@ -317,7 +321,7 @@
         const errors = validation.errors.map(function (item) {
           return {
             code: 'SCHEMA_VALUE_INVALID',
-            path: item.path === '$' ? '$.input' : '$.input' + item.path.slice(1),
+            path: item.path,
             message: item.message,
           }
         })
@@ -385,6 +389,26 @@
       }
     }
     return { type: 'object', oneOf: variants }
+  }
+
+  function operationModelSpecs(ctx) {
+    const out = []
+    const names = modelOperationNames(ctx)
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i]
+      const spec = getOperation(name)
+      out.push({
+        id: name,
+        title: spec.title || name,
+        description: spec.description || ('Preview, review, and apply editor operation "' + name + '".'),
+        schema: clone(spec.inputSchema),
+        route: {
+          inputKey: 'input',
+          args: { op: name },
+        },
+      })
+    }
+    return out
   }
 
   function operationGatewayError(code, message, op, ctx, details) {
@@ -510,6 +534,7 @@
       exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
+      resolveModelSpecs: function () { return [] },
       available: function (ctx) { return modelOperationNames(ctx).length > 0 },
       run: function (args, ctx) {
         const unavailable = unavailableOperationResult(args, ctx)
@@ -527,6 +552,7 @@
       exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
+      resolveModelSpecs: function (ctx) { return operationModelSpecs(ctx) },
       preview: function (args, ctx) {
         if (args && args.previewId && previews[args.previewId]) {
           const resolved = previews[args.previewId]

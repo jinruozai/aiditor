@@ -33,15 +33,27 @@
     const defaults = spec && spec.configDefaults || {}
     const transport = transportDrivers[spec && spec.transport && spec.transport.type] || {}
     const toolProtocol = caps.toolProtocol || transport.toolProtocol || 'none'
+    const toolArgumentsFallback = transport.toolArguments || (toolProtocol === 'none' ? 'none' : 'json')
+    const toolArguments = caps.toolArguments || toolArgumentsFallback
     const outputProtocol = caps.outputProtocol || transport.outputProtocol || 'text'
     if (toolProtocol !== 'native' && toolProtocol !== 'text' && toolProtocol !== 'none') {
       throw new Error('Unknown AI tool protocol: ' + toolProtocol)
     }
     if (outputProtocol !== 'native' && outputProtocol !== 'text') throw new Error('Unknown AI output protocol: ' + outputProtocol)
+    if (toolArguments !== 'strict' && toolArguments !== 'structured' && toolArguments !== 'json' && toolArguments !== 'none') {
+      throw new Error('Unknown AI Tool argument mode: ' + toolArguments)
+    }
+    if (toolProtocol === 'none' && toolArguments !== 'none') throw new Error('Tool argument mode requires a Tool protocol')
+    if (toolProtocol !== 'none' && toolArguments === 'none') throw new Error('Tool protocol requires a Tool argument mode')
+    if (toolArguments === 'strict' && transport.strictToolArguments !== true) {
+      throw new Error('Transport does not support strict Tool arguments: ' + (spec.transport && spec.transport.type || 'unknown'))
+    }
     return {
       stream: caps.stream != null ? !!caps.stream : defaults.stream !== false,
       toolProtocol: toolProtocol,
       toolCalling: toolProtocol !== 'none',
+      toolArguments: toolArguments,
+      toolArgumentsFallback: toolArguments === 'strict' ? toolArgumentsFallback : toolArguments,
       outputProtocol: outputProtocol,
       reasoning: !!caps.reasoning,
       multimodal: !!caps.multimodal,
@@ -422,7 +434,7 @@
       }, failed)
     }
     function failed(err) {
-      recordFailure(c.id, err)
+      if (!err || err.connectionNeutral !== true) recordFailure(c.id, err)
       if (!err || !err.retryable || attempt >= policy.maxAttempts || (signal && signal.aborted)) return Promise.reject(err)
       const delay = retryDelay(policy, attempt, err)
       if (ai.trace && ai.trace.append) {

@@ -164,8 +164,14 @@ assert.equal(ai.getConnectionConfig('openai-codex').defaultModel, 'gpt-5.5')
 assert.deepEqual(ai.modelHints('openai-codex').slice(0, 2), ['gpt-5.5', 'gpt-5.5-pro'])
 assert.equal(ai.connectionCapabilities('deepseek').toolProtocol, 'native')
 assert.equal(ai.connectionCapabilities('deepseek').toolCalling, true)
+assert.equal(ai.connectionCapabilities('deepseek').toolArguments, 'json')
+assert.equal(ai.connectionCapabilities('openai-api').toolArguments, 'strict')
+assert.equal(ai.connectionCapabilities('anthropic-api').toolArguments, 'strict')
+assert.equal(ai.connectionCapabilities('local-bridge').toolArguments, 'structured')
 assert.equal(ai.connectionCapabilities('openai-codex').toolProtocol, 'text')
+assert.equal(ai.connectionCapabilities('openai-codex').toolArguments, 'json')
 assert.equal(ai.connectionCapabilities('mock').toolProtocol, 'none')
+assert.equal(ai.connectionCapabilities('mock').toolArguments, 'none')
 assert.equal(ai.connectionCapabilities('openai-api').outputProtocol, 'native')
 assert.equal(ai.connectionCapabilities('deepseek').outputProtocol, 'text')
 ai.registerTransport('invalid-protocol', { toolProtocol: 'xml' })
@@ -239,12 +245,16 @@ const openAiToolReply = await ai.sendViaConnection('openai-api', {
   model: '',
   stream: true,
   messages: [{ role: 'user', content: 'use tool' }],
-  toolSpecs: [{ id: 'gde.queryRows', title: 'Query Rows', description: 'Read rows', schema: { table: 'string', limit: 'number' } }],
+  toolSpecs: ai.toolArguments.prepareSpecs([{ id: 'gde.queryRows', title: 'Query Rows', description: 'Read rows', schema: { table: 'string', limit: 'number' } }], ai.connectionCapabilities('openai-api')),
+  toolChoice: { mode: 'required', tools: ['gde.queryRows'] },
 }, { signal: null })
 const openAiToolBody = JSON.parse(calls.at(-1).opts.body)
 assert.equal(openAiToolBody.stream, true)
 assert.equal(openAiToolBody.tools[0].function.name, 'gde__queryRows')
-assert.deepEqual(openAiToolBody.tools[0].function.parameters.properties.table, { type: 'string' })
+assert.equal(openAiToolBody.tools[0].function.strict, true)
+assert.deepEqual(openAiToolBody.tools[0].function.parameters.required, ['table', 'limit'])
+assert.deepEqual(openAiToolBody.tool_choice, { type: 'function', function: { name: 'gde__queryRows' } })
+assert.deepEqual(openAiToolBody.tools[0].function.parameters.properties.table, { type: ['string', 'null'] })
 assert.deepEqual(openAiToolReply.toolCalls, [])
 
 const deepSeekToolReply = await ai.sendViaConnection('deepseek', {
@@ -357,11 +367,14 @@ const anthropicToolReply = await ai.sendViaConnection('anthropic-api', {
   model: '',
   stream: false,
   messages: [{ role: 'user', content: 'anthropic tool' }],
-  toolSpecs: [{ id: 'agent.create', description: 'Create an agent', schema: { name: 'string' } }],
+  toolSpecs: ai.toolArguments.prepareSpecs([{ id: 'agent.create', description: 'Create an agent', schema: { name: 'string' } }], ai.connectionCapabilities('anthropic-api')),
+  toolChoice: { mode: 'required', tools: ['agent.create'] },
 }, { signal: null })
 const anthropicToolBody = JSON.parse(calls.at(-1).opts.body)
 assert.equal(anthropicToolBody.tools[0].name, 'agent__create')
-assert.equal(anthropicToolBody.tools[0].input_schema.properties.name.type, 'string')
+assert.equal(anthropicToolBody.tools[0].strict, true)
+assert.deepEqual(anthropicToolBody.tool_choice, { type: 'tool', name: 'agent__create' })
+assert.deepEqual(anthropicToolBody.tools[0].input_schema.properties.name.type, ['string', 'null'])
 assert.equal(anthropicToolReply.toolCalls[0].toolId, 'agent.create')
 assert.equal(anthropicToolReply.toolCalls[0].args.name, 'worker')
 assert.equal(anthropicToolReply.finishReason, 'tool_use')

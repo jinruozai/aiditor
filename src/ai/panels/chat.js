@@ -297,6 +297,8 @@
 
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
+    const layout = props.layout === 'inline' ? 'inline' : 'standard'
+    const inline = layout === 'inline'
     const connection = aiditor.signal(props.connection || defaultConnection())
     const model = aiditor.signal(props.model || defaultModel(connection.peek()))
     const permissionMode = aiditor.signal(props.permissionMode || 'full')
@@ -320,7 +322,7 @@
     const sendDisabled = aiditor.derived(function () { return !hasTarget() || (aiditor.ai.richPrompt.isEmpty(draft()) && !stoppable()) })
     const sendIcon = aiditor.derived(function () { return stoppable() && aiditor.ai.richPrompt.isEmpty(draft()) ? 'square' : 'arrow-up' })
 
-    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat' })
+    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat aiditor-ai-chat-' + layout })
     ui.collect(root, hasTarget.dispose)
     ui.collect(root, responseState.dispose)
     ui.collect(root, busy.dispose)
@@ -329,7 +331,7 @@
     ui.collect(root, sendDisabled.dispose)
     ui.collect(root, sendIcon.dispose)
 
-    const composer = ui.h('div', 'aiditor-ai-composer')
+    const composer = ui.h('div', 'aiditor-ai-composer aiditor-ai-composer-' + layout)
     if (aiditor.ai.installTargetDrop) {
       aiditor.ai.installTargetDrop(composer, {
         onDrop: function (targets) { insertTargets(targets) },
@@ -347,11 +349,11 @@
       value: draft,
       placeholder: 'Message current agent...',
       disabled: controlDisabled,
+      singleLine: inline,
       onSubmit: sendClick,
     })
     editor.classList.add('aiditor-ai-chat-input')
     editorWrap.appendChild(editor)
-    composer.appendChild(editorWrap)
 
     const actions = ui.h('div', 'aiditor-ai-chat-actions')
     const leftActions = ui.h('div', 'aiditor-ai-chat-actions-left')
@@ -439,8 +441,15 @@
     rightActions.appendChild(contextMeter)
     rightActions.appendChild(modelSlot)
     rightActions.appendChild(send)
-    actions.appendChild(leftActions)
-    actions.appendChild(rightActions)
+    if (inline) {
+      actions.appendChild(leftActions)
+      actions.appendChild(editorWrap)
+      actions.appendChild(rightActions)
+    } else {
+      composer.appendChild(editorWrap)
+      actions.appendChild(leftActions)
+      actions.appendChild(rightActions)
+    }
     composer.appendChild(actions)
     root.appendChild(composer)
 

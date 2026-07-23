@@ -10,6 +10,7 @@
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
     maxDelegationDepth: 4,
+    maxToolArgumentCorrections: 2,
     limits: {
       maxTurns: 32,
       timeoutMs: 600000,
@@ -89,25 +90,120 @@
     const request = actor && actor.toolSpecs ? actor : null
     const who = request ? request.actor : actor
     const allowed = requestToolMap(request)
-    return (calls || []).map(function (call) {
-      if (!call.toolId && !call.tool && (call.function || call.arguments != null) && ai.normalizeOpenAiToolCalls) {
-        call = ai.normalizeOpenAiToolCalls([call], request || {})[0]
-      }
-      const id = call.id || call.providerCallId || ('tc_provider_' + Date.now().toString(36) + '_' + nextProviderToolCallId++)
-      const toolId = call.toolId || call.name || call.tool || ''
-      const denied = allowed && !allowed[toolId]
-      return Object.assign({}, call, {
-        id: id,
-        toolId: toolId,
-        name: call.name || call.toolId || call.tool || '',
-        args: ai.toolArguments.read(call),
-        status: denied ? 'failed' : (call.status || 'proposed'),
-        error: denied ? ('Tool was not available in this request: ' + toolId) : call.error,
-        actor: call.actor || who || 'user',
-        createdAt: call.createdAt || Date.now(),
-        updatedAt: call.updatedAt || Date.now(),
-      })
+    const list = calls || []
+    const aliases = request && ai.toolAliasMap ? ai.toolAliasMap(request) : { byName: {} }
+    const expectedNames = list.map(function (call) {
+      const providerName = call && call.function && call.function.name
+      return call.toolId || call.name || call.tool || aliases.byName[providerName] || providerName || ''
     })
+    const normalized = []
+    const batch = []
+    let firstError = null
+    for (let i = 0; i < list.length; i++) {
+      let call = list[i]
+      let id = call.id || call.providerCallId || ('tc_provider_' + Date.now().toString(36) + '_' + nextProviderToolCallId++)
+      let providerName = call && call.function && call.function.name || call.providerName || call.name || call.toolId || call.tool || ''
+      let providerToolId = expectedNames[i]
+      let spec = requestToolSpec(request, providerToolId)
+      let argumentMode = call.argumentMode || spec && spec.argumentMode || request && request.connectionCapabilities && request.connectionCapabilities.toolArguments || 'json'
+      let providerArgs = null
+      let hasArgs = false
+      try {
+        if (!call.toolId && !call.tool && (call.function || call.arguments != null) && ai.normalizeOpenAiToolCalls) {
+          call = ai.normalizeOpenAiToolCalls([call], request || {})[0]
+        }
+        id = call.id || call.providerCallId || id
+        providerName = call.providerName || providerName
+        providerToolId = call.toolId || call.name || call.tool || providerToolId
+        const denied = allowed && !allowed[providerToolId]
+        spec = requestToolSpec(request, providerToolId)
+        argumentMode = call.argumentMode || spec && spec.argumentMode || argumentMode
+        providerArgs = ai.toolArguments.read(call, providerToolId)
+        hasArgs = true
+        if (spec) assertToolArguments(providerArgs, spec, id, argumentMode)
+        const route = spec && spec.route
+        const executorToolId = route && route.toolId || null
+        const executorArgs = routeToolArguments(providerArgs, route)
+        normalized.push(Object.assign({}, call, {
+          id: id,
+          toolId: providerToolId,
+          name: providerToolId,
+          providerToolId: route ? providerToolId : null,
+          providerArgs: route ? providerArgs : null,
+          args: providerArgs,
+          executorToolId: executorToolId,
+          executorArgs: route ? executorArgs : null,
+          argumentMode: argumentMode,
+          status: denied ? 'failed' : (call.status || 'proposed'),
+          error: denied ? ('Tool was not available in this request: ' + providerToolId) : call.error,
+          actor: call.actor || who || 'user',
+          createdAt: call.createdAt || Date.now(),
+          updatedAt: call.updatedAt || Date.now(),
+        }))
+      } catch (error) {
+        if (!isToolArgumentError(error)) throw error
+        if (!firstError) firstError = error
+      }
+      batch.push({
+        callId: id,
+        providerName: providerName,
+        toolId: providerToolId,
+        argumentMode: argumentMode,
+        hasArgs: hasArgs,
+        args: hasArgs ? providerArgs : null,
+      })
+    }
+    if (firstError) {
+      const failedSpec = requestToolSpec(request, firstError.toolName)
+      if (!firstError.argumentMode) firstError.argumentMode = failedSpec && failedSpec.argumentMode || 'json'
+      firstError.expectedToolNames = expectedNames
+      Object.defineProperty(firstError, 'toolCallBatch', { value: batch, configurable: true })
+      throw firstError
+    }
+    return normalized
+  }
+
+  function routeToolArguments(args, route) {
+    if (!route) return args
+    if (route.inputKey) {
+      const out = Object.assign({}, route.args || {})
+      out[route.inputKey] = args
+      return out
+    }
+    return route.args ? Object.assign({}, args, route.args) : args
+  }
+
+  function requestToolSpec(request, id) {
+    const specs = request && request.toolSpecs || []
+    for (let i = 0; i < specs.length; i++) if (specs[i].id === id) return specs[i]
+    return null
+  }
+
+  function assertToolArguments(args, spec, callId, argumentMode) {
+    const result = ai.schema.validate(args, spec.schema)
+    if (result.valid) return
+    const first = result.error
+    const err = new Error('Tool arguments do not match the schema for "' + spec.id + '" at ' + first.path + ': ' + first.message)
+    err.code = 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+    err.toolName = spec.id
+    err.callId = callId || null
+    err.argumentMode = argumentMode
+    err.path = first.path
+    err.keyword = first.keyword
+    err.schemaMessage = first.message
+    err.schemaErrors = result.errors
+    err.argumentHash = toolArgumentHash(args)
+    err.argumentSummary = toolArgumentSummary(args)
+    err.connectionNeutral = true
+    throw err
+  }
+
+  function toolArgumentHash(args) {
+    return ai.serialize.hash(args)
+  }
+
+  function toolArgumentSummary(args) {
+    return ai.serialize.compactString(ai.serialize.stableStringify(args), 320)
   }
 
   function requestToolMap(request) {
@@ -116,7 +212,7 @@
     const specs = request.toolSpecs || []
     const refs = request.tools || []
     for (let i = 0; i < specs.length; i++) map[specs[i].id] = true
-    for (let j = 0; j < refs.length; j++) map[refs[j]] = true
+    if (!specs.length) for (let j = 0; j < refs.length; j++) map[refs[j]] = true
     return map
   }
 
@@ -384,12 +480,23 @@
     return shouldPublishStreamState(state, !!(delta && delta.usage)) ? publishStreamState(agentId, messageId, state, request) : ai.readMessage(agentId, messageId)
   }
 
-  function finishStreamingMessage(agentId, messageId, state, result, request) {
+  function finishStreamingMessage(agentId, messageId, state, result, request, normalizedToolCalls) {
     const message = normalizeProviderMessage(result || {}, request)
     const storedMessage = ai.readMessage(agentId, messageId)
     let content = message.content != null && (message.content !== '' || !state.content) ? message.content : state.content
     const reasoning = message.reasoning_content != null ? message.reasoning_content : (message.reasoningContent != null ? message.reasoningContent : state.reasoning_content)
-    const toolCalls = normalizeToolCalls(message.toolCalls || state.toolCalls, request)
+    let toolCalls = normalizedToolCalls
+    if (toolCalls == null) {
+      try {
+        toolCalls = normalizeToolCalls(message.toolCalls || state.toolCalls, request)
+      } catch (error) {
+        error.providerContent = content || ''
+        error.providerReasoning = reasoning || null
+        error.providerUsage = message.usage || result && result.usage || state.usage || null
+        error.providerFinishReason = resultFinishReason(message) || resultFinishReason(result) || state.finishReason || null
+        throw error
+      }
+    }
     const output = structuredOutput(content, toolCalls, request)
     const actionNote = content && hasActionBoundary(toolCalls) ? content : null
     if (actionNote) content = ''
@@ -766,7 +873,8 @@
     calls = calls || []
     for (let i = 0; i < calls.length; i++) {
       const id = calls[i] && (calls[i].toolId || calls[i].name)
-      if (id === 'agent.delegate' || id === 'agent.send') return true
+      const status = calls[i] && calls[i].status
+      if ((id === 'agent.delegate' || id === 'agent.send') && status !== 'failed' && status !== 'rejected') return true
     }
     return false
   }
@@ -826,7 +934,8 @@
   }
 
   function executeOneToolCall(agentId, call, actor) {
-    const tool = ai.tools.get(call.toolId)
+    const executorToolId = call.executorToolId || call.toolId
+    const tool = ai.tools.get(executorToolId)
     if (!tool) {
       trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_missing', status: 'failed', summary: 'tool not found' }))
       appendToolResult(agentId, call, { error: 'Tool not found: ' + call.toolId }, 'error')
@@ -880,6 +989,231 @@
     })
   }
 
+  function toolArgumentRecoveryMessage(error) {
+    const expected = error.expectedToolNames && error.expectedToolNames.length
+      ? error.expectedToolNames.join(', ')
+      : (error.toolName || 'unknown')
+    return {
+      id: 'system-tool-arguments-recovery-' + Date.now().toString(36),
+      from: 'system',
+      role: 'system',
+      status: 'done',
+      content: [
+        'TOOL_CALL_RECOVERY: The previous response selected Tool calls [' + expected + '] but emitted invalid JSON arguments for "' + (error.toolName || 'unknown') + '".',
+        'No Tool from that response was executed.',
+        'Regenerate exactly the same Tool-call set for the same user intent once, using the provider Tool interface and its strict schemas.',
+        'Do not add prose, omit a call, add a call, or claim that the previous calls ran.',
+      ].join('\n'),
+      meta: {
+        contextLayer: 'runtime',
+        contextCardId: 'tool-arguments-recovery',
+        contextPriority: 110,
+      },
+    }
+  }
+
+  function toolArgumentRecoveryRequest(request, error, correction) {
+    const names = uniqueToolNames(error.expectedToolNames && error.expectedToolNames.length ? error.expectedToolNames : [error.toolName])
+    return Object.assign({}, request, {
+      messages: (request.messages || []).concat([toolArgumentRecoveryMessage(error)]),
+      tools: (request.tools || []).slice(),
+      toolSpecs: (request.toolSpecs || []).filter(function (tool) { return names.indexOf(tool.id) >= 0 }),
+      toolChoice: { mode: 'required', tools: names.slice() },
+      toolArgumentRecoveryAttempt: correction.count,
+      toolArgumentCorrection: correction,
+    })
+  }
+
+  function uniqueToolNames(names) {
+    const out = []
+    for (let i = 0; i < (names || []).length; i++) if (names[i] && out.indexOf(names[i]) < 0) out.push(names[i])
+    return out
+  }
+
+  function canRecoverToolArguments(request, error) {
+    if (!request.connectionCapabilities || request.connectionCapabilities.toolArguments !== 'strict') return false
+    const names = uniqueToolNames(error.expectedToolNames && error.expectedToolNames.length ? error.expectedToolNames : [error.toolName])
+    if (!names.length) return false
+    for (let i = 0; i < names.length; i++) {
+      const spec = requestToolSpec(request, names[i])
+      if (!spec || spec.argumentMode !== 'strict' || !spec.providerSchema) return false
+    }
+    return true
+  }
+
+  function isToolArgumentError(error) {
+    return !!(error && (error.code === 'TOOL_ARGUMENTS_INVALID_JSON' || error.code === 'TOOL_ARGUMENTS_SCHEMA_INVALID'))
+  }
+
+  function toolArgumentFingerprint(error) {
+    return [
+      error.code || '',
+      error.toolName || '',
+      error.argumentHash || '',
+      error.path || '',
+      error.keyword || '',
+      error.parsePosition == null ? '' : error.parsePosition,
+      error.argumentLength == null ? '' : error.argumentLength,
+      error.argumentSnippet || '',
+      error.schemaMessage || '',
+    ].join('|')
+  }
+
+  function toolArgumentCorrectionDecision(request, error) {
+    const current = request.toolArgumentCorrection || { count: 0, fingerprints: [], hiddenUsed: false }
+    const fingerprint = toolArgumentFingerprint(error)
+    if (current.fingerprints.indexOf(fingerprint) >= 0) {
+      return { allowed: false, reason: 'repeated', state: current }
+    }
+    if (current.count >= runtimeConfig.maxToolArgumentCorrections) {
+      return { allowed: false, reason: 'budget', state: current }
+    }
+    return {
+      allowed: true,
+      reason: null,
+      state: {
+        count: current.count + 1,
+        fingerprints: current.fingerprints.concat([fingerprint]),
+        hiddenUsed: current.hiddenUsed,
+      },
+    }
+  }
+
+  function finalToolArgumentError(error, decision) {
+    error.retryable = false
+    error.correctionReason = decision.reason
+    error.correctionAttempts = decision.state.count
+    error.recoveryAttempted = decision.state.hiddenUsed
+    return error
+  }
+
+  function toolArgumentFailureCalls(error, request) {
+    const batch = error.toolCallBatch && error.toolCallBatch.length
+      ? error.toolCallBatch
+      : uniqueToolNames(error.expectedToolNames && error.expectedToolNames.length ? error.expectedToolNames : [error.toolName]).map(function (toolId) {
+        return { callId: null, providerName: '', toolId: toolId }
+      })
+    const details = Object.assign({}, ai.toolArguments.errorDetails(error), {
+      retryable: true,
+      correctionAttempt: request.toolArgumentCorrection.count,
+    })
+    return batch.map(function (item, index) {
+      const providerToolId = item.toolId || error.expectedToolNames && error.expectedToolNames[index] || error.toolName || ''
+      const spec = requestToolSpec(request, providerToolId)
+      const route = spec && spec.route
+      const callId = item.callId || 'tc_invalid_' + Date.now().toString(36) + '_' + nextProviderToolCallId++
+      const failed = error.callId ? callId === error.callId : providerToolId === error.toolName
+      const providerArgs = item.hasArgs ? item.args : {}
+      const payload = failed ? details : {
+        code: 'TOOL_BATCH_ABORTED',
+        toolName: providerToolId,
+        callId: callId,
+        argumentMode: spec && spec.argumentMode || error.argumentMode || 'json',
+        message: 'No Tool was executed because another call in the same batch had invalid arguments.',
+        retryable: true,
+        causedBy: error.toolName || null,
+        correctionAttempt: request.toolArgumentCorrection.count,
+      }
+      return {
+        id: callId,
+        providerCallId: callId,
+        providerName: item.providerName || '',
+        providerToolId: providerToolId,
+        providerArgs: providerArgs,
+        toolId: providerToolId,
+        name: providerToolId,
+        args: providerArgs,
+        executorToolId: route && route.toolId || null,
+        executorArgs: route ? routeToolArguments(providerArgs, route) : null,
+        argumentMode: spec && spec.argumentMode || error.argumentMode || 'json',
+        status: 'failed',
+        error: payload.message,
+        errorDetails: payload,
+        actor: request.actor || 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+    })
+  }
+
+  function finishToolArgumentCorrection(agentId, messageId, state, request, error) {
+    const calls = toolArgumentFailureCalls(error, request)
+    const result = {
+      role: 'assistant',
+      content: error.providerContent || state.content || '',
+      reasoning_content: error.providerReasoning || state.reasoning_content || null,
+      usage: error.providerUsage || state.usage || null,
+      finishReason: error.providerFinishReason || state.finishReason || 'tool_calls',
+    }
+    const message = finishStreamingMessage(agentId, messageId, state, result, request, calls)
+    trace({
+      type: 'tool_arguments_correction_requested',
+      runId: request.runId,
+      traceId: request.runId,
+      agentId: agentId,
+      messageId: messageId,
+      questId: request.input && request.input.questId || null,
+      phase: 'provider',
+      entry: error.toolName || '',
+      status: 'retrying',
+      summary: 'returning invalid Tool arguments to the model for correction',
+      meta: Object.assign({}, ai.toolArguments.errorDetails(error), {
+        correctionAttempt: request.toolArgumentCorrection.count,
+      }),
+    })
+    return { message: message, result: result, request: request }
+  }
+
+  function resetToolArgumentAttempt(agentId, messageId, state, request) {
+    state.content = ''
+    state.toolCalls = []
+    state.reasoning_content = ''
+    state.previewTail = ''
+    state.modelTail = ''
+    state.activityText = ''
+    state.previewUpdatedAt = null
+    state.firstTokenAt = null
+    state.usage = null
+    state.finishReason = null
+    state.runState = 'connecting'
+    state.publishedFirstPreview = false
+    state.publishedFirstTool = false
+    ai.updateMessage(agentId, messageId, {
+      content: '',
+      reasoning_content: null,
+      toolCalls: [],
+      status: 'running',
+    })
+    publishRunState(agentId, state, request, 'connecting', true)
+  }
+
+  function recoveryResultError(error) {
+    const out = new Error('Tool argument recovery did not reproduce the complete Tool-call batch for the original intent')
+    out.code = 'TOOL_ARGUMENTS_RECOVERY_FAILED'
+    out.connectionNeutral = true
+    out.recoveryAttempted = true
+    out.recoveryFor = ai.toolArguments.errorDetails(error)
+    return out
+  }
+
+  function recoveredToolBatch(error, calls) {
+    const expected = error.expectedToolNames && error.expectedToolNames.length
+      ? error.expectedToolNames
+      : [error.toolName || '']
+    if (calls.length !== expected.length) return false
+    const counts = {}
+    for (let i = 0; i < calls.length; i++) {
+      const name = calls[i].providerToolId || calls[i].toolId || calls[i].name || ''
+      counts[name] = (counts[name] || 0) + 1
+    }
+    for (let j = 0; j < expected.length; j++) {
+      const name = expected[j]
+      if (!name || !counts[name]) return false
+      counts[name]--
+    }
+    return true
+  }
+
   function runChatTurn(agentId, provider, request, ctx, controller, actor) {
     const inputMessage = request.input && request.input.id ? request.input : null
     const responseId = inputMessage && inputMessage.meta && inputMessage.meta.responseId || (inputMessage && inputMessage.id) || request.runId
@@ -919,18 +1253,23 @@
       status: 'running',
       summary: 'assistant response started',
     })
+    let recoveryError = null
+    let recoveryCompleted = false
     function failTurn(err) {
       if (controller.signal.aborted) return null
       const completedAt = Date.now()
       const currentMessage = ai.readMessage(agentId, assistant.id) || assistant
+      const argumentDetails = ai.toolArguments.errorDetails(err) || err && err.recoveryFor || null
+      const errorMeta = {
+        error: String(err && err.message ? err.message : err),
+        errorCode: err && err.code || null,
+        finishReason: err && err.reason || state.finishReason || null,
+      }
+      if (argumentDetails) errorMeta.toolArguments = argumentDetails
       ai.updateMessage(agentId, assistant.id, {
         content: err && err.providerContent || currentMessage.content || '',
         status: 'error',
-        meta: Object.assign({}, currentMessage.meta || {}, {
-          error: String(err && err.message ? err.message : err),
-          errorCode: err && err.code || null,
-          finishReason: err && err.reason || state.finishReason || null,
-        }),
+        meta: Object.assign({}, currentMessage.meta || {}, errorMeta),
         stats: {
           runId: request.runId,
           startTime: state.startTime,
@@ -941,15 +1280,39 @@
       state.completedAt = completedAt
       state.error = String(err && err.message ? err.message : err)
       publishRunState(agentId, state, request, 'error', true)
-      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error, meta: { code: err && err.code || null, finishReason: err && err.reason || state.finishReason || null } })
+      trace({ type: 'run_failed', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: assistant.id, questId: inputMessage && inputMessage.questId || null, status: 'failed', summary: state.error, meta: { code: err && err.code || null, finishReason: err && err.reason || state.finishReason || null, toolArguments: argumentDetails } })
       throw err
     }
-    return Promise.resolve().then(function () {
-      request.stream = request.stream || !!provider.stream
+    function completeProviderAttempt(attemptRequest, result, providerResult) {
+      assertProviderCompleted(state, result, attemptRequest)
+      const done = finishStreamingMessage(agentId, assistant.id, state, result, attemptRequest)
+      if (recoveryError && !recoveryCompleted) {
+        const expected = recoveryError.toolName || ''
+        const calls = done.toolCalls || []
+        if (!recoveredToolBatch(recoveryError, calls)) throw recoveryResultError(recoveryError)
+        recoveryCompleted = true
+        trace({
+          type: 'tool_arguments_recovery_completed',
+          runId: request.runId,
+          traceId: request.runId,
+          agentId: agentId,
+          messageId: assistant.id,
+          questId: inputMessage && inputMessage.questId || null,
+          phase: 'provider',
+          entry: expected,
+          status: 'completed',
+          summary: 'tool arguments recovered',
+          meta: { attempt: 1, toolName: expected },
+        })
+      }
+      return { message: done, result: providerResult || result, request: attemptRequest }
+    }
+    function sendAttempt(attemptRequest) {
+      attemptRequest.stream = attemptRequest.stream || !!provider.stream
       trace({
         type: 'provider_request_started',
-        runId: request.runId,
-        traceId: request.runId,
+        runId: attemptRequest.runId,
+        traceId: attemptRequest.runId,
         agentId: agentId,
         messageId: assistant.id,
         questId: inputMessage && inputMessage.questId || null,
@@ -958,36 +1321,76 @@
         status: 'running',
         summary: request.connectionName + ' / ' + (request.agent.model || request.model || ''),
         meta: {
-          messageCount: request.messages ? request.messages.length : 0,
-          toolCount: request.tools ? request.tools.length : 0,
-          toolProtocol: request.connectionCapabilities && request.connectionCapabilities.toolProtocol || 'none',
+          messageCount: attemptRequest.messages ? attemptRequest.messages.length : 0,
+          toolCount: attemptRequest.tools ? attemptRequest.tools.length : 0,
+          toolProtocol: attemptRequest.connectionCapabilities && attemptRequest.connectionCapabilities.toolProtocol || 'none',
+          toolArguments: attemptRequest.connectionCapabilities && attemptRequest.connectionCapabilities.toolArguments || 'none',
+          toolArgumentRecoveryAttempt: attemptRequest.toolArgumentRecoveryAttempt || 0,
         },
       })
-      return provider.stream ? provider.stream(request, ctx) : provider.send(request, ctx)
-    }).then(function (result) {
-      if (controller.signal.aborted) return null
-      if (isIterable(result)) {
-        return consumeDeltas(agentId, assistant.id, state, result, request, controller).then(function () {
-          if (controller.signal.aborted) return null
-          const completed = completedStreamResult(state, null, request)
-          assertProviderCompleted(state, completed, request)
-          const done = finishStreamingMessage(agentId, assistant.id, state, completed, request)
-          return continueAfterTools(agentId, provider, done, done, request, controller, actor)
+      return Promise.resolve().then(function () {
+        return provider.stream ? provider.stream(attemptRequest, ctx) : provider.send(attemptRequest, ctx)
+      }).then(function (result) {
+        if (controller.signal.aborted) return null
+        if (isIterable(result)) {
+          return consumeDeltas(agentId, assistant.id, state, result, attemptRequest, controller).then(function () {
+            if (controller.signal.aborted) return null
+            const completed = completedStreamResult(state, null, attemptRequest)
+            return completeProviderAttempt(attemptRequest, completed, completed)
+          })
+        }
+        if (result && result.deltas && isIterable(result.deltas)) {
+          return consumeDeltas(agentId, assistant.id, state, result.deltas, attemptRequest, controller).then(function () {
+            if (controller.signal.aborted) return null
+            const completed = completedStreamResult(state, result, attemptRequest)
+            return completeProviderAttempt(attemptRequest, completed, result)
+          })
+        }
+        if (controller.signal.aborted) return null
+        return completeProviderAttempt(attemptRequest, result, result)
+      })
+    }
+    function handleToolArgumentError(err, attemptRequest) {
+      if (!isToolArgumentError(err)) throw err
+      const decision = toolArgumentCorrectionDecision(attemptRequest, err)
+      if (!decision.allowed) throw finalToolArgumentError(err, decision)
+      const useHiddenRecovery = canRecoverToolArguments(attemptRequest, err) && !decision.state.hiddenUsed
+      if (useHiddenRecovery) {
+        const correction = Object.assign({}, decision.state, { hiddenUsed: true })
+        const recoveryRequest = toolArgumentRecoveryRequest(attemptRequest, err, correction)
+        err.retryable = true
+        err.recoveryAttempted = true
+        recoveryError = err
+        trace({
+          type: 'tool_arguments_recovery_started',
+          runId: request.runId,
+          traceId: request.runId,
+          agentId: agentId,
+          messageId: assistant.id,
+          questId: inputMessage && inputMessage.questId || null,
+          phase: 'provider',
+          entry: err.toolName || '',
+          status: 'retrying',
+          summary: 'retrying invalid tool arguments with strict schemas',
+          meta: Object.assign({}, ai.toolArguments.errorDetails(err), { correctionAttempt: correction.count }),
         })
+        resetToolArgumentAttempt(agentId, assistant.id, state, attemptRequest)
+        return runAttempt(recoveryRequest)
       }
-      if (result && result.deltas && isIterable(result.deltas)) {
-        return consumeDeltas(agentId, assistant.id, state, result.deltas, request, controller).then(function () {
-          if (controller.signal.aborted) return null
-          const completed = completedStreamResult(state, result, request)
-          assertProviderCompleted(state, completed, request)
-          const done = finishStreamingMessage(agentId, assistant.id, state, completed, request)
-          return continueAfterTools(agentId, provider, done, result, request, controller, actor)
-        })
-      }
-      assertProviderCompleted(state, result, request)
-      const done = finishStreamingMessage(agentId, assistant.id, state, result, request)
-      return continueAfterTools(agentId, provider, done, result, request, controller, actor)
-    }).catch(failTurn)
+      err.retryable = true
+      err.recoveryAttempted = decision.state.hiddenUsed
+      const correctionRequest = Object.assign({}, attemptRequest, { toolArgumentCorrection: decision.state })
+      return finishToolArgumentCorrection(agentId, assistant.id, state, correctionRequest, err)
+    }
+    function runAttempt(attemptRequest) {
+      return sendAttempt(attemptRequest).catch(function (err) {
+        return handleToolArgumentError(err, attemptRequest)
+      })
+    }
+    return runAttempt(request).then(function (completed) {
+      if (!completed || controller.signal.aborted) return null
+      return continueAfterTools(agentId, provider, completed.message, completed.result, completed.request, controller, actor)
+    }, failTurn)
   }
 
   function continueAfterTools(agentId, provider, message, result, request, controller, actor) {
@@ -1037,6 +1440,7 @@
       nextRequest.input = request.input
       nextRequest.budget = request.budget
       nextRequest.startedAt = request.startedAt
+      nextRequest.toolArgumentCorrection = request.toolArgumentCorrection || null
       const nextCtx = ai.createRunContext(nextRequest, controller)
       return runChatTurn(agentId, provider, nextRequest, nextCtx, controller, actor)
     })
@@ -2059,6 +2463,7 @@
     if (next.maxConcurrentAgents != null) runtimeConfig.maxConcurrentAgents = next.maxConcurrentAgents
     if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
     if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
+    if (next.maxToolArgumentCorrections != null) runtimeConfig.maxToolArgumentCorrections = next.maxToolArgumentCorrections
     if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)
     scheduleQueuedAgents()
     return ai.runtimeConfig()

@@ -66,6 +66,8 @@
     assertFree('ai.tools', tools, name, meta)
     if (tool.resolveSchema != null && typeof tool.resolveSchema !== 'function')
       throw new Error('ai.tools.register: resolveSchema must be a function for "' + name + '"')
+    if (tool.resolveModelSpecs != null && typeof tool.resolveModelSpecs !== 'function')
+      throw new Error('ai.tools.register: resolveModelSpecs must be a function for "' + name + '"')
     tool.schema = normalizeToolSchema(tool.schema)
     tools[name] = tool
     toolMeta[name] = normalizeMeta(meta)

@@ -366,6 +366,7 @@ aiditor.ai.configureRuntime({
   maxConcurrentAgents: 8,
   maxConcurrentMessagesPerAgent: 1,
   maxDelegationDepth: 4,
+  maxToolArgumentCorrections: 2,
   limits: {
     maxTurns: 32,
     timeoutMs: 600000,
@@ -378,6 +379,8 @@ aiditor.ai.configureRuntime({
 approval resumes. `timeoutMs` starts when execution starts, not while queued.
 `maxTokens` uses reported provider usage; if a provider does not report usage,
 the runtime does not pretend that token enforcement is available.
+`maxToolArgumentCorrections` is a separate no-side-effect correction ceiling
+inside one run; it does not expand any execution budget.
 
 The built-in Agents panel creates user-facing agents with the focused
 `orchestration` skill. Hosts using `aiditor.ai.createAgent()` directly choose
@@ -386,8 +389,10 @@ their own `skillRefs`; no global tool set is injected as a fallback.
 Tool availability is resolved per request from the agent, active skills, runtime
 context, permissions, and connection capability. An empty tool set stays empty;
 the runtime never falls back to every registered tool. The request trace records
-`skillRefs`, `toolRefs`, `toolCount`, and `toolProtocol`, which is the source of
-truth when diagnosing why a model did or did not receive a tool.
+`skillRefs`, `toolRefs`, canonical `gatewayCount`, provider-facing `toolCount`,
+`toolProtocol`, `toolArguments`, and strict/best-effort Tool counts. This is the
+source of truth when diagnosing why a model did not receive a Tool or why one
+request-local projection did not receive a strict schema.
 
 This is also the discovery contract. The model receives the complete schemas for
 its effective tools, a bounded catalog for inactive skills, and context/reference
@@ -699,6 +704,34 @@ message-live-strip
 message-virtualizer
 ```
 
+`ai-chatinput` has one layout option. `standard` is the default multiline
+composer. `inline` keeps the same attachments, permission, model, context, send,
+and stop behavior in one compact row, with the prompt between the permission and
+model controls:
+
+```js
+{
+  component: 'ai-chatinput',
+  props: { layout: 'inline' },
+}
+```
+
+The combined panel forwards the same input contract:
+
+```js
+{
+  component: 'ai-chat',
+  props: { input: { layout: 'inline' } },
+}
+```
+
+In this layout `ai-chat` sizes the composer from its content and omits the
+multiline height splitter. Layout is panel configuration rather than an
+in-composer preference, so the framework does not add a mode-switch button.
+Internally the prompt uses `aiditor.ui.richPromptInput({ singleLine: true })`:
+Enter submits, Shift+Enter cannot insert a line break, pasted line breaks become
+spaces, and reference tokens retain their normal behavior.
+
 `aiditor.ai.agentVersion(agentId)` is the keyed lifecycle/configuration revision
 selector used by panels that depend on related Agents. It is intentionally
 separate from per-message versions, so descendant streaming tokens do not force
@@ -766,11 +799,41 @@ PROVIDER_CONTENT_BLOCKED
 PROVIDER_INTERRUPTED
 TOOL_PROTOCOL_INVALID
 TOOL_ARGUMENTS_INVALID_JSON
+TOOL_ARGUMENTS_SCHEMA_INVALID
+TOOL_ARGUMENTS_RECOVERY_FAILED
 ```
 
 The raw `finishReason` is preserved in message metadata and trace events. The
 runtime does not silently convert these failures into `idle`, and it does not
 execute text that only imitates a tool call.
+
+Invalid Tool arguments use one run-scoped correction state machine. Normalization
+and original-schema validation remain a whole-response barrier, so mixed
+valid/invalid batches execute zero Tools. A fully strict batch first gets one
+hidden constrained regeneration of the exact Tool set. Other failures become
+failed Tool calls with structured Tool Results and continue through the ordinary
+Agent turn. This visible path also serves `json` and `structured` connections
+without pretending that their generation is schema-constrained.
+
+Parseable arguments are retained on the failed ToolCall and replayed unchanged to
+the Provider. Traces and error metadata receive only a bounded canonical summary
+and stable hash. Schema diagnostics expose a stable keyword and prefer concrete
+branch errors. A `oneOf`/`anyOf` branch is selected only when every object branch
+declares the same unique `const` or single-value `enum` discriminator; otherwise
+the Host reports the generic union failure and does not infer a domain shape.
+Candidate discovery follows Schema property order and ignores fields that are
+not declared by every branch, so input key order and partial branch shapes cannot
+turn a validation failure into a Runtime exception.
+
+The default `maxToolArgumentCorrections` is two. A repeated fingerprint includes
+the Tool id, canonical argument hash, and concrete error result, so different
+arguments may continue within the budget while an identical failed call stops.
+An exhausted budget ends the turn; successful correction executes the resulting
+batch once. Corrections retain the same run, actor, permissions, execution
+budget, and abort signal and cannot bypass preview/approval. Network,
+authentication, cancellation, and budget failures remain terminal. Final
+diagnostics state whether hidden recovery was attempted and whether the error is
+still retryable.
 
 ## Tool Call Lifecycle
 
@@ -787,6 +850,19 @@ applied
 rejected
 failed
 ```
+
+For ordinary Tools, the semantic and execution identities are the same. A
+request-local Operation projection keeps them separate:
+
+```text
+toolId / args                  operation id and direct operation input
+executorToolId / executorArgs hidden canonical gateway and { op, input }
+```
+
+Only the first pair is user/model-visible and appears in traces, errors, Tool
+Results, permission entries, and provider replay. The executor pair exists only
+to reuse the registered preview/apply lifecycle without creating a second Tool
+or Operation system.
 
 Implemented APIs include:
 

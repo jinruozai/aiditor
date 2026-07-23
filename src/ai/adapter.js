@@ -91,15 +91,46 @@
   function openAiTools(request) {
     const specs = request.toolSpecs || []
     return specs.map(function (tool) {
-      return {
+      const out = {
         type: 'function',
         function: {
           name: toolName(tool.id, request),
           description: toolDescription(tool),
-          parameters: ai.normalizeToolSchema(tool.schema),
+          parameters: tool.providerSchema || ai.normalizeToolSchema(tool.schema),
         },
       }
+      if (tool.argumentMode === 'strict') out.function.strict = true
+      return out
     })
+  }
+
+  function prepareToolSpecs(specs, capabilities) {
+    const mode = capabilities && capabilities.toolArguments || 'none'
+    const fallback = capabilities && capabilities.toolArgumentsFallback || mode
+    return (specs || []).map(function (tool) {
+      const normalized = ai.normalizeToolSchema(tool.schema)
+      if (mode !== 'strict') return Object.assign({}, tool, { schema: normalized, argumentMode: mode })
+      try {
+        return Object.assign({}, tool, {
+          schema: normalized,
+          providerSchema: ai.schema.strictTool(normalized),
+          argumentMode: 'strict',
+        })
+      } catch (error) {
+        if (!error || error.code !== 'TOOL_SCHEMA_STRICT_UNSUPPORTED') throw error
+        return Object.assign({}, tool, {
+          schema: normalized,
+          argumentMode: fallback,
+          strictUnavailable: { code: error.code, path: error.path, message: error.message },
+        })
+      }
+    })
+  }
+
+  function toolSpec(request, id) {
+    const specs = request && request.toolSpecs || []
+    for (let i = 0; i < specs.length; i++) if (specs[i].id === id) return specs[i]
+    return null
   }
 
   function hasOwn(value, key) {
@@ -112,23 +143,100 @@
     try {
       return JSON.parse(value)
     } catch (cause) {
+      const position = jsonErrorPosition(cause, value)
+      const snippet = argumentSnippet(value, position)
       const err = new Error('Provider returned invalid JSON tool arguments')
       err.code = 'TOOL_ARGUMENTS_INVALID_JSON'
       err.cause = cause
+      err.argumentLength = value.length
+      err.parsePosition = position
+      err.argumentSnippet = snippet.text
+      err.snippetStart = snippet.start
+      err.connectionNeutral = true
       throw err
     }
   }
 
-  function toolCallArgs(call) {
+  function jsonErrorPosition(error, source) {
+    const message = String(error && error.message || '')
+    const match = message.match(/position\s+(\d+)/i)
+    if (match) return Number(match[1])
+    const lineColumn = message.match(/line\s+(\d+)\s+column\s+(\d+)/i)
+    if (lineColumn) {
+      const lines = String(source).split('\n')
+      let position = 0
+      const line = Math.max(1, Number(lineColumn[1]))
+      for (let i = 1; i < line && i <= lines.length; i++) position += lines[i - 1].length + 1
+      return position + Math.max(0, Number(lineColumn[2]) - 1)
+    }
+    return /(end of (json|data|input)|unexpected end|unterminated)/i.test(message) ? String(source).length : null
+  }
+
+  function argumentSnippet(value, position) {
+    const max = 160
+    const center = position == null ? 0 : position
+    const start = Math.max(0, Math.min(value.length, center) - Math.floor(max / 2))
+    return { start: start, text: value.slice(start, start + max) }
+  }
+
+  function decorateToolArgumentError(error, call, toolName) {
+    if (!error || error.code !== 'TOOL_ARGUMENTS_INVALID_JSON') return error
+    const fn = call && call.function || {}
+    error.toolName = toolName || call && (call.toolId || call.name || call.tool) || fn.name || ''
+    error.callId = call && (call.id || call.providerCallId) || null
+    const at = error.parsePosition == null ? 'unknown position' : 'position ' + error.parsePosition
+    const id = error.callId ? ' (' + error.callId + ')' : ''
+    error.message = 'Invalid JSON arguments for tool "' + (error.toolName || 'unknown') + '"' + id +
+      ' at ' + at + '; length ' + error.argumentLength + '; near ' + JSON.stringify(error.argumentSnippet)
+    return error
+  }
+
+  function toolArgumentErrorDetails(error) {
+    if (!error || (error.code !== 'TOOL_ARGUMENTS_INVALID_JSON' && error.code !== 'TOOL_ARGUMENTS_SCHEMA_INVALID')) return null
+    const details = {
+      code: error.code,
+      toolName: error.toolName || '',
+      callId: error.callId || null,
+      argumentMode: error.argumentMode || 'json',
+      recoveryAttempted: error.recoveryAttempted === true,
+      message: String(error.message || 'Tool arguments are invalid'),
+      retryable: error.retryable !== false,
+    }
+    if (error.code === 'TOOL_ARGUMENTS_INVALID_JSON') {
+      details.argumentLength = error.argumentLength
+      details.parsePosition = error.parsePosition
+      details.snippetStart = error.snippetStart
+      details.argumentSnippet = error.argumentSnippet || ''
+    } else {
+      details.path = error.path || '$'
+      details.keyword = error.keyword || null
+      details.schemaMessage = error.schemaMessage || error.message
+      details.argumentHash = error.argumentHash || null
+      details.argumentSummary = error.argumentSummary || ''
+    }
+    if (error.correctionAttempts != null) details.correctionAttempts = error.correctionAttempts
+    if (error.correctionReason) details.correctionReason = error.correctionReason
+    return details
+  }
+
+  function toolCallArgs(call, toolName) {
     const fn = call && call.function || null
     if (hasOwn(call, 'args')) return call.args === undefined ? {} : call.args
-    if (hasOwn(fn, 'arguments')) return decodeToolArguments(fn.arguments)
-    if (hasOwn(call, 'arguments')) return decodeToolArguments(call.arguments)
+    try {
+      if (hasOwn(fn, 'arguments')) return decodeToolArguments(fn.arguments)
+      if (hasOwn(call, 'arguments')) return decodeToolArguments(call.arguments)
+    } catch (error) {
+      throw decorateToolArgumentError(error, call, toolName)
+    }
     return {}
   }
 
-  function mergeArgumentDelta(current, delta) {
-    if (typeof delta === 'string') return (typeof current === 'string' ? current : '') + delta
+  function providerToolCallArgs(call) {
+    return hasOwn(call, 'providerArgs') && call.providerArgs != null ? call.providerArgs : toolCallArgs(call)
+  }
+
+  function mergeArgumentDelta(current, delta, update) {
+    if (typeof delta === 'string') return update === 'snapshot' ? delta : (typeof current === 'string' ? current : '') + delta
     return delta
   }
 
@@ -144,11 +252,11 @@
       if (delta.toolId) next.toolId = delta.toolId
       if (delta.name) next.name = delta.name
       if (hasOwn(delta, 'args')) next.args = delta.args
-      if (hasOwn(delta, 'arguments')) next.arguments = mergeArgumentDelta(next.arguments, delta.arguments)
+      if (hasOwn(delta, 'arguments')) next.arguments = mergeArgumentDelta(next.arguments, delta.arguments, delta.argumentUpdate)
       if (delta.function) {
         const fn = Object.assign({}, next.function || {})
         if (delta.function.name) fn.name = delta.function.name
-        if (hasOwn(delta.function, 'arguments')) fn.arguments = mergeArgumentDelta(fn.arguments, delta.function.arguments)
+        if (hasOwn(delta.function, 'arguments')) fn.arguments = mergeArgumentDelta(fn.arguments, delta.function.arguments, delta.argumentUpdate)
         next.function = fn
       }
       out[at] = next
@@ -164,18 +272,44 @@
   }
 
   function normalizeOpenAiToolCalls(calls, request) {
-    return (calls || []).map(function (call) {
+    const list = calls || []
+    const names = list.map(function (call) {
       const fn = call.function || {}
-      const providerName = fn.name || call.providerName || call.name || call.toolId || call.id
-      const id = toolIdFromName(providerName, request)
-      return {
-        id: call.id || null,
-        toolId: id,
-        name: id,
-        providerName: providerName,
-        args: toolCallArgs(call),
-      }
+      return toolIdFromName(fn.name || call.providerName || call.name || call.toolId || call.id, request)
     })
+    try {
+      return list.map(function (call, index) {
+        const fn = call.function || {}
+        const providerName = fn.name || call.providerName || call.name || call.toolId || call.id
+        const id = names[index]
+        const spec = toolSpec(request, id)
+        let args = toolCallArgs(call, id)
+        if (spec && spec.argumentMode === 'strict') args = ai.schema.restoreStrictTool(args, spec.schema)
+        return {
+          id: call.id || null,
+          toolId: id,
+          name: id,
+          providerName: providerName,
+          args: args,
+          argumentMode: spec && spec.argumentMode || 'json',
+        }
+      })
+    } catch (error) {
+      if (error && error.code === 'TOOL_ARGUMENTS_INVALID_JSON') {
+        const spec = toolSpec(request, error.toolName)
+        error.argumentMode = spec && spec.argumentMode || 'json'
+        error.expectedToolNames = names.slice()
+        error.toolCallBatch = list.map(function (call, index) {
+          const fn = call.function || {}
+          return {
+            callId: call.id || call.providerCallId || null,
+            providerName: fn.name || call.providerName || call.name || call.toolId || '',
+            toolId: names[index] || '',
+          }
+        })
+      }
+      throw error
+    }
   }
 
   function toolCallId(call) {
@@ -240,7 +374,7 @@
             type: 'function',
             function: {
               name: call.providerName || toolName(call.toolId || call.name, request),
-              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(toolCallArgs(call)) : JSON.stringify(toolCallArgs(call)),
+              arguments: ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(providerToolCallArgs(call)) : JSON.stringify(providerToolCallArgs(call)),
             },
           }
         })
@@ -301,7 +435,7 @@
             type: 'tool_use',
             id: toolCallId(call),
             name: call.providerName || toolName(call.toolId || call.name, request),
-            input: toolCallArgs(call),
+            input: providerToolCallArgs(call),
           })
         }
         out.push({ role: role, content: blocks })
@@ -335,11 +469,13 @@
   function anthropicTools(request) {
     const specs = request.toolSpecs || []
     return specs.map(function (tool) {
-      return {
+      const out = {
         name: toolName(tool.id, request),
         description: toolDescription(tool),
-        input_schema: ai.normalizeToolSchema(tool.schema),
+        input_schema: tool.providerSchema || ai.normalizeToolSchema(tool.schema),
       }
+      if (tool.argumentMode === 'strict') out.strict = true
+      return out
     })
   }
 
@@ -352,12 +488,16 @@
       if (item.type === 'text' && item.text) text.push(item.text)
       if (item.type !== 'tool_use') continue
       const id = toolIdFromName(item.name || '', request)
+      const spec = toolSpec(request, id)
+      let args = hasOwn(item, 'input') ? item.input : {}
+      if (spec && spec.argumentMode === 'strict') args = ai.schema.restoreStrictTool(args, spec.schema)
       toolCalls.push({
         id: item.id || null,
         toolId: id,
         name: id,
         providerName: item.name || '',
-        args: hasOwn(item, 'input') ? item.input : {},
+        args: args,
+        argumentMode: spec && spec.argumentMode || 'structured',
       })
     }
     return { content: text.join(''), toolCalls: toolCalls }
@@ -495,6 +635,8 @@
   ai.toolArguments = {
     read: toolCallArgs,
     mergeDeltas: mergeToolCallDeltas,
+    errorDetails: toolArgumentErrorDetails,
+    prepareSpecs: prepareToolSpecs,
   }
   ai.toolAliasMap = toolAliasMap
   ai.openAiTools = openAiTools

@@ -95,6 +95,7 @@ ai.operations.register('case.unavailable', {
   inputSchema: { type: 'object', properties: {} },
   available: function () { return unavailableOperationEnabled },
   preview: function () { return { ok: true } },
+  apply: function () { return { applied: true } },
 })
 assert.throws(function () {
   ai.operations.register('case.legacySchema', { schema: { type: 'object' } })
@@ -102,6 +103,13 @@ assert.throws(function () {
 assert.throws(function () {
   ai.operations.register('case.missingSchema', { exposeToModel: true })
 }, /model-visible operation requires inputSchema/)
+assert.throws(function () {
+  ai.operations.register('case.missingApply', {
+    exposeToModel: true,
+    inputSchema: { type: 'object', properties: {} },
+    preview: function () { return { ok: true } },
+  })
+}, /model-visible operation requires apply/)
 ai.operations.register('case.extra', {})
 assert.deepEqual(ai.operations.list('case.extra'), ['case.extra'])
 assert.deepEqual(ai.operations.unregisterPrefix('case.extra'), ['case.extra'])
@@ -125,7 +133,7 @@ assert.equal(ai.references.selection()[0].uri, 'case://item/one')
 const invalid = ai.operations.preview('case.setValue', { value: 'bad' })
 assert.equal(invalid.ok, false)
 assert.equal(invalid.code, 'OPERATION_INPUT_INVALID')
-assert.equal(invalid.errors[0].path, '$.input.value')
+assert.equal(invalid.errors[0].path, '$.value')
 assert.equal(previewCalls, 0)
 assert.equal(value, 1)
 
@@ -149,15 +157,12 @@ const explicitRequest = ai.makeRequest(ai.createAgent({
   toolRefs: ['aiditor.previewOperation', 'aiditor.applyOperation'],
 }), null, 'inspect_explicit', 'user', 0)
 assert.deepEqual(explicitRequest.tools, ['aiditor.previewOperation', 'aiditor.applyOperation'])
-const previewToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'aiditor.previewOperation' })
-const applyToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'aiditor.applyOperation' })
-const previewBranches = previewToolSpec.schema.oneOf
-const applyBranches = applyToolSpec.schema.oneOf
-assert.deepEqual(previewBranches.map(function (branch) { return branch.properties.op.enum[0] }), ['case.setValue'])
-assert.equal(previewBranches[0].properties.input.properties.value.type, 'number')
-assert.equal(previewBranches[0].additionalProperties, false)
-assert.equal(applyBranches[0].properties.previewId.type, 'string')
-assert.deepEqual(applyBranches.slice(1).map(function (branch) { return branch.properties.op.enum[0] }), ['case.setValue'])
+const operationToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'case.setValue' })
+assert.equal(operationToolSpec.schema.properties.value.type, 'number')
+assert.equal(operationToolSpec.schema.additionalProperties, false)
+assert.deepEqual(operationToolSpec.route, { toolId: 'aiditor.applyOperation', inputKey: 'input', args: { op: 'case.setValue' } })
+assert.equal(explicitRequest.toolSpecs.some(function (tool) { return tool.id.indexOf('aiditor.previewOperation') >= 0 }), false)
+assert.equal(explicitRequest.toolSpecs.some(function (tool) { return tool.id.indexOf('aiditor.applyOperation') >= 0 }), false)
 
 const pointSchema = {
   type: 'object',
@@ -174,28 +179,41 @@ ai.operations.register('case.sharedSchema', {
     },
   },
   preview: function () { return { ok: true } },
+  apply: function () { return { applied: true } },
 })
 const sharedSchemaRequest = ai.makeRequest(ai.createAgent({
   name: 'Shared Schema Agent',
-  toolRefs: ['aiditor.previewOperation'],
+  toolRefs: ['aiditor.applyOperation'],
 }), null, 'inspect_shared_schema', 'user', 0)
-const sharedSchemaBranch = sharedSchemaRequest.toolSpecs[0].schema.oneOf.find(function (branch) {
-  return branch.properties.op.enum[0] === 'case.sharedSchema'
+const sharedSchemaSpec = sharedSchemaRequest.toolSpecs.find(function (tool) {
+  return tool.id === 'case.sharedSchema'
 })
-assert.deepEqual(sharedSchemaBranch.properties.input.properties.first.items.required, ['x', 'y'])
-assert.deepEqual(sharedSchemaBranch.properties.input.properties.second.items.required, ['x', 'y'])
+assert.deepEqual(sharedSchemaSpec.schema.properties.first.items.required, ['x', 'y'])
+assert.deepEqual(sharedSchemaSpec.schema.properties.second.items.required, ['x', 'y'])
 ai.operations.unregister('case.sharedSchema')
 
 unavailableOperationEnabled = true
 const requestWithAvailableOperation = ai.makeRequest(ai.createAgent({
   name: 'Available Operation Agent',
-  toolRefs: ['aiditor.previewOperation'],
+  toolRefs: ['aiditor.applyOperation'],
 }), null, 'inspect_available', 'user', 0)
 assert.deepEqual(
-  requestWithAvailableOperation.toolSpecs[0].schema.oneOf.map(function (branch) { return branch.properties.op.enum[0] }),
+  requestWithAvailableOperation.toolSpecs.map(function (tool) { return tool.route.args.op }),
   ['case.setValue', 'case.unavailable']
 )
 unavailableOperationEnabled = false
+
+ai.tools.register('case.setValue', {
+  schema: { type: 'object', properties: {} },
+  run: function () { return null },
+})
+assert.throws(function () {
+  ai.makeRequest(ai.createAgent({
+    name: 'Conflicting Operation Agent',
+    toolRefs: ['case.setValue', 'aiditor.applyOperation'],
+  }), null, 'inspect_conflict', 'user', 0)
+}, /Model Tool id conflict: case\.setValue/)
+ai.tools.unregister('case.setValue')
 
 const previewGateway = ai.tools.get('aiditor.previewOperation')
 const unknownOperation = previewGateway.run({ op: 'case.missing', input: {} }, { actor: 'user', agent: agent })
