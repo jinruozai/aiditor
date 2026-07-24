@@ -704,33 +704,28 @@ message-live-strip
 message-virtualizer
 ```
 
-`ai-chatinput` has one layout option. `standard` is the default multiline
-composer. `inline` keeps the same attachments, permission, model, context, send,
-and stop behavior in one compact row, with the prompt between the permission and
-model controls:
+`ai-chatinput` adapts to its allocated height. At or above
+`--aiditor-ai-chat-multiline-min-h` it uses the normal two-row composer: prompt
+above, controls below. Below that threshold it uses one compact row with the
+prompt between permission and model controls. The threshold represents the
+minimum space for two prompt lines plus the control row; it is a theme component
+token rather than a parallel JavaScript constant.
 
-```js
-{
-  component: 'ai-chatinput',
-  props: { layout: 'inline' },
-}
-```
+Both layouts share one stable DOM tree. Resize only changes Grid placement and a
+`singleLine` signal, so prompt focus, selection, IME composition, reference
+tokens, draft state, model controls, and stop state are not remounted. Detached
+panels ignore zero-height resize notifications and retain their last layout until
+reattached.
 
-The combined panel forwards the same input contract:
+`ai-chat` keeps its splitter but allows the input pane to shrink from its chosen
+`inputSize` down to `--aiditor-ai-chat-input-min-h`. This lets the same automatic
+composer fit short Docks without crossing their boundary. Applications no longer
+select a chat input layout through panel props.
 
-```js
-{
-  component: 'ai-chat',
-  props: { input: { layout: 'inline' } },
-}
-```
-
-In this layout `ai-chat` sizes the composer from its content and omits the
-multiline height splitter. Layout is panel configuration rather than an
-in-composer preference, so the framework does not add a mode-switch button.
-Internally the prompt uses `aiditor.ui.richPromptInput({ singleLine: true })`:
-Enter submits, Shift+Enter cannot insert a line break, pasted line breaks become
-spaces, and reference tokens retain their normal behavior.
+The underlying `aiditor.ui.richPromptInput` accepts `singleLine` as either a
+boolean or signal. In single-line state Enter submits, Shift+Enter cannot insert
+a line break, pasted line breaks become spaces, and reference tokens retain their
+normal behavior.
 
 `aiditor.ai.agentVersion(agentId)` is the keyed lifecycle/configuration revision
 selector used by panels that depend on related Agents. It is intentionally

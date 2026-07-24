@@ -390,12 +390,12 @@
     opts = opts || {}
     const value = ui.asSig(opts.value || aiditor.ai.richPrompt.empty())
     const disabled = ui.asSig(opts.disabled || false)
-    const singleLine = opts.singleLine === true
-    const root = ui.h('div', 'aiditor-richprompt' + (singleLine ? ' aiditor-richprompt-single-line' : ''))
-    const editor = ui.h('div', 'aiditor-richprompt-editor' + (singleLine ? ' aiditor-richprompt-editor-single-line' : ''), {
+    const singleLine = ui.asSig(opts.singleLine == null ? false : opts.singleLine)
+    const root = ui.h('div', 'aiditor-richprompt')
+    const editor = ui.h('div', 'aiditor-richprompt-editor', {
       contenteditable: disabled() ? 'false' : 'true',
       role: 'textbox',
-      'aria-multiline': singleLine ? 'false' : 'true',
+      'aria-multiline': 'true',
       spellcheck: 'false',
     })
     if (opts.placeholder) editor.dataset.placeholder = opts.placeholder
@@ -408,7 +408,7 @@
       if (composing) return
       const at = selectionIndex(editor, value.peek())
       const serialized = serialize(editor, value.peek())
-      const next = singleLine ? singleLineDraft(serialized) : serialized
+      const next = singleLine.peek() ? singleLineDraft(serialized) : serialized
       const shouldFlatten = hasDomNoise(editor) || serialized.text !== next.text
       const clean = isBlankDraft(next) ? aiditor.ai.richPrompt.empty() : next
       lastKey = draftKey(clean)
@@ -421,7 +421,7 @@
 
     function renderExternal() {
       const source = aiditor.ai.richPrompt.normalize(read(value))
-      const d = singleLine ? singleLineDraft(source) : source
+      const d = singleLine() ? singleLineDraft(source) : source
       const key = draftKey(d)
       if (key === lastKey) return
       lastKey = key
@@ -432,6 +432,12 @@
     ui.collect(root, aiditor.effect(function () {
       editor.contentEditable = disabled() ? 'false' : 'true'
       root.classList.toggle('aiditor-richprompt-disabled', !!disabled())
+    }))
+    ui.collect(root, aiditor.effect(function () {
+      const active = !!singleLine()
+      root.classList.toggle('aiditor-richprompt-single-line', active)
+      editor.classList.toggle('aiditor-richprompt-editor-single-line', active)
+      editor.setAttribute('aria-multiline', active ? 'false' : 'true')
     }))
 
     editor.addEventListener('compositionstart', function () { composing = true })
@@ -452,7 +458,7 @@
     })
     editor.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && (composing || ev.isComposing)) return
-      if (ev.key === 'Enter' && singleLine) {
+      if (ev.key === 'Enter' && singleLine.peek()) {
         ev.preventDefault()
         if (opts.onSubmit) opts.onSubmit(ev)
         return
@@ -467,11 +473,11 @@
         insertDraftText('\n')
         return
       }
-      if (!singleLine && ev.key === 'ArrowUp' && moveCaretVertical(editor, -1)) {
+      if (!singleLine.peek() && ev.key === 'ArrowUp' && moveCaretVertical(editor, -1)) {
         ev.preventDefault()
         return
       }
-      if (!singleLine && ev.key === 'ArrowDown' && moveCaretVertical(editor, 1)) {
+      if (!singleLine.peek() && ev.key === 'ArrowDown' && moveCaretVertical(editor, 1)) {
         ev.preventDefault()
         return
       }
@@ -509,7 +515,7 @@
 
     root.__aiditorRichPromptEditor = editor
     root.__aiditorRichPromptInsertRefs = function (references) {
-      const current = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const current = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const d = isBlankDraft(current) ? aiditor.ai.richPrompt.empty() : current
       const list = references || []
       const r = selectionRange(editor, d)
@@ -527,10 +533,10 @@
     }
 
     function replaceSelectionWithText(text) {
-      const d = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const d = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
-      const inserted = singleLine ? String(text || '').replace(/\r\n?|\n/g, ' ') : text
+      const inserted = singleLine.peek() ? String(text || '').replace(/\r\n?|\n/g, ' ') : text
       const next = aiditor.ai.richPrompt.insertText(base, r.start, inserted)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)
@@ -538,11 +544,11 @@
     }
 
     function replaceSelectionWithDraft(fragment) {
-      const d = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const d = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
       const normalized = aiditor.ai.richPrompt.normalize(fragment)
-      const f = singleLine ? singleLineDraft(normalized) : normalized
+      const f = singleLine.peek() ? singleLineDraft(normalized) : normalized
       const next = aiditor.ai.richPrompt.insertDraft(base, r.start, f)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)

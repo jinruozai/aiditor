@@ -18472,12 +18472,12 @@
     opts = opts || {}
     const value = ui.asSig(opts.value || aiditor.ai.richPrompt.empty())
     const disabled = ui.asSig(opts.disabled || false)
-    const singleLine = opts.singleLine === true
-    const root = ui.h('div', 'aiditor-richprompt' + (singleLine ? ' aiditor-richprompt-single-line' : ''))
-    const editor = ui.h('div', 'aiditor-richprompt-editor' + (singleLine ? ' aiditor-richprompt-editor-single-line' : ''), {
+    const singleLine = ui.asSig(opts.singleLine == null ? false : opts.singleLine)
+    const root = ui.h('div', 'aiditor-richprompt')
+    const editor = ui.h('div', 'aiditor-richprompt-editor', {
       contenteditable: disabled() ? 'false' : 'true',
       role: 'textbox',
-      'aria-multiline': singleLine ? 'false' : 'true',
+      'aria-multiline': 'true',
       spellcheck: 'false',
     })
     if (opts.placeholder) editor.dataset.placeholder = opts.placeholder
@@ -18490,7 +18490,7 @@
       if (composing) return
       const at = selectionIndex(editor, value.peek())
       const serialized = serialize(editor, value.peek())
-      const next = singleLine ? singleLineDraft(serialized) : serialized
+      const next = singleLine.peek() ? singleLineDraft(serialized) : serialized
       const shouldFlatten = hasDomNoise(editor) || serialized.text !== next.text
       const clean = isBlankDraft(next) ? aiditor.ai.richPrompt.empty() : next
       lastKey = draftKey(clean)
@@ -18503,7 +18503,7 @@
 
     function renderExternal() {
       const source = aiditor.ai.richPrompt.normalize(read(value))
-      const d = singleLine ? singleLineDraft(source) : source
+      const d = singleLine() ? singleLineDraft(source) : source
       const key = draftKey(d)
       if (key === lastKey) return
       lastKey = key
@@ -18514,6 +18514,12 @@
     ui.collect(root, aiditor.effect(function () {
       editor.contentEditable = disabled() ? 'false' : 'true'
       root.classList.toggle('aiditor-richprompt-disabled', !!disabled())
+    }))
+    ui.collect(root, aiditor.effect(function () {
+      const active = !!singleLine()
+      root.classList.toggle('aiditor-richprompt-single-line', active)
+      editor.classList.toggle('aiditor-richprompt-editor-single-line', active)
+      editor.setAttribute('aria-multiline', active ? 'false' : 'true')
     }))
 
     editor.addEventListener('compositionstart', function () { composing = true })
@@ -18534,7 +18540,7 @@
     })
     editor.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && (composing || ev.isComposing)) return
-      if (ev.key === 'Enter' && singleLine) {
+      if (ev.key === 'Enter' && singleLine.peek()) {
         ev.preventDefault()
         if (opts.onSubmit) opts.onSubmit(ev)
         return
@@ -18549,11 +18555,11 @@
         insertDraftText('\n')
         return
       }
-      if (!singleLine && ev.key === 'ArrowUp' && moveCaretVertical(editor, -1)) {
+      if (!singleLine.peek() && ev.key === 'ArrowUp' && moveCaretVertical(editor, -1)) {
         ev.preventDefault()
         return
       }
-      if (!singleLine && ev.key === 'ArrowDown' && moveCaretVertical(editor, 1)) {
+      if (!singleLine.peek() && ev.key === 'ArrowDown' && moveCaretVertical(editor, 1)) {
         ev.preventDefault()
         return
       }
@@ -18591,7 +18597,7 @@
 
     root.__aiditorRichPromptEditor = editor
     root.__aiditorRichPromptInsertRefs = function (references) {
-      const current = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const current = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const d = isBlankDraft(current) ? aiditor.ai.richPrompt.empty() : current
       const list = references || []
       const r = selectionRange(editor, d)
@@ -18609,10 +18615,10 @@
     }
 
     function replaceSelectionWithText(text) {
-      const d = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const d = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
-      const inserted = singleLine ? String(text || '').replace(/\r\n?|\n/g, ' ') : text
+      const inserted = singleLine.peek() ? String(text || '').replace(/\r\n?|\n/g, ' ') : text
       const next = aiditor.ai.richPrompt.insertText(base, r.start, inserted)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)
@@ -18620,11 +18626,11 @@
     }
 
     function replaceSelectionWithDraft(fragment) {
-      const d = singleLine ? singleLineDraft(value.peek()) : value.peek()
+      const d = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
       const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
       const normalized = aiditor.ai.richPrompt.normalize(fragment)
-      const f = singleLine ? singleLineDraft(normalized) : normalized
+      const f = singleLine.peek() ? singleLineDraft(normalized) : normalized
       const next = aiditor.ai.richPrompt.insertDraft(base, r.start, f)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)
@@ -18933,8 +18939,7 @@
 
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
-    const layout = props.layout === 'inline' ? 'inline' : 'standard'
-    const inline = layout === 'inline'
+    const compact = aiditor.signal(false)
     const connection = aiditor.signal(props.connection || defaultConnection())
     const model = aiditor.signal(props.model || defaultModel(connection.peek()))
     const permissionMode = aiditor.signal(props.permissionMode || 'full')
@@ -18958,7 +18963,7 @@
     const sendDisabled = aiditor.derived(function () { return !hasTarget() || (aiditor.ai.richPrompt.isEmpty(draft()) && !stoppable()) })
     const sendIcon = aiditor.derived(function () { return stoppable() && aiditor.ai.richPrompt.isEmpty(draft()) ? 'square' : 'arrow-up' })
 
-    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat aiditor-ai-chat-' + layout })
+    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat aiditor-ai-chat-standard' })
     ui.collect(root, hasTarget.dispose)
     ui.collect(root, responseState.dispose)
     ui.collect(root, busy.dispose)
@@ -18967,7 +18972,7 @@
     ui.collect(root, sendDisabled.dispose)
     ui.collect(root, sendIcon.dispose)
 
-    const composer = ui.h('div', 'aiditor-ai-composer aiditor-ai-composer-' + layout)
+    const composer = ui.h('div', 'aiditor-ai-composer aiditor-ai-composer-standard')
     if (aiditor.ai.installTargetDrop) {
       aiditor.ai.installTargetDrop(composer, {
         onDrop: function (targets) { insertTargets(targets) },
@@ -18985,7 +18990,7 @@
       value: draft,
       placeholder: 'Message current agent...',
       disabled: controlDisabled,
-      singleLine: inline,
+      singleLine: compact,
       onSubmit: sendClick,
     })
     editor.classList.add('aiditor-ai-chat-input')
@@ -19077,17 +19082,29 @@
     rightActions.appendChild(contextMeter)
     rightActions.appendChild(modelSlot)
     rightActions.appendChild(send)
-    if (inline) {
-      actions.appendChild(leftActions)
-      actions.appendChild(editorWrap)
-      actions.appendChild(rightActions)
-    } else {
-      composer.appendChild(editorWrap)
-      actions.appendChild(leftActions)
-      actions.appendChild(rightActions)
-    }
+    composer.appendChild(editorWrap)
+    actions.appendChild(leftActions)
+    actions.appendChild(rightActions)
     composer.appendChild(actions)
     root.appendChild(composer)
+
+    ui.collect(root, aiditor.effect(function () {
+      const inline = compact()
+      root.classList.toggle('aiditor-ai-chat-inline', inline)
+      root.classList.toggle('aiditor-ai-chat-standard', !inline)
+      composer.classList.toggle('aiditor-ai-composer-inline', inline)
+      composer.classList.toggle('aiditor-ai-composer-standard', !inline)
+    }))
+    if (window.ResizeObserver) {
+      const resizeObserver = new window.ResizeObserver(function (entries) {
+        const height = entries[0].contentRect.height
+        if (height <= 0) return
+        const threshold = ui.readNum('--aiditor-ai-chat-multiline-min-h', undefined, root)
+        compact.set(height < threshold)
+      })
+      resizeObserver.observe(root)
+      ui.collect(root, function () { resizeObserver.disconnect() })
+    }
 
     ui.collect(root, aiditor.effect(function () {
       const opts = connectionOptions()
@@ -20541,8 +20558,7 @@
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
     const inputProps = props.input || {}
-    const inline = inputProps.layout === 'inline'
-    const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-chat-combined' + (inline ? ' aiditor-ai-chat-combined-inline' : ''))
+    const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-chat-combined')
     const messagesPane = ui.h('div', 'aiditor-ai-chat-combined-messages')
     const inputPane = ui.h('div', 'aiditor-ai-chat-combined-input')
     const messageSpec = aiditor.resolveComponent('ai-messages')
@@ -20551,10 +20567,10 @@
     messagesPane.appendChild(messageSpec.factory(aiditor.signal(props.messages || {}), ctx))
     inputPane.appendChild(inputSpec.factory(aiditor.signal(inputProps), ctx))
     root.appendChild(messagesPane)
-    if (!inline) root.appendChild(createSplitter())
+    root.appendChild(createSplitter())
     root.appendChild(inputPane)
 
-    if (!inline) root.style.setProperty('--aiditor-ai-chat-input-size', Number(props.inputSize || 230) + 'px')
+    root.style.setProperty('--aiditor-ai-chat-input-size', Number(props.inputSize || 230) + 'px')
 
     return root
 
@@ -20573,7 +20589,7 @@
         const startInput = inputPane.getBoundingClientRect().height
         const move = function (moveEv) {
           const total = root.getBoundingClientRect().height
-          const minInput = Number(props.minInputSize || 140)
+          const minInput = minimumInputSize()
           const minMessages = Number(props.minMessagesSize || 160)
           const next = clamp(startInput - (moveEv.clientY - startY), minInput, Math.max(minInput, total - minMessages))
           root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
@@ -20595,13 +20611,20 @@
         ev.preventDefault()
         const current = inputPane.getBoundingClientRect().height
         const total = root.getBoundingClientRect().height
-        const minInput = Number(props.minInputSize || 140)
+        const minInput = minimumInputSize()
         const minMessages = Number(props.minMessagesSize || 160)
         const dir = ev.key === 'ArrowUp' ? 1 : -1
         const next = clamp(current + dir * 24, minInput, Math.max(minInput, total - minMessages))
         root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
       })
       return splitter
+    }
+
+    function minimumInputSize() {
+      const componentMinimum = ui.readNum('--aiditor-ai-chat-input-min-h', undefined, inputPane)
+      return props.minInputSize == null
+        ? componentMinimum
+        : Math.max(componentMinimum, Number(props.minInputSize))
     }
   }
 

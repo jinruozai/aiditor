@@ -359,12 +359,13 @@ ai-messages
 ai-chat
 ```
 
-`ai-chatinput` defaults to its multiline `standard` layout. Set
-`props.layout: "inline"` for a compact single-row composer; when used through
-`ai-chat`, pass the same setting as `props.input.layout`. The inline layout keeps
-the existing rich references and all Agent controls, while its prompt accepts no
-line breaks. The underlying UI primitive is
-`aiditor.ui.richPromptInput({ singleLine: true })`.
+`ai-chatinput` automatically uses a two-row composer when it can display at
+least two prompt lines and a compact single-row composer when its panel becomes
+shorter. Both states keep the same prompt and control DOM. `ai-chat` lets its
+input pane shrink to the compact minimum instead of overflowing its Dock. The
+underlying `aiditor.ui.richPromptInput` accepts a boolean or signal for
+`singleLine`, allowing its ARIA and keyboard semantics to follow the layout
+without remounting.
 
 ## UI Library
 

@@ -17,8 +17,7 @@
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
     const inputProps = props.input || {}
-    const inline = inputProps.layout === 'inline'
-    const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-chat-combined' + (inline ? ' aiditor-ai-chat-combined-inline' : ''))
+    const root = ui.h('div', 'aiditor-ai-panel aiditor-ai-chat-combined')
     const messagesPane = ui.h('div', 'aiditor-ai-chat-combined-messages')
     const inputPane = ui.h('div', 'aiditor-ai-chat-combined-input')
     const messageSpec = aiditor.resolveComponent('ai-messages')
@@ -27,10 +26,10 @@
     messagesPane.appendChild(messageSpec.factory(aiditor.signal(props.messages || {}), ctx))
     inputPane.appendChild(inputSpec.factory(aiditor.signal(inputProps), ctx))
     root.appendChild(messagesPane)
-    if (!inline) root.appendChild(createSplitter())
+    root.appendChild(createSplitter())
     root.appendChild(inputPane)
 
-    if (!inline) root.style.setProperty('--aiditor-ai-chat-input-size', Number(props.inputSize || 230) + 'px')
+    root.style.setProperty('--aiditor-ai-chat-input-size', Number(props.inputSize || 230) + 'px')
 
     return root
 
@@ -49,7 +48,7 @@
         const startInput = inputPane.getBoundingClientRect().height
         const move = function (moveEv) {
           const total = root.getBoundingClientRect().height
-          const minInput = Number(props.minInputSize || 140)
+          const minInput = minimumInputSize()
           const minMessages = Number(props.minMessagesSize || 160)
           const next = clamp(startInput - (moveEv.clientY - startY), minInput, Math.max(minInput, total - minMessages))
           root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
@@ -71,13 +70,20 @@
         ev.preventDefault()
         const current = inputPane.getBoundingClientRect().height
         const total = root.getBoundingClientRect().height
-        const minInput = Number(props.minInputSize || 140)
+        const minInput = minimumInputSize()
         const minMessages = Number(props.minMessagesSize || 160)
         const dir = ev.key === 'ArrowUp' ? 1 : -1
         const next = clamp(current + dir * 24, minInput, Math.max(minInput, total - minMessages))
         root.style.setProperty('--aiditor-ai-chat-input-size', Math.round(next) + 'px')
       })
       return splitter
+    }
+
+    function minimumInputSize() {
+      const componentMinimum = ui.readNum('--aiditor-ai-chat-input-min-h', undefined, inputPane)
+      return props.minInputSize == null
+        ? componentMinimum
+        : Math.max(componentMinimum, Number(props.minInputSize))
     }
   }
 

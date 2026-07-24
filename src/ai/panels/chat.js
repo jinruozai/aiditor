@@ -297,8 +297,7 @@
 
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
-    const layout = props.layout === 'inline' ? 'inline' : 'standard'
-    const inline = layout === 'inline'
+    const compact = aiditor.signal(false)
     const connection = aiditor.signal(props.connection || defaultConnection())
     const model = aiditor.signal(props.model || defaultModel(connection.peek()))
     const permissionMode = aiditor.signal(props.permissionMode || 'full')
@@ -322,7 +321,7 @@
     const sendDisabled = aiditor.derived(function () { return !hasTarget() || (aiditor.ai.richPrompt.isEmpty(draft()) && !stoppable()) })
     const sendIcon = aiditor.derived(function () { return stoppable() && aiditor.ai.richPrompt.isEmpty(draft()) ? 'square' : 'arrow-up' })
 
-    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat aiditor-ai-chat-' + layout })
+    const root = ui.view({ scroll: 'hidden', className: 'aiditor-ai-panel aiditor-ai-chat aiditor-ai-chat-standard' })
     ui.collect(root, hasTarget.dispose)
     ui.collect(root, responseState.dispose)
     ui.collect(root, busy.dispose)
@@ -331,7 +330,7 @@
     ui.collect(root, sendDisabled.dispose)
     ui.collect(root, sendIcon.dispose)
 
-    const composer = ui.h('div', 'aiditor-ai-composer aiditor-ai-composer-' + layout)
+    const composer = ui.h('div', 'aiditor-ai-composer aiditor-ai-composer-standard')
     if (aiditor.ai.installTargetDrop) {
       aiditor.ai.installTargetDrop(composer, {
         onDrop: function (targets) { insertTargets(targets) },
@@ -349,7 +348,7 @@
       value: draft,
       placeholder: 'Message current agent...',
       disabled: controlDisabled,
-      singleLine: inline,
+      singleLine: compact,
       onSubmit: sendClick,
     })
     editor.classList.add('aiditor-ai-chat-input')
@@ -441,17 +440,29 @@
     rightActions.appendChild(contextMeter)
     rightActions.appendChild(modelSlot)
     rightActions.appendChild(send)
-    if (inline) {
-      actions.appendChild(leftActions)
-      actions.appendChild(editorWrap)
-      actions.appendChild(rightActions)
-    } else {
-      composer.appendChild(editorWrap)
-      actions.appendChild(leftActions)
-      actions.appendChild(rightActions)
-    }
+    composer.appendChild(editorWrap)
+    actions.appendChild(leftActions)
+    actions.appendChild(rightActions)
     composer.appendChild(actions)
     root.appendChild(composer)
+
+    ui.collect(root, aiditor.effect(function () {
+      const inline = compact()
+      root.classList.toggle('aiditor-ai-chat-inline', inline)
+      root.classList.toggle('aiditor-ai-chat-standard', !inline)
+      composer.classList.toggle('aiditor-ai-composer-inline', inline)
+      composer.classList.toggle('aiditor-ai-composer-standard', !inline)
+    }))
+    if (window.ResizeObserver) {
+      const resizeObserver = new window.ResizeObserver(function (entries) {
+        const height = entries[0].contentRect.height
+        if (height <= 0) return
+        const threshold = ui.readNum('--aiditor-ai-chat-multiline-min-h', undefined, root)
+        compact.set(height < threshold)
+      })
+      resizeObserver.observe(root)
+      ui.collect(root, function () { resizeObserver.disconnect() })
+    }
 
     ui.collect(root, aiditor.effect(function () {
       const opts = connectionOptions()
