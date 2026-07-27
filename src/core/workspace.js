@@ -5,6 +5,11 @@
   const workspace = {}
   const HANDLE_DB = 'aiditor.workspace.handles'
   const HANDLE_STORE = 'handles'
+  const SEARCH_MAX_FILES = 1000
+  const SEARCH_MAX_FILE_BYTES = 1024 * 1024
+  const SEARCH_MAX_RESULTS = 50
+  const SEARCH_MAX_PER_FILE = 20
+  const SEARCH_MAX_DIAGNOSTICS = 100
 
   function hashText(text) {
     text = String(text == null ? '' : text)
@@ -334,6 +339,161 @@
     return out
   }
 
+  function searchNumber(value, fallback, maximum) {
+    const number = Number(value)
+    if (!Number.isFinite(number) || number <= 0) return fallback
+    return Math.min(maximum, Math.floor(number))
+  }
+
+  function searchContextLines(value) {
+    if (value == null) return 2
+    const number = Number(value)
+    if (!Number.isFinite(number) || number < 0) return 0
+    return Math.min(50, Math.floor(number))
+  }
+
+  function textByteSize(text) {
+    return typeof Blob !== 'undefined' ? new Blob([text]).size : text.length
+  }
+
+  function normalizeSearchOptions(opts) {
+    const input = opts || {}
+    return Object.assign({}, input, {
+      path: normalizePath(input.path || ''),
+      limit: searchNumber(input.limit, SEARCH_MAX_RESULTS, 100000),
+      maxPerFile: searchNumber(input.maxPerFile, SEARCH_MAX_PER_FILE, 10000),
+      maxFiles: searchNumber(input.maxFiles, SEARCH_MAX_FILES, 100000),
+      maxFileBytes: searchNumber(input.maxFileBytes, SEARCH_MAX_FILE_BYTES, 1024 * 1024 * 1024),
+      before: searchContextLines(input.before),
+      after: searchContextLines(input.after),
+    })
+  }
+
+  function searchDiagnostic(op, path, err) {
+    const reason = workspaceReason(err)
+    return {
+      path: normalizePath(path || ''),
+      op: op,
+      code: String(err && err.code || reason).toUpperCase(),
+      reason: reason,
+      message: String(err && err.message || err || reason),
+    }
+  }
+
+  function sizeDiagnostic(path, size, limit) {
+    return {
+      path: normalizePath(path),
+      op: 'readText',
+      code: 'SIZE_LIMIT',
+      reason: 'size_limit',
+      message: 'workspace.search: file size ' + size + ' exceeds maxFileBytes ' + limit,
+    }
+  }
+
+  async function boundedTextSearch(api, query, opts) {
+    const o = normalizeSearchOptions(opts)
+    if (o.mode === 'regex') {
+      try { new RegExp(String(query || ''), o.caseSensitive ? 'g' : 'gi') } catch (err) {
+        throw workspaceError('INVALID_REGEX', 'workspace.search: invalid regular expression: ' + err.message, {
+          op: 'search',
+          path: o.path,
+          reason: 'invalid_query',
+        })
+      }
+    }
+
+    const result = { matches: [], errors: [], scannedFiles: 0, skippedFiles: 0, limitHit: false }
+    const directories = []
+    let stopped = false
+
+    function addError(error) {
+      if (result.errors.length < SEARCH_MAX_DIAGNOSTICS) result.errors.push(error)
+      else result.limitHit = true
+    }
+
+    async function scanFile(path, knownSize) {
+      if (stopped || !pathAllowed(path, o)) return
+      if (result.scannedFiles >= o.maxFiles) {
+        result.limitHit = true
+        stopped = true
+        return
+      }
+      result.scannedFiles++
+      if (knownSize != null && knownSize > o.maxFileBytes) {
+        result.skippedFiles++
+        result.limitHit = true
+        addError(sizeDiagnostic(path, knownSize, o.maxFileBytes))
+        return
+      }
+
+      let file
+      try {
+        file = await api.readText(path)
+      } catch (err) {
+        result.skippedFiles++
+        addError(searchDiagnostic('readText', path, err))
+        return
+      }
+
+      const text = String(file.text == null ? '' : file.text)
+      const measuredSize = textByteSize(text)
+      const size = file && file.size != null ? Math.max(Number(file.size) || 0, measuredSize) : measuredSize
+      if (size > o.maxFileBytes) {
+        result.skippedFiles++
+        result.limitHit = true
+        addError(sizeDiagnostic(path, size, o.maxFileBytes))
+        return
+      }
+
+      const matches = searchText(path, text, query, o)
+      for (let i = 0; i < matches.length; i++) {
+        if (result.matches.length >= o.limit) {
+          result.limitHit = true
+          stopped = true
+          return
+        }
+        result.matches.push(matches[i])
+      }
+      if (result.matches.length >= o.limit) {
+        result.limitHit = true
+        stopped = true
+      }
+    }
+
+    async function listDirectory(path) {
+      let entries
+      try {
+        entries = await api.list(path)
+      } catch (err) {
+        addError(searchDiagnostic('list', path, err))
+        return false
+      }
+      entries = (entries || []).slice().sort(function (a, b) {
+        return String(a.path || '').localeCompare(String(b.path || ''))
+      })
+      for (let i = 0; i < entries.length && !stopped; i++) {
+        const entry = entries[i]
+        const entryPath = normalizePath(entry.path || (path ? path + '/' + entry.name : entry.name))
+        if (entry.kind === 'directory') directories.push(entryPath)
+        else await scanFile(entryPath, entry.size == null ? null : Number(entry.size))
+      }
+      return true
+    }
+
+    if (o.path) {
+      const listed = await listDirectory(o.path)
+      if (!listed) {
+        result.errors.length = 0
+        await scanFile(o.path, null)
+      }
+    } else {
+      directories.push('')
+    }
+
+    while (directories.length && !stopped) await listDirectory(directories.shift())
+    return result
+  }
+
   function capabilityValue(adapter, key) {
     if (key === 'objectUrl') return typeof URL !== 'undefined' && !!URL.createObjectURL && !!adapter.readBlob
     if (key === 'permissionRecovery') return !!adapter.recoverPermission
@@ -345,7 +505,7 @@
 
   function defaultCapabilities(adapter) {
     const keys = [
-      'list', 'readText', 'writeText', 'readBlob', 'writeBlob',
+      'list', 'search', 'readText', 'writeText', 'readBlob', 'writeBlob',
       'mkdir', 'move', 'copy', 'delete', 'recursiveDelete', 'stat',
       'objectUrl', 'snapshot', 'previewOperation', 'applyOperation',
       'revealInSystem', 'permissionRecovery', 'watch',
@@ -409,8 +569,13 @@
     const adapterRevealInSystem = api.revealInSystem
     api.__aiditorRevealInSystemSupported = typeof adapterRevealInSystem === 'function'
 
+    if (!api.search && api.list && api.readText) {
+      api.search = function (query, opts) { return boundedTextSearch(api, query, opts || {}) }
+    }
+
     api.capabilities = function () {
       const caps = adapterCapabilities ? adapterCapabilities.call(api) : defaultCapabilities(api)
+      caps.search = !!api.search
       if (caps.revealInSystem == null) caps.revealInSystem = !!api.__aiditorRevealInSystemSupported
       return caps
     }
@@ -1050,26 +1215,6 @@
         return { from: from, to: to, moved: true }
       },
       rename: function (from, to, opts) { return this.move(from, to, opts || {}) },
-      search: function (query, opts) {
-        const o = opts || {}
-        const root = normalizePath(o.path || '')
-        const limit = o.limit || 50
-        const out = []
-        const paths = allPaths(root)
-        let chain = Promise.resolve()
-        for (let i = 0; i < paths.length; i++) {
-          if (!pathAllowed(paths[i], o)) continue
-          const item = paths[i]
-          chain = chain.then(function () {
-            if (out.length >= limit) return null
-            return fileText(item).then(function (text) {
-              const matches = searchText(item, text, query, o)
-              for (let j = 0; j < matches.length && out.length < limit; j++) out.push(matches[j])
-            })
-          })
-        }
-        return chain.then(function () { return out })
-      },
       stat: function (path) {
         path = normalizePath(path)
         if (isFile(path)) {
@@ -1221,24 +1366,6 @@
       if (stat && o.targetBaseHash && stat.hash && stat.hash !== o.targetBaseHash) throw new Error('workspace.' + action + ': targetBaseHash mismatch')
     }
 
-    async function walkAt(path, out) {
-      path = normalizePath(path || '')
-      const start = await handleFor(path)
-      if (start.kind === 'file') {
-        out.push({ path: path, name: fileName(path), kind: 'file' })
-        return
-      }
-      await walk(start, path, out)
-    }
-
-    async function walk(dir, prefix, out) {
-      for await (const entry of dir.values()) {
-        const path = prefix ? prefix + '/' + entry.name : entry.name
-        out.push({ path: path, name: entry.name, kind: entry.kind })
-        if (entry.kind === 'directory') await walk(entry, path, out)
-      }
-    }
-
     const api = {
       rootId: function () { return rootHandle.name || 'directory' },
       kind: function () { return 'browser-fsa' },
@@ -1360,19 +1487,6 @@
         const current = await this.readText(path)
         const next = applyLinePatches(current.text, baseHash, patches || [])
         return this.writeText(path, next, { baseHash: baseHash })
-      },
-      search: async function (query, opts) {
-        const out = []
-        const entries = []
-        await walkAt(opts && opts.path || '', entries)
-        const limit = opts && opts.limit || 50
-        for (let i = 0; i < entries.length && out.length < limit; i++) {
-          if (entries[i].kind !== 'file' || !pathAllowed(entries[i].path, opts || {})) continue
-          const read = await this.readText(entries[i].path)
-          const matches = searchText(entries[i].path, read.text, query, opts || {})
-          for (let j = 0; j < matches.length && out.length < limit; j++) out.push(matches[j])
-        }
-        return out
       },
       stat: async function (path) {
         path = normalizePath(path)

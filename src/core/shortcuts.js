@@ -409,30 +409,38 @@
   }
 
   function context(ev) {
+    return contextForInput(normalizeKeyInput(ev || {}), null, ev || null)
+  }
+
+  function contextForInput(input, surface, ev) {
     const targetEl = ev && ev.target || null
     const panel = nearestSurface(targetEl)
-    const editable = isEditableTarget(targetEl)
+    const editableTarget = isEditableTarget(targetEl)
     const overlay = overlayTarget(targetEl)
-    const key = ev && ev.key != null ? eventKey(ev) : ''
+    const key = eventKey(input)
     let target = null
 
     const hover = liveSurface(hoverSurface)
     const active = liveSurface(activeSurface)
 
-    if (overlay) target = mergeSurface(overlay.layer, panel)
-    else if (editable) target = mergeSurface('editable', panel)
+    if (surface) target = surfaceFrom(surface, surface.layer || 'panel')
+    else if (overlay) target = mergeSurface(overlay.layer, panel)
+    else if (editableTarget) target = mergeSurface('editable', panel)
     else if (panel) target = surfaceFrom(panel, 'panel')
     else if (hover) target = surfaceFrom(hover, 'panel')
     else if (active) target = surfaceFrom(active, 'panel')
-    else target = selectionTarget(ev) || { layer: 'global' }
+    else target = selectionTarget(ev || input) || { layer: 'global' }
+
+    const editable = editableTarget || target && target.layer === 'editable'
 
     return {
       event: ev || null,
+      input: input,
       key: key,
       layer: target && target.layer || 'global',
       target: target,
       editable: editable,
-      handled: ev ? isHandled(ev) || !!ev.defaultPrevented : false,
+      handled: ev ? isHandled(ev) || !!ev.defaultPrevented : !!input.handled,
       scope: target && target.scope || '',
     }
   }
@@ -470,8 +478,17 @@
   }
 
   function onKeydown(ev) {
-    const ctx = context(ev)
-    const ids = eventKeyCandidates(ev)
+    return dispatchInput(normalizeKeyInput(ev), null, ev)
+  }
+
+  function dispatchKey(input, surface) {
+    return dispatchInput(normalizeKeyInput(input), surface || null, null)
+  }
+
+  function dispatchInput(input, surface, ev) {
+    if (input.phase !== 'down') return false
+    const ctx = contextForInput(input, surface, ev)
+    const ids = eventKeyCandidates(input)
     const seen = {}
     const candidates = []
     for (let i = 0; i < ids.length; i++) {
@@ -491,11 +508,13 @@
       if (!commandAvailable(item)) continue
       ctx.command = item.command
       ctx.binding = cloneBinding(item)
-      if (item.preventDefault !== false && ev.preventDefault) ev.preventDefault()
-      markHandled(ev)
+      if (item.preventDefault !== false && ev && ev.preventDefault) ev.preventDefault()
+      if (ev) markHandled(ev)
+      ctx.handled = true
       aiditor.commands.run(item.command, item.args || {}, ctx)
-      return
+      return true
     }
+    return false
   }
 
   function commandAvailable(item) {
@@ -537,7 +556,7 @@
     if (item.scope && item.scope !== ctx.scope) return false
     if (ctx.editable) {
       if (item.editablePolicy === 'block') return false
-      if (item.editablePolicy === 'local' && (ctx.handled || isHandled(ctx.event) || ctx.event.defaultPrevented)) return false
+      if (item.editablePolicy === 'local' && (ctx.handled || isHandled(ctx.event) || !!(ctx.event && ctx.event.defaultPrevented))) return false
     }
     return matchesWhen(item.when, ctx)
   }
@@ -592,6 +611,24 @@
     return { primary: raw, alternate: ev && ev.ctrlKey ? replaceMod(raw, 'Ctrl') : raw }
   }
 
+  function normalizeKeyInput(input) {
+    input = input || {}
+    const phaseValue = String(input.phase || input.type || 'down').toLowerCase()
+    return {
+      key: input.key == null ? '' : String(input.key),
+      code: input.code == null ? '' : String(input.code),
+      phase: phaseValue === 'up' || phaseValue === 'keyup' ? 'up' : 'down',
+      ctrlKey: input.ctrlKey != null ? !!input.ctrlKey : !!input.control,
+      metaKey: input.metaKey != null ? !!input.metaKey : !!input.meta,
+      altKey: input.altKey != null ? !!input.altKey : !!input.alt,
+      shiftKey: input.shiftKey != null ? !!input.shiftKey : !!input.shift,
+      repeat: input.repeat != null ? !!input.repeat : !!input.isAutoRepeat,
+      isComposing: !!input.isComposing,
+      location: input.location == null ? 0 : Number(input.location) || 0,
+      handled: !!input.handled,
+    }
+  }
+
   function replaceMod(list, value) {
     const out = list.slice()
     const at = out.indexOf('Mod')
@@ -601,7 +638,7 @@
 
   function normalizeKey(input, options) {
     if (!input) return ''
-    if (typeof input === 'object' && input.key != null) return eventKey(input)
+    if (typeof input === 'object' && input.key != null) return eventKey(normalizeKeyInput(input))
     const mac = isMac(options)
     const parts = String(input).split('+')
     const mods = []
@@ -769,6 +806,7 @@
     const target = ctx.target || null
     return {
       event: ctx.event || null,
+      input: ctx.input || null,
       key: ctx.key || '',
       layer: ctx.layer || target && target.layer || 'global',
       target: target,
@@ -1057,6 +1095,7 @@
     setSelectionProvider: setSelectionProvider,
     clearTransientTargets: clearTransientTargets,
     context: context,
+    dispatchKey: dispatchKey,
     normalizeKey: normalizeKey,
     eventKey: eventKey,
     formatShortcut: formatShortcut,

@@ -337,8 +337,8 @@
       limit: 50,
       include: ['*.js', '**/*.js'],
       exclude: ['node_modules/**', '.git/**', 'aiditor-runtime/**'],
-    }).then(function (results) {
-      const paths = uniqueJsPaths(results)
+    }).then(function (result) {
+      const paths = uniqueJsPaths(result.matches)
       const matches = []
       function readNext(index) {
         if (index >= paths.length) return Promise.resolve({ matches: matches })

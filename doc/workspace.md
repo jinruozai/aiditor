@@ -111,6 +111,25 @@ state.
 Text IO uses `readText` and `writeText`; see [workspace-v2.md](./workspace-v2.md)
 for the final API surface.
 
+`search(query, options)` is a bounded text scan and returns a structured
+completion result:
+
+```js
+{
+  matches: WorkspaceSearchMatch[],
+  errors: WorkspaceSearchError[],
+  scannedFiles: number,
+  skippedFiles: number,
+  limitHit: boolean,
+}
+```
+
+When an adapter does not provide `search` but does provide `list` and
+`readText`, the framework installs the same bounded implementation used by the
+memory and File System Access adapters. It applies include/exclude filters and
+limits before reading files, continues after individual list/read failures, and
+reports those failures in `errors` instead of failing the entire search.
+
 `stat(path)` returns a stable file identity shape:
 
 ```js

@@ -6449,7 +6449,7 @@
     ai.tools.register('workspace.searchFiles', {
       title: 'Search Workspace Files',
       description: 'Search text in the current AI workspace. Results include fileHash, line, column, and preview ranges for precise follow-up reads.',
-      schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, path: { type: 'string' }, include: { type: 'array' }, exclude: { type: 'array' }, mode: { type: 'string', enum: ['literal', 'regex'] }, caseSensitive: { type: 'boolean' }, before: { type: 'number' }, after: { type: 'number' }, limit: { type: 'number' } } },
+      schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, path: { type: 'string' }, include: { type: 'array' }, exclude: { type: 'array' }, mode: { type: 'string', enum: ['literal', 'regex'] }, caseSensitive: { type: 'boolean' }, before: { type: 'number' }, after: { type: 'number' }, limit: { type: 'number' }, maxPerFile: { type: 'number' }, maxFiles: { type: 'number' }, maxFileBytes: { type: 'number' } } },
       permissions: ['tool.call'],
       available: workspaceAvailable,
       run: function (args) { return requireWorkspace().search(args.query || '', args || {}) },
@@ -9963,8 +9963,8 @@
       limit: 50,
       include: ['*.js', '**/*.js'],
       exclude: ['node_modules/**', '.git/**', 'aiditor-runtime/**'],
-    }).then(function (results) {
-      const paths = uniqueJsPaths(results)
+    }).then(function (result) {
+      const paths = uniqueJsPaths(result.matches)
       const matches = []
       function readNext(index) {
         if (index >= paths.length) return Promise.resolve({ matches: matches })

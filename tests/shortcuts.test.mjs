@@ -146,6 +146,50 @@ assert.equal(ran[0].ctx.scope, 'editor.panel')
 assert.equal(ran[0].ctx.target.panelId, 'panel-1')
 assert.equal(ran[0].ctx.target.meta.documentKey, 'doc-a')
 
+ran = []
+assert.equal(aiditor.shortcuts.dispatchKey({
+  key: 's',
+  code: 'KeyS',
+  phase: 'down',
+  ctrlKey: true,
+  repeat: true,
+}, {
+  layer: 'panel',
+  panelId: 'panel-native',
+  component: 'case.editor',
+  scope: 'editor.panel',
+  meta: { documentKey: 'doc-native' },
+}), true)
+assert.equal(ran.length, 1)
+assert.equal(ran[0].ctx.event, null)
+assert.equal(ran[0].ctx.input.code, 'KeyS')
+assert.equal(ran[0].ctx.input.repeat, true)
+assert.equal(ran[0].ctx.target.panelId, 'panel-native')
+assert.equal(ran[0].ctx.target.meta.documentKey, 'doc-native')
+assert.equal(aiditor.shortcuts.dispatchKey({ key: 's', phase: 'up', ctrlKey: true }), false)
+assert.equal(ran.length, 1)
+
+ran = []
+assert.equal(aiditor.shortcuts.dispatchKey({
+  type: 'keyDown',
+  key: 's',
+  code: 'KeyS',
+  control: true,
+  isAutoRepeat: false,
+}, {
+  layer: 'panel',
+  scope: 'editor.panel',
+}), true)
+assert.equal(ran.length, 1)
+assert.equal(ran[0].ctx.input.ctrlKey, true)
+assert.equal(ran[0].ctx.input.repeat, false)
+ran = []
+assert.equal(aiditor.shortcuts.dispatchKey({ key: 's', code: 'KeyS' }, {
+  layer: 'panel',
+  scope: 'editor.panel',
+}), false)
+assert.equal(ran.length, 0)
+
 aiditor.shortcuts.register({
   id: 'case.local.shortcut',
   command: 'case.local',

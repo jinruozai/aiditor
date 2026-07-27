@@ -1,7 +1,7 @@
 # Shortcut System
 
 `aiditor.shortcuts` is the framework-level keyboard shortcut primitive. It
-normalizes browser key events, resolves a generic editor context, matches
+normalizes browser or host key input, resolves a generic editor context, matches
 registered key bindings, diagnoses conflicts, and routes the chosen binding to
 `aiditor.commands.run`.
 
@@ -24,7 +24,7 @@ domain validation stays above `aiditor.shortcuts`.
 Framework-owned responsibilities:
 
 - key normalization and platform display formatting
-- keydown routing with an indexed candidate lookup
+- DOM and native-host key routing through one indexed dispatcher
 - binding registry, owner cleanup, source precedence, and priority
 - generic shortcut context resolution
 - panel shortcut surface metadata
@@ -95,7 +95,8 @@ which generic surface is currently relevant.
 
 ```ts
 type ShortcutContext = {
-  event: KeyboardEvent;
+  event: KeyboardEvent | null;
+  input: ShortcutKeyInput;
   key: string;
   layer: ShortcutLayer;
   target: ShortcutTarget | null;
@@ -104,6 +105,20 @@ type ShortcutContext = {
   scope?: string;
   command?: string;
   binding?: ShortcutBinding;
+};
+
+type ShortcutKeyInput = {
+  key: string;
+  code?: string;
+  phase?: "down" | "up";
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  repeat?: boolean;
+  isComposing?: boolean;
+  location?: number;
+  handled?: boolean;
 };
 
 type ShortcutTarget = {
@@ -135,6 +150,7 @@ aiditor.shortcuts.setActiveSurface(surface)
 aiditor.shortcuts.setSelectionProvider(provider)
 aiditor.shortcuts.clearTransientTargets(options)
 aiditor.shortcuts.context(event)
+aiditor.shortcuts.dispatchKey(input, surface)
 ```
 
 `attachPanelSurface` returns a disposer and also participates in normal owner or
@@ -155,7 +171,9 @@ Target resolution order:
 `layer: "selection"` is a generic routing layer only. AIditor does not provide a
 selection service and does not know what the selection means. Hosts may provide
 a selection context adapter with `setSelectionProvider(provider)`. The provider
-receives the keyboard event and returns an opaque `ShortcutTarget` or `null`.
+receives the keyboard event for DOM dispatch or the normalized
+`ShortcutKeyInput` for host dispatch, then returns an opaque `ShortcutTarget` or
+`null`.
 
 Hover surfaces must be transient. The runtime clears stale hover state when the
 element is disconnected, when the pointer leaves the registered surface, and
@@ -167,6 +185,45 @@ but its `target.panelId`, `target.component`, `target.scope`, and `target.meta`
 come from the nearest registered panel surface. This lets generic shortcuts such
 as save route through commands with enough host metadata while keeping the
 framework unaware of document or resource semantics.
+
+## Host Key Dispatch
+
+Desktop and native hosts dispatch structured input directly instead of creating
+synthetic `KeyboardEvent` objects:
+
+```js
+const handled = aiditor.shortcuts.dispatchKey({
+  key: 's',
+  code: 'KeyS',
+  phase: 'down',
+  ctrlKey: true,
+  repeat: false,
+}, {
+  layer: 'panel',
+  panelId: 'editor-main',
+  component: 'code-editor',
+  scope: 'editor.code',
+  meta: { resourceUri: 'workspace://src/main.js' },
+})
+```
+
+`key` is required and carries the logical, layout-aware key used for shortcut
+matching. `code` is optional physical-key metadata and is exposed through
+`ShortcutContext.input`; it is not used as a fallback shortcut identity. Each
+call is a complete input snapshot, so the runtime never maintains modifier
+state that can become stale across a host bridge.
+
+Only `phase:"down"` participates in command matching. `phase:"up"` returns
+`false`. The dispatcher returns `true` only after a live command binding is
+selected and invoked. A host can use that result to suppress its own default
+handling. Native dispatch cannot call DOM `preventDefault`; DOM `keydown`
+continues to honor each binding's `preventDefault` flag before entering the same
+dispatcher.
+
+The optional `surface` is generic shortcut metadata, not a DOM element. When it
+is omitted, the normal hover, active, selection, and global resolution chain is
+used. Electron-style `type/control/meta/alt/shift/isAutoRepeat` fields are
+accepted at this adapter boundary and normalized to the canonical fields above.
 
 ## Key Normalization
 
@@ -433,6 +490,7 @@ aiditor.shortcuts.attachPanelSurface(el, surface)
 aiditor.shortcuts.setHoverSurface(surface)
 aiditor.shortcuts.setActiveSurface(surface)
 aiditor.shortcuts.setSelectionProvider(provider)
+aiditor.shortcuts.dispatchKey(input, surface)
 aiditor.shortcuts.clearTransientTargets(options)
 aiditor.shortcuts.context(event)
 

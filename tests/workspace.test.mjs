@@ -29,18 +29,19 @@ const patched = await ws.patchText('src/panel.js', read.hash, [
 assert.equal(patched.text, 'one\nTWO\nthree\n')
 
 const found = await ws.search('TWO', { limit: 5 })
-assert.equal(found.length, 1)
-assert.equal(found[0].path, 'src/panel.js')
-assert.equal(found[0].line, 2)
-assert.equal(found[0].column, 1)
-assert.equal(found[0].fileHash, patched.hash)
-assert.equal(found[0].previewEndLine, 4)
+assert.equal(found.matches.length, 1)
+assert.equal(found.matches[0].path, 'src/panel.js')
+assert.equal(found.matches[0].line, 2)
+assert.equal(found.matches[0].column, 1)
+assert.equal(found.matches[0].fileHash, patched.hash)
+assert.equal(found.matches[0].previewEndLine, 4)
+assert.deepEqual(found.errors, [])
 
 const regexFound = await ws.search('t.o', { mode: 'regex', caseSensitive: false, limit: 5 })
-assert.equal(regexFound.some(function (item) { return item.path === 'src/panel.js' && item.matchText === 'TWO' }), true)
+assert.equal(regexFound.matches.some(function (item) { return item.path === 'src/panel.js' && item.matchText === 'TWO' }), true)
 const included = await ws.search('items', { include: ['data/*.json'], limit: 5 })
-assert.equal(included.length, 1)
-assert.equal(included[0].path, 'data/items.json')
+assert.equal(included.matches.length, 1)
+assert.equal(included.matches[0].path, 'data/items.json')
 
 const editedText = aiditor.workspace.applyTextEdits('alpha\nbeta\n', aiditor.workspace.hashText('alpha\nbeta\n'), [
   { oldText: 'beta', newText: 'BETA' },
@@ -264,8 +265,9 @@ const nested = await root.getDirectoryHandle('nested', { create: true })
 src.entries['panel.js'] = new FakeFileHandle('panel.js', src, 'alpha\nbeta\n')
 nested.entries['other.js'] = new FakeFileHandle('other.js', nested, 'beta\n')
 const fsa = aiditor.workspace.fromHandle(root)
-assert.equal((await fsa.search('beta', { path: 'src', limit: 10 })).length, 1)
-assert.equal((await fsa.search('beta', { path: 'src/panel.js', limit: 10 }))[0].path, 'src/panel.js')
+assert.equal((await fsa.search('beta', { path: 'src', limit: 10 })).matches.length, 1)
+assert.equal((await fsa.search('beta', { path: 'src/panel.js', limit: 10 })).matches[0].path, 'src/panel.js')
+assert.equal((await fsa.capabilities()).search, true)
 assert.equal((await fsa.capabilities()).revealInSystem, false)
 assert.deepEqual(await fsa.revealInSystem('src/panel.js'), { ok: false, reason: 'unsupported' })
 src.entries['bad.bin'] = new FakeFileHandle('bad.bin', src, '', { failRead: true })
@@ -281,6 +283,42 @@ await assert.rejects(async function () { return fsa.snapshot('src', { recursive:
   assert.equal(err.op, 'snapshot')
   assert.equal(err.reason, 'not_readable')
   assert.equal(err.rootPath, 'src')
+  return true
+})
+
+const bridgeFiles = {
+  'src/ok.js': 'alpha\nbeta\n',
+  'src/large.js': 'beta'.repeat(20),
+}
+const searchBridge = aiditor.workspace.fromBridge({
+  rootId: function () { return 'bridge-test' },
+  kind: function () { return 'bridge' },
+  capabilities: function () { return { list: true, readText: true, search: false } },
+  list: function (path) {
+    if (!path) return Promise.resolve([{ path: 'src', name: 'src', kind: 'directory' }])
+    if (path === 'src') return Promise.resolve([
+      { path: 'src/bad.js', name: 'bad.js', kind: 'file', size: 4 },
+      { path: 'src/large.js', name: 'large.js', kind: 'file', size: bridgeFiles['src/large.js'].length },
+      { path: 'src/ok.js', name: 'ok.js', kind: 'file', size: bridgeFiles['src/ok.js'].length },
+    ])
+    return Promise.reject(new Error('not a directory'))
+  },
+  readText: function (path) {
+    if (path === 'src/bad.js') return Promise.reject(Object.assign(new Error('bridge read failed'), { code: 'NOT_READABLE' }))
+    return Promise.resolve({ path: path, text: bridgeFiles[path], size: bridgeFiles[path].length, hash: null, mtime: null })
+  },
+})
+assert.equal(searchBridge.capabilities().search, true)
+const bridgeSearch = await searchBridge.search('beta', { maxFileBytes: 40, limit: 10 })
+assert.deepEqual(bridgeSearch.matches.map(function (item) { return item.path }), ['src/ok.js'])
+assert.equal(bridgeSearch.scannedFiles, 3)
+assert.equal(bridgeSearch.skippedFiles, 2)
+assert.equal(bridgeSearch.errors.some(function (item) { return item.path === 'src/bad.js' && item.op === 'readText' }), true)
+assert.equal(bridgeSearch.errors.some(function (item) { return item.path === 'src/large.js' && item.reason === 'size_limit' }), true)
+assert.equal(bridgeSearch.limitHit, true)
+await assert.rejects(function () { return searchBridge.search('[', { mode: 'regex' }) }, function (err) {
+  assert.equal(err.code, 'INVALID_REGEX')
+  assert.equal(err.op, 'search')
   return true
 })
 await fsa.delete('src/panel.js')

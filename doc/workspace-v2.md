@@ -159,6 +159,59 @@ a text adapter supports `readBlob` by wrapping returned text in a `Blob`.
 Fallback still reports unknown `mime`, `mtime`, or backend metadata as `null`;
 it must not invent facts.
 
+`search` follows the same rule. An adapter with `list + readText` receives the
+framework bounded text-search implementation, so `capabilities().search` reports
+the effective enhanced adapter rather than only the raw bridge methods.
+
+## Bounded Text Search
+
+```js
+workspace.search(query, {
+  path?: string,
+  include?: string | string[],
+  exclude?: string | string[],
+  mode?: 'literal' | 'regex',
+  caseSensitive?: boolean,
+  before?: number,
+  after?: number,
+  limit?: number,
+  maxPerFile?: number,
+  maxFiles?: number,
+  maxFileBytes?: number,
+})
+```
+
+The result is always:
+
+```js
+{
+  matches: WorkspaceSearchMatch[],
+  errors: [{
+    path: string,
+    op: 'list' | 'readText',
+    code: string,
+    reason: string,
+    message: string,
+  }],
+  scannedFiles: number,
+  skippedFiles: number,
+  limitHit: boolean,
+}
+```
+
+Memory, File System Access, and fallback bridge search use the same walker and
+result shape. Results are deterministic by workspace-relative path. The default
+bounds are 1,000 scanned files, 1 MiB per file, 50 total matches, 20 matches per
+file, and at most 100 retained diagnostics. Callers may lower or explicitly
+raise the scan bounds per request.
+
+Invalid regular expressions reject the search before traversal. Individual
+directory listing, text read, and file-size failures are converted into bounded
+structured diagnostics and scanning continues. `limitHit` is true when a scan,
+file-size, result, or diagnostic bound prevents complete traversal. Search does
+not infer project ignore files, build an index, or require a server; hosts supply
+project-specific include/exclude patterns explicitly.
+
 `revealInSystem` is a platform adapter capability. Pure Web, memory, and File
 System Access adapters normally report `false`. Electron, Tauri, native bridge,
 or desktop adapters can report `true` when they can ask the host operating
