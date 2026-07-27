@@ -86,6 +86,193 @@
   }
   function safeRead(dt, type) { try { return dt.getData(type) } catch (_) { return '' } }
 
+  function externalCapabilities() {
+    const proto = typeof DataTransferItem !== 'undefined' && DataTransferItem.prototype
+    return {
+      files: true,
+      directories: !!(proto && (
+        typeof proto.getAsFileSystemHandle === 'function' ||
+        typeof proto.getAsEntry === 'function' ||
+        typeof proto.webkitGetAsEntry === 'function'
+      )),
+    }
+  }
+
+  // Capture entry/handle access synchronously in the drop event tick. Some
+  // browsers invalidate DataTransferItem access as soon as the handler yields.
+  function captureExternalSources(dt) {
+    const sources = []
+    const items = dt && dt.items ? Array.from(dt.items) : []
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (!item || item.kind !== 'file') continue
+      const getEntry = item.getAsEntry || item.webkitGetAsEntry
+      sources.push({
+        handle: typeof item.getAsFileSystemHandle === 'function' ? item.getAsFileSystemHandle() : null,
+        entry: typeof getEntry === 'function' ? getEntry.call(item) : null,
+        file: typeof item.getAsFile === 'function' ? item.getAsFile() : null,
+      })
+    }
+    if (!sources.length && dt && dt.files) {
+      const files = Array.from(dt.files)
+      for (let i = 0; i < files.length; i++) sources.push({ file: files[i] })
+    }
+    return sources
+  }
+
+  function readExternalEntries(dt, opts) {
+    return normalizeExternalSources(captureExternalSources(dt), opts || {})
+  }
+
+  async function normalizeExternalSources(sources, opts) {
+    const signal = opts.signal || null
+    const state = {
+      entries: [],
+      errors: [],
+      directoryPaths: new Set(),
+      maxEntries: opts.maxEntries || 10000,
+      maxDepth: opts.maxDepth || 64,
+      limited: false,
+    }
+    for (let i = 0; i < sources.length && !state.limited; i++) {
+      throwIfAborted(signal)
+      const source = sources[i]
+      let handle = null
+      let handleError = null
+      if (source.handle) {
+        try { handle = await source.handle }
+        catch (err) { handleError = err }
+      }
+      if (handle) await walkHandle(handle, '', 0, state, signal)
+      else if (source.entry) await walkLegacyEntry(source.entry, '', 0, state, signal)
+      else if (source.file) appendFileWithParents(source.file, state)
+      else if (handleError) pushReadError(state, '', handleError)
+    }
+    return {
+      entries: state.entries,
+      errors: state.errors,
+      capabilities: externalCapabilities(),
+    }
+  }
+
+  async function walkHandle(handle, parent, depth, state, signal) {
+    throwIfAborted(signal)
+    const path = joinRelative(parent, handle.name)
+    if (depth > state.maxDepth) { pushLimitError(state, path, 'max_depth'); return }
+    if (handle.kind === 'directory') {
+      if (!pushExternalEntry(state, { kind: 'directory', name: handle.name, relativePath: path })) return
+      try {
+        for await (const child of handle.values()) {
+          if (state.limited) break
+          await walkHandle(child, path, depth + 1, state, signal)
+        }
+      } catch (err) {
+        if (signal && signal.aborted) throw abortError()
+        pushReadError(state, path, err)
+      }
+      return
+    }
+    try {
+      const file = await handle.getFile()
+      pushExternalEntry(state, { kind: 'file', name: handle.name, relativePath: path, file: file })
+    } catch (err) {
+      if (signal && signal.aborted) throw abortError()
+      pushReadError(state, path, err)
+    }
+  }
+
+  async function walkLegacyEntry(entry, parent, depth, state, signal) {
+    throwIfAborted(signal)
+    const path = joinRelative(parent, entry.name)
+    if (depth > state.maxDepth) { pushLimitError(state, path, 'max_depth'); return }
+    if (entry.isDirectory) {
+      if (!pushExternalEntry(state, { kind: 'directory', name: entry.name, relativePath: path })) return
+      let children
+      try { children = await readAllLegacyEntries(entry.createReader(), signal) }
+      catch (err) {
+        if (signal && signal.aborted) throw abortError()
+        pushReadError(state, path, err)
+        return
+      }
+      for (let i = 0; i < children.length && !state.limited; i++) {
+        await walkLegacyEntry(children[i], path, depth + 1, state, signal)
+      }
+      return
+    }
+    try {
+      const file = await legacyFile(entry, signal)
+      pushExternalEntry(state, { kind: 'file', name: entry.name, relativePath: path, file: file })
+    } catch (err) {
+      if (signal && signal.aborted) throw abortError()
+      pushReadError(state, path, err)
+    }
+  }
+
+  function readAllLegacyEntries(reader, signal) {
+    return new Promise(function (resolve, reject) {
+      const out = []
+      function next() {
+        if (signal && signal.aborted) { reject(abortError()); return }
+        reader.readEntries(function (batch) {
+          if (!batch || !batch.length) { resolve(out); return }
+          out.push.apply(out, batch)
+          next()
+        }, reject)
+      }
+      next()
+    })
+  }
+
+  function legacyFile(entry, signal) {
+    return new Promise(function (resolve, reject) {
+      if (signal && signal.aborted) { reject(abortError()); return }
+      entry.file(resolve, reject)
+    })
+  }
+
+  function appendFileWithParents(file, state) {
+    const path = normalizeRelative(file.webkitRelativePath || file.name)
+    const parts = path.split('/').filter(Boolean)
+    let parent = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      parent = joinRelative(parent, parts[i])
+      if (!state.directoryPaths.has(parent) && !pushExternalEntry(state, { kind: 'directory', name: parts[i], relativePath: parent })) return
+    }
+    pushExternalEntry(state, { kind: 'file', name: file.name, relativePath: path, file: file })
+  }
+
+  function pushExternalEntry(state, entry) {
+    if (state.entries.length >= state.maxEntries) {
+      pushLimitError(state, entry.relativePath, 'max_entries')
+      return false
+    }
+    state.entries.push(entry)
+    if (entry.kind === 'directory') state.directoryPaths.add(entry.relativePath)
+    return true
+  }
+
+  function pushLimitError(state, path, code) {
+    if (state.limited) return
+    state.limited = true
+    state.errors.push({ path: path || '', op: 'read', code: code, message: code === 'max_depth' ? 'Directory nesting limit exceeded.' : 'Dropped entry limit exceeded.' })
+  }
+
+  function pushReadError(state, path, err) {
+    state.errors.push({
+      path: path || '',
+      op: 'read',
+      code: err && (err.name || err.code) || 'read_failed',
+      message: err && err.message || 'Failed to read dropped entry.',
+    })
+  }
+
+  function normalizeRelative(path) {
+    return String(path || '').replace(/\\/g, '/').split('/').filter(function (part) { return part && part !== '.' }).join('/')
+  }
+  function joinRelative(parent, name) { return normalizeRelative(parent ? parent + '/' + name : name) }
+  function throwIfAborted(signal) { if (signal && signal.aborted) throw abortError() }
+  function abortError() { const err = new Error('Drop reading cancelled.'); err.name = 'AbortError'; return err }
+
   // Shallow gate that works with only dt.types (no file/JSON content).
   // If `accept` is a function, caller owns the full decision; we pass the
   // shallow `data` and they can `return true` optimistically at dragover
@@ -108,6 +295,7 @@
     if (!onDrop) throw new Error('ui.dropzone: onDrop is required')
 
     let depth = 0     // track nested dragenter/leave so we don't flicker on child hover
+    let readController = null
 
     function clear() {
       depth = 0
@@ -126,7 +314,7 @@
       return matchesAccept(accept, peekTypes(ev.dataTransfer))
     }
     function shallowCanDrop(ev) {
-      return canDrop(extractData(ev.dataTransfer, false))
+      return canDrop(extractData(ev.dataTransfer, false), ev)
     }
 
     function onEnter(ev) {
@@ -151,8 +339,34 @@
       ev.preventDefault()
       clear()
       const data = extractData(ev.dataTransfer, true)
-      if (!canDrop(data)) return
-      onDrop(data, ev)
+      const sources = captureExternalSources(ev.dataTransfer)
+      if (!sources.length) {
+        data.entries = []
+        data.errors = []
+        data.capabilities = externalCapabilities()
+        if (canDrop(data, ev)) onDrop(data, ev)
+        return
+      }
+      if (readController) readController.abort()
+      readController = new AbortController()
+      const current = readController
+      normalizeExternalSources(sources, {
+        signal: current.signal,
+        maxEntries: o.maxEntries,
+        maxDepth: o.maxDepth,
+      }).then(function (external) {
+        if (current.signal.aborted) return
+        data.entries = external.entries
+        data.errors = external.errors
+        data.capabilities = external.capabilities
+        if (!canDrop(data, ev)) return
+        onDrop(data, ev)
+      }).catch(function (err) {
+        if (err && err.name === 'AbortError') return
+        aiditor.reportError(err, { scope: 'ui.dropzone', action: 'readExternalEntries' })
+      }).finally(function () {
+        if (readController === current) readController = null
+      })
     }
 
     el.addEventListener('dragenter', onEnter)
@@ -161,11 +375,19 @@
     el.addEventListener('drop',      onDropEv)
 
     const detach = function () {
+      if (readController) readController.abort()
+      readController = null
       el.removeEventListener('dragenter', onEnter)
       el.removeEventListener('dragover',  onOver)
       el.removeEventListener('dragleave', onLeave)
       el.removeEventListener('drop',      onDropEv)
       clear()
+    }
+    detach.cancel = function () { if (readController) readController.abort() }
+    if (o.signal) {
+      const cancel = function () { detach.cancel() }
+      o.signal.addEventListener('abort', cancel, { once: true })
+      ui.collect(el, function () { o.signal.removeEventListener('abort', cancel) })
     }
     ui.collect(el, detach)
     return detach
@@ -279,5 +501,10 @@
     return ''
   }
 
-  ui.dnd = { matchesKind: matchesKind, extractUrl: extractUrl }
+  ui.dnd = {
+    matchesKind: matchesKind,
+    extractUrl: extractUrl,
+    capabilities: externalCapabilities,
+    readExternalEntries: readExternalEntries,
+  }
 })(window.aiditor = window.aiditor || {})

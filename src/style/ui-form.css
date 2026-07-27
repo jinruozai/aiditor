@@ -1384,6 +1384,27 @@
 .aiditor-ui-struct-input-cell,
 .aiditor-ui-dict-input-cell,
 .aiditor-ui-array-input-cell { min-width: 0; }
+.aiditor-ui-field-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 2px var(--aiditor-space-1) 0;
+  font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
+  line-height: 1.35;
+}
+.aiditor-ui-field-messages[hidden] { display: none; }
+.aiditor-ui-field-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--aiditor-fg-2);
+}
+.aiditor-ui-field-message-info { color: var(--aiditor-accent); }
+.aiditor-ui-field-message-warning { color: var(--aiditor-warn); }
+.aiditor-ui-field-message-error { color: var(--aiditor-error); }
+.aiditor-ui-struct-input-row-has-error > .aiditor-ui-struct-input-label {
+  color: var(--aiditor-error);
+}
 .aiditor-ui-struct-input-actions,
 .aiditor-ui-dict-input-actions {
   display: inline-flex;

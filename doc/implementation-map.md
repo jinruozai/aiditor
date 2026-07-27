@@ -38,6 +38,9 @@ preserved or deliberately replaced.
 | `src/dock/layout.js` | [ui.md](./ui.md) | `createDockLayout`. |
 | `src/ui/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Ordered Inspector selection, provider registry, multi-target edit gates, and formula-ready change helpers. |
 | `src/ui/panel/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Built-in generic Inspector dock panel backed by `aiditor.inspector` and `aiditor.ui.propertyForm`. |
+| `src/ui/data/fileBrowser.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Neutral controlled current-directory browser with list/icon presentation and generic action/drag/drop hooks. |
+| `src/ui/data/tree.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Virtualized static/lazy tree with controlled selection/expansion and node-scoped async loading. |
+| `src/ui/_internal/_dnd.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Generic drag/drop transport plus external file/directory normalization. |
 | `src/ui/panel/history.js` | [core.md](./core.md), [ui.md](./ui.md) | Built-in generic History dock panel backed by an `aiditor.history` instance or named binding. |
 | `src/ui/panel/panel-list.js` | [ui.md](./ui.md) | Built-in searchable panel palette for registered generic panel components. |
 | `src/ui/base/actionMenu.js` | [ui.md](./ui.md) | Shared UiAction-to-menu adapter used by actionBar menus and field context-menu action surfaces. |

@@ -31,7 +31,8 @@ for (const file of files) {
   if (r.status !== 0) {
     failed = true
     process.stderr.write(file + '\n')
-    process.stderr.write(r.stderr || r.stdout)
+    const output = r.stderr || r.stdout || (r.error && r.error.message) || 'Syntax check failed without diagnostic output.'
+    process.stderr.write(String(output) + (String(output).endsWith('\n') ? '' : '\n'))
   }
 }
 

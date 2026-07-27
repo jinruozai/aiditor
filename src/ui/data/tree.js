@@ -55,16 +55,21 @@
   // of visible ids (match OR has matching descendant) plus the set of ids
   // to auto-expand (has matching descendant). Second pass walks the tree
   // keeping only visible ids, honoring the auto-expand union. O(n) total.
-  function flatten(items, expanded, query, match, behavior) {
+  function flatten(items, expanded, query, match, behavior, inspectNode) {
     const out = []
     if (!query) {
       function walk(nodes, depth) {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i]
-          const hasKids = !!(n.children && n.children.length)
+          const info = inspectNode(n)
+          const hasKids = info.hasKids
           const isExp = expanded.has(n.id)
-          out.push({ node: n, depth: depth, hasKids: hasKids, expanded: isExp, matched: false })
-          if (hasKids && isExp) walk(n.children, depth + 1)
+          out.push({
+            node: n, depth: depth, hasKids: hasKids, expanded: isExp, matched: false,
+            loadState: info.loadState, loading: info.loading, error: info.error,
+            posInSet: i + 1, setSize: nodes.length,
+          })
+          if (info.children.length && isExp) walk(info.children, depth + 1)
         }
       }
       walk(items, 0)
@@ -78,9 +83,10 @@
       let anyMatch = false
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i]
+        const info = inspectNode(n)
         const self = !!match(n, query)
         if (self) matched.add(n.id)
-        const kidMatch = (n.children && n.children.length) ? scan(n.children) : false
+        const kidMatch = info.children.length ? scan(info.children) : false
         if (self || kidMatch) {
           visible.add(n.id)
           if (kidMatch) autoExp.add(n.id)
@@ -96,13 +102,16 @@
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i]
         if (!highlightMode && !visible.has(n.id)) continue
-        const hasKids = !!(n.children && n.children.length)
+        const info = inspectNode(n)
+        const hasKids = info.hasKids
         const isExp = expanded.has(n.id) || autoExp.has(n.id)
         out.push({
           node: n, depth: depth, hasKids: hasKids, expanded: isExp,
           matched: matched.has(n.id),
+          loadState: info.loadState, loading: info.loading, error: info.error,
+          posInSet: i + 1, setSize: nodes.length,
         })
-        if (hasKids && isExp) walk(n.children, depth + 1)
+        if (info.children.length && isExp) walk(info.children, depth + 1)
       }
     }
     walk(items, 0)
@@ -110,12 +119,13 @@
   }
 
   // All visible ids (expand-all / collapse-all helpers).
-  function allIds(items) {
+  function allIds(items, inspectNode) {
     const s = new Set()
     function walk(nodes) {
       for (let i = 0; i < nodes.length; i++) {
         s.add(nodes[i].id)
-        if (nodes[i].children && nodes[i].children.length) walk(nodes[i].children)
+        const children = inspectNode(nodes[i]).children
+        if (children.length) walk(children)
       }
     }
     walk(items)
@@ -175,10 +185,14 @@
           : row.hasKids
     const arrow = ui.h('span', 'aiditor-ui-tree-arrow')
     if (arrowShown && row.hasKids) {
-      arrow.textContent = row.expanded ? '▾' : '▸'
+      arrow.textContent = row.loading ? '' : (row.error ? '!' : (row.expanded ? '▾' : '▸'))
+      arrow.classList.toggle('aiditor-ui-tree-arrow-loading', !!row.loading)
+      arrow.classList.toggle('aiditor-ui-tree-arrow-error', !!row.error)
+      if (row.error) arrow.title = row.error.message || 'Failed to load children. Click to retry.'
       arrow.addEventListener('click', function (e) {
         e.stopPropagation()
-        ctx.toggle()
+        if (row.error) ctx.retry()
+        else ctx.toggle()
       })
     } else {
       arrow.textContent = ''
@@ -268,6 +282,9 @@
   ui.tree = function (opts) {
     const o = opts || {}
     const items = ui.asSig(o.items != null ? o.items : [])
+    const loadChildren = typeof o.loadChildren === 'function' ? o.loadChildren : null
+    const loadVersion = aiditor.signal(0)
+    const loadCache = new Map()
     const rowH = o.rowHeight || DEFAULT_ROW_H
     const indent = o.indentSize || DEFAULT_INDENT
 
@@ -293,7 +310,7 @@
     const writeExpanded = o.expanded ? ui.writer(o.expanded, null, 'ui.tree') : function (s) { expanded.set(s) }
     if (!o.expanded && o.defaultExpanded != null) {
       const init = o.defaultExpanded
-      if (init === 'all') expanded.set(allIds(items.peek()))
+      if (init === 'all') expanded.set(allIds(items.peek(), inspectNode))
       else if (Array.isArray(init)) expanded.set(new Set(init))
       else if (init === 'none') { /* empty by default */ }
     }
@@ -305,6 +322,105 @@
     // Focus/anchor tracked internally (non-reactive — only kbd cares).
     let focusedId = null
     let anchorId = null
+
+    function inspectNode(node) {
+      const cached = loadCache.get(node.id)
+      const staticChildren = Array.isArray(node.children) ? node.children : []
+      const children = cached && cached.status === 'loaded' ? cached.children : staticChildren
+      const lazy = !!(loadChildren && node.hasChildren === true && !staticChildren.length && !(cached && cached.status === 'loaded'))
+      return {
+        children: children,
+        hasKids: !!(children.length || lazy || (cached && (cached.status === 'loading' || cached.status === 'error'))),
+        loadState: cached ? cached.status : 'idle',
+        loading: !!(cached && cached.status === 'loading'),
+        error: cached && cached.status === 'error' ? cached.error : null,
+      }
+    }
+
+    function bumpLoadVersion() { loadVersion.set(loadVersion.peek() + 1) }
+
+    function findNode(id) {
+      let found = null
+      function walk(nodes) {
+        for (let i = 0; i < nodes.length && !found; i++) {
+          const node = nodes[i]
+          if (node.id === id) { found = node; return }
+          const children = inspectNode(node).children
+          if (children.length) walk(children)
+        }
+      }
+      walk(items.peek() || [])
+      return found
+    }
+
+    function ensureChildren(node) {
+      if (!loadChildren || !node || node.hasChildren !== true) return Promise.resolve([])
+      const staticChildren = Array.isArray(node.children) ? node.children : []
+      if (staticChildren.length) return Promise.resolve(staticChildren)
+      const current = loadCache.get(node.id)
+      if (current && current.status === 'loaded') return Promise.resolve(current.children)
+      if (current && current.status === 'loading') return current.promise
+      if (current && current.status === 'error') return Promise.resolve([])
+
+      const controller = new AbortController()
+      const token = {}
+      const state = { status: 'loading', children: [], error: null, controller: controller, token: token, promise: null }
+      loadCache.set(node.id, state)
+      bumpLoadVersion()
+      const source = { scope: 'ui.tree', action: 'loadChildren', nodeId: node.id }
+      let thrown = null
+      const result = aiditor.safeCall(source, function () {
+        try { return loadChildren(node, controller.signal) }
+        catch (err) { thrown = err; throw err }
+      })
+      const pending = thrown ? Promise.reject(thrown) : Promise.resolve(result)
+      state.promise = pending.then(function (children) {
+        if (controller.signal.aborted || loadCache.get(node.id) !== state || state.token !== token) return []
+        if (!Array.isArray(children)) throw new Error('ui.tree: loadChildren must resolve to an array')
+        state.status = 'loaded'
+        state.children = children
+        state.controller = null
+        bumpLoadVersion()
+        return children
+      }).catch(function (err) {
+        if (controller.signal.aborted || loadCache.get(node.id) !== state) return []
+        state.status = 'error'
+        state.error = err
+        state.controller = null
+        bumpLoadVersion()
+        return []
+      })
+      return state.promise
+    }
+
+    function abortLoad(id) {
+      const state = loadCache.get(id)
+      if (!state || state.status !== 'loading') return
+      state.controller.abort()
+      loadCache.delete(id)
+      bumpLoadVersion()
+    }
+
+    function invalidateChildren(id) {
+      const ids = id == null ? Array.from(loadCache.keys()) : [id]
+      for (let i = 0; i < ids.length; i++) {
+        const state = loadCache.get(ids[i])
+        if (state && state.controller) state.controller.abort()
+        loadCache.delete(ids[i])
+      }
+      bumpLoadVersion()
+      for (let i = 0; i < ids.length; i++) {
+        if (!asSet(expanded.peek()).has(ids[i])) continue
+        const node = findNode(ids[i])
+        if (node) ensureChildren(node)
+      }
+    }
+
+    function retryChildren(id) {
+      invalidateChildren(id)
+      const node = findNode(id)
+      return node ? ensureChildren(node) : Promise.resolve([])
+    }
 
     // Root element. Role + aria-multiselectable announce the tree to AT.
     const el = ui.h('div', 'aiditor-ui-tree aiditor-ui-scrollarea')
@@ -325,7 +441,8 @@
 
     // Derived flat list; recomputed whenever items / expanded / search change.
     const flatSig = aiditor.derived(function () {
-      return flatten(items(), expanded(), searchSig(), matchFn, searchBehavior)
+      loadVersion()
+      return flatten(items(), expanded(), searchSig(), matchFn, searchBehavior, inspectNode)
     })
     ui.collect(el, flatSig.dispose)
 
@@ -356,10 +473,15 @@
           focused: row.node.id === focusedId,
           selected: readSelSet().has(row.node.id),
           matched: row.matched,
+          loading: row.loading,
+          error: row.error,
+          loadState: row.loadState,
         },
         query: searchSig.peek(),
         highlight: makeHighlight(searchSig.peek()),
         toggle:   function () { toggleNode(row.node.id) },
+        retry:    function () { return retryChildren(row.node.id) },
+        invalidate: function () { invalidateChildren(row.node.id) },
         select:   function (mode) { applyClickSelect(row, mode || 'replace') },
         activate: function () { if (typeof o.onActivate === 'function') o.onActivate(row.node) },
       }
@@ -397,6 +519,16 @@
       rowEl.classList.toggle('aiditor-ui-tree-row-disabled', !can)
       rowEl.setAttribute('aria-selected', sel ? 'true' : 'false')
       rowEl.setAttribute('aria-level', String(row.depth + 1))
+      rowEl.setAttribute('aria-posinset', String(row.posInSet))
+      rowEl.setAttribute('aria-setsize', String(row.setSize))
+      rowEl.classList.toggle('aiditor-ui-tree-row-loading', !!row.loading)
+      rowEl.classList.toggle('aiditor-ui-tree-row-error', !!row.error)
+      if (row.loading) rowEl.setAttribute('aria-busy', 'true')
+      else rowEl.removeAttribute('aria-busy')
+      const label = String(row.node.label != null ? row.node.label : row.node.id)
+      if (row.loading) rowEl.setAttribute('aria-label', label + ', loading')
+      else if (row.error) rowEl.setAttribute('aria-label', label + ', loading failed')
+      else rowEl.removeAttribute('aria-label')
       if (row.hasKids) rowEl.setAttribute('aria-expanded', row.expanded ? 'true' : 'false')
       else rowEl.removeAttribute('aria-expanded')
       rowEl.dataset.treeNodeId = String(id)
@@ -519,6 +651,39 @@
       if (typeof o.onExpand === 'function') o.onExpand(id, next.has(id))
     }
 
+    let previousExpanded = new Set()
+    const stopAsyncExpansion = aiditor.effect(function () {
+      const current = asSet(expanded())
+      loadVersion()
+      previousExpanded.forEach(function (id) { if (!current.has(id)) abortLoad(id) })
+      current.forEach(function (id) {
+        const node = findNode(id)
+        if (node) ensureChildren(node)
+      })
+      previousExpanded = new Set(current)
+    })
+    ui.collect(el, stopAsyncExpansion)
+
+    const stopPruneLoads = aiditor.effect(function () {
+      items()
+      loadVersion()
+      const known = new Set()
+      function walk(nodes) {
+        for (let i = 0; i < nodes.length; i++) {
+          known.add(nodes[i].id)
+          const children = inspectNode(nodes[i]).children
+          if (children.length) walk(children)
+        }
+      }
+      walk(items.peek() || [])
+      loadCache.forEach(function (state, id) {
+        if (known.has(id)) return
+        if (state.controller) state.controller.abort()
+        loadCache.delete(id)
+      })
+    })
+    ui.collect(el, stopPruneLoads)
+
     // ── virtualizer ────────────────────────────────────────────────
     // Slots and renderRow use the simple per-index cache. renderTemplate is
     // the stable high-frequency path: visible instances reconcile by node id
@@ -631,6 +796,8 @@
 
     el.addEventListener('scroll', paint, { passive: true })
     ui.collect(el, function () {
+      loadCache.forEach(function (state) { if (state.controller) state.controller.abort() })
+      loadCache.clear()
       rowCache.forEach(function (entry) {
         if (entry.tpl && typeof entry.tpl.dispose === 'function') entry.tpl.dispose()
         else ui.dispose(entry.el)
@@ -750,7 +917,7 @@
         const i = flat.findIndex(function (r) { return r.node.id === id })
         if (i >= 0) scrollIntoView(i)
       },
-      expandAll:   function () { writeExpanded(allIds(items.peek())) },
+      expandAll:   function () { writeExpanded(allIds(items.peek(), inspectNode)) },
       collapseAll: function () { writeExpanded(new Set()) },
       getFlat:     function () { return flatSig.peek() },
       getRowEl:    function (id) {
@@ -762,6 +929,9 @@
       focus:     function () { el.focus() },
       toggle:    toggleNode,                 // expand/collapse a single node
       isExpanded: function (id) { return asSet(expanded.peek()).has(id) },
+      invalidateChildren: invalidateChildren,
+      retry: retryChildren,
+      loadState: function (id) { return inspectNode(findNode(id) || { id: id }).loadState },
       // Exposed so tree-dnd can reach virtualizer internals without
       // re-implementing hit-test or scrolling. Keep underscore-prefixed —
       // not part of the public contract.

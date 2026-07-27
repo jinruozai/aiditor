@@ -8672,6 +8672,193 @@
   }
   function safeRead(dt, type) { try { return dt.getData(type) } catch (_) { return '' } }
 
+  function externalCapabilities() {
+    const proto = typeof DataTransferItem !== 'undefined' && DataTransferItem.prototype
+    return {
+      files: true,
+      directories: !!(proto && (
+        typeof proto.getAsFileSystemHandle === 'function' ||
+        typeof proto.getAsEntry === 'function' ||
+        typeof proto.webkitGetAsEntry === 'function'
+      )),
+    }
+  }
+
+  // Capture entry/handle access synchronously in the drop event tick. Some
+  // browsers invalidate DataTransferItem access as soon as the handler yields.
+  function captureExternalSources(dt) {
+    const sources = []
+    const items = dt && dt.items ? Array.from(dt.items) : []
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (!item || item.kind !== 'file') continue
+      const getEntry = item.getAsEntry || item.webkitGetAsEntry
+      sources.push({
+        handle: typeof item.getAsFileSystemHandle === 'function' ? item.getAsFileSystemHandle() : null,
+        entry: typeof getEntry === 'function' ? getEntry.call(item) : null,
+        file: typeof item.getAsFile === 'function' ? item.getAsFile() : null,
+      })
+    }
+    if (!sources.length && dt && dt.files) {
+      const files = Array.from(dt.files)
+      for (let i = 0; i < files.length; i++) sources.push({ file: files[i] })
+    }
+    return sources
+  }
+
+  function readExternalEntries(dt, opts) {
+    return normalizeExternalSources(captureExternalSources(dt), opts || {})
+  }
+
+  async function normalizeExternalSources(sources, opts) {
+    const signal = opts.signal || null
+    const state = {
+      entries: [],
+      errors: [],
+      directoryPaths: new Set(),
+      maxEntries: opts.maxEntries || 10000,
+      maxDepth: opts.maxDepth || 64,
+      limited: false,
+    }
+    for (let i = 0; i < sources.length && !state.limited; i++) {
+      throwIfAborted(signal)
+      const source = sources[i]
+      let handle = null
+      let handleError = null
+      if (source.handle) {
+        try { handle = await source.handle }
+        catch (err) { handleError = err }
+      }
+      if (handle) await walkHandle(handle, '', 0, state, signal)
+      else if (source.entry) await walkLegacyEntry(source.entry, '', 0, state, signal)
+      else if (source.file) appendFileWithParents(source.file, state)
+      else if (handleError) pushReadError(state, '', handleError)
+    }
+    return {
+      entries: state.entries,
+      errors: state.errors,
+      capabilities: externalCapabilities(),
+    }
+  }
+
+  async function walkHandle(handle, parent, depth, state, signal) {
+    throwIfAborted(signal)
+    const path = joinRelative(parent, handle.name)
+    if (depth > state.maxDepth) { pushLimitError(state, path, 'max_depth'); return }
+    if (handle.kind === 'directory') {
+      if (!pushExternalEntry(state, { kind: 'directory', name: handle.name, relativePath: path })) return
+      try {
+        for await (const child of handle.values()) {
+          if (state.limited) break
+          await walkHandle(child, path, depth + 1, state, signal)
+        }
+      } catch (err) {
+        if (signal && signal.aborted) throw abortError()
+        pushReadError(state, path, err)
+      }
+      return
+    }
+    try {
+      const file = await handle.getFile()
+      pushExternalEntry(state, { kind: 'file', name: handle.name, relativePath: path, file: file })
+    } catch (err) {
+      if (signal && signal.aborted) throw abortError()
+      pushReadError(state, path, err)
+    }
+  }
+
+  async function walkLegacyEntry(entry, parent, depth, state, signal) {
+    throwIfAborted(signal)
+    const path = joinRelative(parent, entry.name)
+    if (depth > state.maxDepth) { pushLimitError(state, path, 'max_depth'); return }
+    if (entry.isDirectory) {
+      if (!pushExternalEntry(state, { kind: 'directory', name: entry.name, relativePath: path })) return
+      let children
+      try { children = await readAllLegacyEntries(entry.createReader(), signal) }
+      catch (err) {
+        if (signal && signal.aborted) throw abortError()
+        pushReadError(state, path, err)
+        return
+      }
+      for (let i = 0; i < children.length && !state.limited; i++) {
+        await walkLegacyEntry(children[i], path, depth + 1, state, signal)
+      }
+      return
+    }
+    try {
+      const file = await legacyFile(entry, signal)
+      pushExternalEntry(state, { kind: 'file', name: entry.name, relativePath: path, file: file })
+    } catch (err) {
+      if (signal && signal.aborted) throw abortError()
+      pushReadError(state, path, err)
+    }
+  }
+
+  function readAllLegacyEntries(reader, signal) {
+    return new Promise(function (resolve, reject) {
+      const out = []
+      function next() {
+        if (signal && signal.aborted) { reject(abortError()); return }
+        reader.readEntries(function (batch) {
+          if (!batch || !batch.length) { resolve(out); return }
+          out.push.apply(out, batch)
+          next()
+        }, reject)
+      }
+      next()
+    })
+  }
+
+  function legacyFile(entry, signal) {
+    return new Promise(function (resolve, reject) {
+      if (signal && signal.aborted) { reject(abortError()); return }
+      entry.file(resolve, reject)
+    })
+  }
+
+  function appendFileWithParents(file, state) {
+    const path = normalizeRelative(file.webkitRelativePath || file.name)
+    const parts = path.split('/').filter(Boolean)
+    let parent = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      parent = joinRelative(parent, parts[i])
+      if (!state.directoryPaths.has(parent) && !pushExternalEntry(state, { kind: 'directory', name: parts[i], relativePath: parent })) return
+    }
+    pushExternalEntry(state, { kind: 'file', name: file.name, relativePath: path, file: file })
+  }
+
+  function pushExternalEntry(state, entry) {
+    if (state.entries.length >= state.maxEntries) {
+      pushLimitError(state, entry.relativePath, 'max_entries')
+      return false
+    }
+    state.entries.push(entry)
+    if (entry.kind === 'directory') state.directoryPaths.add(entry.relativePath)
+    return true
+  }
+
+  function pushLimitError(state, path, code) {
+    if (state.limited) return
+    state.limited = true
+    state.errors.push({ path: path || '', op: 'read', code: code, message: code === 'max_depth' ? 'Directory nesting limit exceeded.' : 'Dropped entry limit exceeded.' })
+  }
+
+  function pushReadError(state, path, err) {
+    state.errors.push({
+      path: path || '',
+      op: 'read',
+      code: err && (err.name || err.code) || 'read_failed',
+      message: err && err.message || 'Failed to read dropped entry.',
+    })
+  }
+
+  function normalizeRelative(path) {
+    return String(path || '').replace(/\\/g, '/').split('/').filter(function (part) { return part && part !== '.' }).join('/')
+  }
+  function joinRelative(parent, name) { return normalizeRelative(parent ? parent + '/' + name : name) }
+  function throwIfAborted(signal) { if (signal && signal.aborted) throw abortError() }
+  function abortError() { const err = new Error('Drop reading cancelled.'); err.name = 'AbortError'; return err }
+
   // Shallow gate that works with only dt.types (no file/JSON content).
   // If `accept` is a function, caller owns the full decision; we pass the
   // shallow `data` and they can `return true` optimistically at dragover
@@ -8694,6 +8881,7 @@
     if (!onDrop) throw new Error('ui.dropzone: onDrop is required')
 
     let depth = 0     // track nested dragenter/leave so we don't flicker on child hover
+    let readController = null
 
     function clear() {
       depth = 0
@@ -8712,7 +8900,7 @@
       return matchesAccept(accept, peekTypes(ev.dataTransfer))
     }
     function shallowCanDrop(ev) {
-      return canDrop(extractData(ev.dataTransfer, false))
+      return canDrop(extractData(ev.dataTransfer, false), ev)
     }
 
     function onEnter(ev) {
@@ -8737,8 +8925,34 @@
       ev.preventDefault()
       clear()
       const data = extractData(ev.dataTransfer, true)
-      if (!canDrop(data)) return
-      onDrop(data, ev)
+      const sources = captureExternalSources(ev.dataTransfer)
+      if (!sources.length) {
+        data.entries = []
+        data.errors = []
+        data.capabilities = externalCapabilities()
+        if (canDrop(data, ev)) onDrop(data, ev)
+        return
+      }
+      if (readController) readController.abort()
+      readController = new AbortController()
+      const current = readController
+      normalizeExternalSources(sources, {
+        signal: current.signal,
+        maxEntries: o.maxEntries,
+        maxDepth: o.maxDepth,
+      }).then(function (external) {
+        if (current.signal.aborted) return
+        data.entries = external.entries
+        data.errors = external.errors
+        data.capabilities = external.capabilities
+        if (!canDrop(data, ev)) return
+        onDrop(data, ev)
+      }).catch(function (err) {
+        if (err && err.name === 'AbortError') return
+        aiditor.reportError(err, { scope: 'ui.dropzone', action: 'readExternalEntries' })
+      }).finally(function () {
+        if (readController === current) readController = null
+      })
     }
 
     el.addEventListener('dragenter', onEnter)
@@ -8747,11 +8961,19 @@
     el.addEventListener('drop',      onDropEv)
 
     const detach = function () {
+      if (readController) readController.abort()
+      readController = null
       el.removeEventListener('dragenter', onEnter)
       el.removeEventListener('dragover',  onOver)
       el.removeEventListener('dragleave', onLeave)
       el.removeEventListener('drop',      onDropEv)
       clear()
+    }
+    detach.cancel = function () { if (readController) readController.abort() }
+    if (o.signal) {
+      const cancel = function () { detach.cancel() }
+      o.signal.addEventListener('abort', cancel, { once: true })
+      ui.collect(el, function () { o.signal.removeEventListener('abort', cancel) })
     }
     ui.collect(el, detach)
     return detach
@@ -8865,7 +9087,12 @@
     return ''
   }
 
-  ui.dnd = { matchesKind: matchesKind, extractUrl: extractUrl }
+  ui.dnd = {
+    matchesKind: matchesKind,
+    extractUrl: extractUrl,
+    capabilities: externalCapabilities,
+    readExternalEntries: readExternalEntries,
+  }
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ui/base/icon-set.js ---- */
@@ -12112,6 +12339,7 @@
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
+  let messageId = 0
   const EDITOR_CONTEXT_SELECTOR = [
     'input',
     'textarea',
@@ -12180,6 +12408,7 @@
       const editor = f.editor(fieldSig, writeSlot, ctx)
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
+      if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
 
       if (f.labelActions) {
         const labelActions = ui.h('div', 'aiditor-ui-struct-input-label-actions')
@@ -12240,6 +12469,88 @@
     if (f.label === false || f.labelMode === 'hidden') return 'hidden'
     if (f.labelMode === 'sr-only') return 'sr-only'
     return 'visible'
+  }
+
+  function bindFieldMessages(root, row, cell, editor, source) {
+    const sig = ui.isSignal(source) ? source : aiditor.signal(source || [])
+    const box = ui.h('div', 'aiditor-ui-field-messages')
+    const id = 'aiditor-field-messages-' + (++messageId)
+    box.id = id
+    box.setAttribute('role', 'status')
+    box.setAttribute('aria-live', 'polite')
+    box.hidden = true
+    cell.appendChild(box)
+    const control = messageControl(editor)
+    const previousDescribedBy = control && control.getAttribute ? control.getAttribute('aria-describedby') : null
+    const previousInvalid = control && control.getAttribute ? control.getAttribute('aria-invalid') : null
+    ui.bind(box, sig, function (value) {
+      const messages = normalizeMessages(value)
+      ui.disposeChildren(box)
+      let hasError = false
+      for (let i = 0; i < messages.length; i++) {
+        const item = messages[i]
+        if (item.kind === 'error') hasError = true
+        const line = ui.h('div', 'aiditor-ui-field-message aiditor-ui-field-message-' + item.kind, { text: item.message })
+        if (item.code) line.dataset.code = item.code
+        box.appendChild(line)
+      }
+      box.hidden = messages.length === 0
+      row.classList.toggle('aiditor-ui-struct-input-row-has-message', messages.length > 0)
+      row.classList.toggle('aiditor-ui-struct-input-row-has-error', hasError)
+      if (control && control.setAttribute) {
+        const describedBy = describedByValue(previousDescribedBy, id, messages.length > 0)
+        if (describedBy) control.setAttribute('aria-describedby', describedBy)
+        else control.removeAttribute('aria-describedby')
+        if (hasError) control.setAttribute('aria-invalid', 'true')
+        else if (previousInvalid != null) control.setAttribute('aria-invalid', previousInvalid)
+        else control.removeAttribute('aria-invalid')
+      }
+    })
+    if (sig !== source && sig.dispose) ui.collect(root, sig.dispose)
+    if (source && source.dispose) ui.collect(root, source.dispose)
+  }
+
+  function normalizeMessages(value) {
+    const list = Array.isArray(value) ? value : (value ? [value] : [])
+    const out = []
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i]
+      if (!item || item.message == null) continue
+      const kind = item.kind === 'error' || item.kind === 'warning' ? item.kind : 'info'
+      out.push({ kind: kind, message: String(item.message), code: item.code == null ? '' : String(item.code) })
+    }
+    return out
+  }
+
+  function messageControl(editor) {
+    if (!editor) return null
+    const composite = [
+      'aiditor-ui-struct-input',
+      'aiditor-ui-array-editor',
+      'aiditor-ui-dict-input',
+      'aiditor-ui-vec',
+      'aiditor-ui-color',
+      'aiditor-ui-gradient',
+      'aiditor-ui-curve',
+    ]
+    for (let i = 0; i < composite.length; i++) {
+      if (editor.classList && editor.classList.contains(composite[i])) return editor
+    }
+    const tags = ['input', 'textarea', 'select', '[role="textbox"]', '[role="spinbutton"]', '[role="combobox"]']
+    for (let i = 0; i < tags.length; i++) {
+      if (editor.matches && editor.matches(tags[i])) return editor
+      if (editor.querySelector) {
+        const found = editor.querySelector(tags[i])
+        if (found) return found
+      }
+    }
+    return editor
+  }
+
+  function describedByValue(previous, id, active) {
+    const parts = String(previous || '').split(/\s+/).filter(function (part) { return part && part !== id })
+    if (active) parts.push(id)
+    return parts.join(' ')
   }
 
   function fieldLabel(f) {
@@ -13714,6 +14025,7 @@
         collapsed: rawObj && rawObj.collapsed,
         onToggle: rawObj && rawObj.onToggle,
         actions: rawObj && rawObj.actions,
+        messages: messagesForContext(withFieldPath(a.ctx, fname)),
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, withFieldPath(ctx, fname)) },
       }
     })
@@ -13923,6 +14235,15 @@
     return typeof path === 'function' ? path() : path
   }
 
+  function messagesForContext(ctx) {
+    const source = ctx && ctx.fieldMessages
+    if (!ui.isSignal(source)) return null
+    return aiditor.derived(function () {
+      const map = source() || {}
+      return map[readFieldPath(ctx)] || []
+    })
+  }
+
   function appendFieldPath(base, segment) {
     const parts = []
     if (base) {
@@ -13975,6 +14296,7 @@
 //   fieldActions?:(fieldCtx) => UiAction[]            optional per-field row actions
 //   fieldContextActions?:(fieldCtx) => UiAction[]|Promise<UiAction[]>
 //                                                     optional per-field context-menu actions
+//   fieldMessages?:signal<object>|object              fieldPath -> FieldMessage[]
 //   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
 //                                                     filepath/img/snd editors
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
@@ -14039,6 +14361,7 @@
     const fieldActions = typeof o.fieldActions === 'function' ? o.fieldActions : null
     const fieldContextActions = typeof o.fieldContextActions === 'function' ? o.fieldContextActions : null
     const filePathActions = typeof o.filePathActions === 'function' ? o.filePathActions : null
+    const fieldMessages = ui.isSignal(o.fieldMessages) ? o.fieldMessages : aiditor.signal(o.fieldMessages || {})
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const ctx       = o.ctx
@@ -14102,6 +14425,7 @@
           const label = fieldLabel(raw, fname)
           const action = fieldActionSignals(fname, label, raw, subFd)
           const reset = resetActionSignal(fname, defaults)
+          const messages = messagesForPath(fieldMessages, fname)
           return {
             key:     fname,
             label:   label.value,
@@ -14116,8 +14440,9 @@
             actionCtx: action.ctx,
             contextActions: action.contextActions,
             contextCtx: action.ctx,
+            messages: messages,
             editor:  function (slotSig, write, innerCtx) {
-              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions), subFd,
+              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions, fieldMessages), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
           }
@@ -14311,14 +14636,22 @@
     return out
   }
 
-  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions) {
+  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions, fieldMessages) {
     const out = fieldCtx(ctx, field)
     out.field = field
     out.label = label && label.value || field
     out.rawField = raw
     out.resolvedField = resolved
+    out.fieldMessages = fieldMessages
     if (filePathActions) out.filePathActions = filePathActions
     return out
+  }
+
+  function messagesForPath(messages, path) {
+    return aiditor.derived(function () {
+      const map = messages() || {}
+      return map[path] || []
+    })
   }
 
   function fieldDisabled(targets, requireAllTargets, canEdit, field, raw) {
@@ -17709,16 +18042,21 @@
   // of visible ids (match OR has matching descendant) plus the set of ids
   // to auto-expand (has matching descendant). Second pass walks the tree
   // keeping only visible ids, honoring the auto-expand union. O(n) total.
-  function flatten(items, expanded, query, match, behavior) {
+  function flatten(items, expanded, query, match, behavior, inspectNode) {
     const out = []
     if (!query) {
       function walk(nodes, depth) {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i]
-          const hasKids = !!(n.children && n.children.length)
+          const info = inspectNode(n)
+          const hasKids = info.hasKids
           const isExp = expanded.has(n.id)
-          out.push({ node: n, depth: depth, hasKids: hasKids, expanded: isExp, matched: false })
-          if (hasKids && isExp) walk(n.children, depth + 1)
+          out.push({
+            node: n, depth: depth, hasKids: hasKids, expanded: isExp, matched: false,
+            loadState: info.loadState, loading: info.loading, error: info.error,
+            posInSet: i + 1, setSize: nodes.length,
+          })
+          if (info.children.length && isExp) walk(info.children, depth + 1)
         }
       }
       walk(items, 0)
@@ -17732,9 +18070,10 @@
       let anyMatch = false
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i]
+        const info = inspectNode(n)
         const self = !!match(n, query)
         if (self) matched.add(n.id)
-        const kidMatch = (n.children && n.children.length) ? scan(n.children) : false
+        const kidMatch = info.children.length ? scan(info.children) : false
         if (self || kidMatch) {
           visible.add(n.id)
           if (kidMatch) autoExp.add(n.id)
@@ -17750,13 +18089,16 @@
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i]
         if (!highlightMode && !visible.has(n.id)) continue
-        const hasKids = !!(n.children && n.children.length)
+        const info = inspectNode(n)
+        const hasKids = info.hasKids
         const isExp = expanded.has(n.id) || autoExp.has(n.id)
         out.push({
           node: n, depth: depth, hasKids: hasKids, expanded: isExp,
           matched: matched.has(n.id),
+          loadState: info.loadState, loading: info.loading, error: info.error,
+          posInSet: i + 1, setSize: nodes.length,
         })
-        if (hasKids && isExp) walk(n.children, depth + 1)
+        if (info.children.length && isExp) walk(info.children, depth + 1)
       }
     }
     walk(items, 0)
@@ -17764,12 +18106,13 @@
   }
 
   // All visible ids (expand-all / collapse-all helpers).
-  function allIds(items) {
+  function allIds(items, inspectNode) {
     const s = new Set()
     function walk(nodes) {
       for (let i = 0; i < nodes.length; i++) {
         s.add(nodes[i].id)
-        if (nodes[i].children && nodes[i].children.length) walk(nodes[i].children)
+        const children = inspectNode(nodes[i]).children
+        if (children.length) walk(children)
       }
     }
     walk(items)
@@ -17829,10 +18172,14 @@
           : row.hasKids
     const arrow = ui.h('span', 'aiditor-ui-tree-arrow')
     if (arrowShown && row.hasKids) {
-      arrow.textContent = row.expanded ? '▾' : '▸'
+      arrow.textContent = row.loading ? '' : (row.error ? '!' : (row.expanded ? '▾' : '▸'))
+      arrow.classList.toggle('aiditor-ui-tree-arrow-loading', !!row.loading)
+      arrow.classList.toggle('aiditor-ui-tree-arrow-error', !!row.error)
+      if (row.error) arrow.title = row.error.message || 'Failed to load children. Click to retry.'
       arrow.addEventListener('click', function (e) {
         e.stopPropagation()
-        ctx.toggle()
+        if (row.error) ctx.retry()
+        else ctx.toggle()
       })
     } else {
       arrow.textContent = ''
@@ -17922,6 +18269,9 @@
   ui.tree = function (opts) {
     const o = opts || {}
     const items = ui.asSig(o.items != null ? o.items : [])
+    const loadChildren = typeof o.loadChildren === 'function' ? o.loadChildren : null
+    const loadVersion = aiditor.signal(0)
+    const loadCache = new Map()
     const rowH = o.rowHeight || DEFAULT_ROW_H
     const indent = o.indentSize || DEFAULT_INDENT
 
@@ -17947,7 +18297,7 @@
     const writeExpanded = o.expanded ? ui.writer(o.expanded, null, 'ui.tree') : function (s) { expanded.set(s) }
     if (!o.expanded && o.defaultExpanded != null) {
       const init = o.defaultExpanded
-      if (init === 'all') expanded.set(allIds(items.peek()))
+      if (init === 'all') expanded.set(allIds(items.peek(), inspectNode))
       else if (Array.isArray(init)) expanded.set(new Set(init))
       else if (init === 'none') { /* empty by default */ }
     }
@@ -17959,6 +18309,105 @@
     // Focus/anchor tracked internally (non-reactive — only kbd cares).
     let focusedId = null
     let anchorId = null
+
+    function inspectNode(node) {
+      const cached = loadCache.get(node.id)
+      const staticChildren = Array.isArray(node.children) ? node.children : []
+      const children = cached && cached.status === 'loaded' ? cached.children : staticChildren
+      const lazy = !!(loadChildren && node.hasChildren === true && !staticChildren.length && !(cached && cached.status === 'loaded'))
+      return {
+        children: children,
+        hasKids: !!(children.length || lazy || (cached && (cached.status === 'loading' || cached.status === 'error'))),
+        loadState: cached ? cached.status : 'idle',
+        loading: !!(cached && cached.status === 'loading'),
+        error: cached && cached.status === 'error' ? cached.error : null,
+      }
+    }
+
+    function bumpLoadVersion() { loadVersion.set(loadVersion.peek() + 1) }
+
+    function findNode(id) {
+      let found = null
+      function walk(nodes) {
+        for (let i = 0; i < nodes.length && !found; i++) {
+          const node = nodes[i]
+          if (node.id === id) { found = node; return }
+          const children = inspectNode(node).children
+          if (children.length) walk(children)
+        }
+      }
+      walk(items.peek() || [])
+      return found
+    }
+
+    function ensureChildren(node) {
+      if (!loadChildren || !node || node.hasChildren !== true) return Promise.resolve([])
+      const staticChildren = Array.isArray(node.children) ? node.children : []
+      if (staticChildren.length) return Promise.resolve(staticChildren)
+      const current = loadCache.get(node.id)
+      if (current && current.status === 'loaded') return Promise.resolve(current.children)
+      if (current && current.status === 'loading') return current.promise
+      if (current && current.status === 'error') return Promise.resolve([])
+
+      const controller = new AbortController()
+      const token = {}
+      const state = { status: 'loading', children: [], error: null, controller: controller, token: token, promise: null }
+      loadCache.set(node.id, state)
+      bumpLoadVersion()
+      const source = { scope: 'ui.tree', action: 'loadChildren', nodeId: node.id }
+      let thrown = null
+      const result = aiditor.safeCall(source, function () {
+        try { return loadChildren(node, controller.signal) }
+        catch (err) { thrown = err; throw err }
+      })
+      const pending = thrown ? Promise.reject(thrown) : Promise.resolve(result)
+      state.promise = pending.then(function (children) {
+        if (controller.signal.aborted || loadCache.get(node.id) !== state || state.token !== token) return []
+        if (!Array.isArray(children)) throw new Error('ui.tree: loadChildren must resolve to an array')
+        state.status = 'loaded'
+        state.children = children
+        state.controller = null
+        bumpLoadVersion()
+        return children
+      }).catch(function (err) {
+        if (controller.signal.aborted || loadCache.get(node.id) !== state) return []
+        state.status = 'error'
+        state.error = err
+        state.controller = null
+        bumpLoadVersion()
+        return []
+      })
+      return state.promise
+    }
+
+    function abortLoad(id) {
+      const state = loadCache.get(id)
+      if (!state || state.status !== 'loading') return
+      state.controller.abort()
+      loadCache.delete(id)
+      bumpLoadVersion()
+    }
+
+    function invalidateChildren(id) {
+      const ids = id == null ? Array.from(loadCache.keys()) : [id]
+      for (let i = 0; i < ids.length; i++) {
+        const state = loadCache.get(ids[i])
+        if (state && state.controller) state.controller.abort()
+        loadCache.delete(ids[i])
+      }
+      bumpLoadVersion()
+      for (let i = 0; i < ids.length; i++) {
+        if (!asSet(expanded.peek()).has(ids[i])) continue
+        const node = findNode(ids[i])
+        if (node) ensureChildren(node)
+      }
+    }
+
+    function retryChildren(id) {
+      invalidateChildren(id)
+      const node = findNode(id)
+      return node ? ensureChildren(node) : Promise.resolve([])
+    }
 
     // Root element. Role + aria-multiselectable announce the tree to AT.
     const el = ui.h('div', 'aiditor-ui-tree aiditor-ui-scrollarea')
@@ -17979,7 +18428,8 @@
 
     // Derived flat list; recomputed whenever items / expanded / search change.
     const flatSig = aiditor.derived(function () {
-      return flatten(items(), expanded(), searchSig(), matchFn, searchBehavior)
+      loadVersion()
+      return flatten(items(), expanded(), searchSig(), matchFn, searchBehavior, inspectNode)
     })
     ui.collect(el, flatSig.dispose)
 
@@ -18010,10 +18460,15 @@
           focused: row.node.id === focusedId,
           selected: readSelSet().has(row.node.id),
           matched: row.matched,
+          loading: row.loading,
+          error: row.error,
+          loadState: row.loadState,
         },
         query: searchSig.peek(),
         highlight: makeHighlight(searchSig.peek()),
         toggle:   function () { toggleNode(row.node.id) },
+        retry:    function () { return retryChildren(row.node.id) },
+        invalidate: function () { invalidateChildren(row.node.id) },
         select:   function (mode) { applyClickSelect(row, mode || 'replace') },
         activate: function () { if (typeof o.onActivate === 'function') o.onActivate(row.node) },
       }
@@ -18051,6 +18506,16 @@
       rowEl.classList.toggle('aiditor-ui-tree-row-disabled', !can)
       rowEl.setAttribute('aria-selected', sel ? 'true' : 'false')
       rowEl.setAttribute('aria-level', String(row.depth + 1))
+      rowEl.setAttribute('aria-posinset', String(row.posInSet))
+      rowEl.setAttribute('aria-setsize', String(row.setSize))
+      rowEl.classList.toggle('aiditor-ui-tree-row-loading', !!row.loading)
+      rowEl.classList.toggle('aiditor-ui-tree-row-error', !!row.error)
+      if (row.loading) rowEl.setAttribute('aria-busy', 'true')
+      else rowEl.removeAttribute('aria-busy')
+      const label = String(row.node.label != null ? row.node.label : row.node.id)
+      if (row.loading) rowEl.setAttribute('aria-label', label + ', loading')
+      else if (row.error) rowEl.setAttribute('aria-label', label + ', loading failed')
+      else rowEl.removeAttribute('aria-label')
       if (row.hasKids) rowEl.setAttribute('aria-expanded', row.expanded ? 'true' : 'false')
       else rowEl.removeAttribute('aria-expanded')
       rowEl.dataset.treeNodeId = String(id)
@@ -18173,6 +18638,39 @@
       if (typeof o.onExpand === 'function') o.onExpand(id, next.has(id))
     }
 
+    let previousExpanded = new Set()
+    const stopAsyncExpansion = aiditor.effect(function () {
+      const current = asSet(expanded())
+      loadVersion()
+      previousExpanded.forEach(function (id) { if (!current.has(id)) abortLoad(id) })
+      current.forEach(function (id) {
+        const node = findNode(id)
+        if (node) ensureChildren(node)
+      })
+      previousExpanded = new Set(current)
+    })
+    ui.collect(el, stopAsyncExpansion)
+
+    const stopPruneLoads = aiditor.effect(function () {
+      items()
+      loadVersion()
+      const known = new Set()
+      function walk(nodes) {
+        for (let i = 0; i < nodes.length; i++) {
+          known.add(nodes[i].id)
+          const children = inspectNode(nodes[i]).children
+          if (children.length) walk(children)
+        }
+      }
+      walk(items.peek() || [])
+      loadCache.forEach(function (state, id) {
+        if (known.has(id)) return
+        if (state.controller) state.controller.abort()
+        loadCache.delete(id)
+      })
+    })
+    ui.collect(el, stopPruneLoads)
+
     // ── virtualizer ────────────────────────────────────────────────
     // Slots and renderRow use the simple per-index cache. renderTemplate is
     // the stable high-frequency path: visible instances reconcile by node id
@@ -18285,6 +18783,8 @@
 
     el.addEventListener('scroll', paint, { passive: true })
     ui.collect(el, function () {
+      loadCache.forEach(function (state) { if (state.controller) state.controller.abort() })
+      loadCache.clear()
       rowCache.forEach(function (entry) {
         if (entry.tpl && typeof entry.tpl.dispose === 'function') entry.tpl.dispose()
         else ui.dispose(entry.el)
@@ -18404,7 +18904,7 @@
         const i = flat.findIndex(function (r) { return r.node.id === id })
         if (i >= 0) scrollIntoView(i)
       },
-      expandAll:   function () { writeExpanded(allIds(items.peek())) },
+      expandAll:   function () { writeExpanded(allIds(items.peek(), inspectNode)) },
       collapseAll: function () { writeExpanded(new Set()) },
       getFlat:     function () { return flatSig.peek() },
       getRowEl:    function (id) {
@@ -18416,6 +18916,9 @@
       focus:     function () { el.focus() },
       toggle:    toggleNode,                 // expand/collapse a single node
       isExpanded: function (id) { return asSet(expanded.peek()).has(id) },
+      invalidateChildren: invalidateChildren,
+      retry: retryChildren,
+      loadState: function (id) { return inspectNode(findNode(id) || { id: id }).loadState },
       // Exposed so tree-dnd can reach virtualizer internals without
       // re-implementing hit-test or scrolling. Keep underscore-prefixed —
       // not part of the public contract.
@@ -18968,463 +19471,535 @@
   }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ui/data/assetBrowser.js ---- */
-// aiditor.ui.assetBrowser - generic file-manager style asset browser.
+/* ---- ui/data/fileBrowser.js ---- */
+// aiditor.ui.fileBrowser — neutral current-directory file browser.
 //
-// The component is intentionally storage-agnostic. It renders entries and
-// interactions; callers provide an adapter for listing, importing, moving,
-// renaming, deleting, preview URL resolution, and persistence side effects.
+// The browser owns presentation and interaction only. Callers own directory
+// loading, file mutations, persistence, and all project/asset semantics.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
 
-  const VIEW = [
-    ['sm', 'assetBrowser.view.small', 'Small icons'],
-    ['md', 'assetBrowser.view.medium', 'Medium icons'],
-    ['lg', 'assetBrowser.view.large', 'Large icons'],
-    ['xl', 'assetBrowser.view.extraLarge', 'Extra large icons'],
-    ['list', 'assetBrowser.view.list', 'List'],
+  const VIEWS = [
+    { value: 'icons', label: 'Icons', icon: 'grid' },
+    { value: 'list', label: 'List', icon: 'list' },
   ]
-  const SORT = [
-    ['name', 'assetBrowser.sort.name', 'Name'],
-    ['mtime', 'assetBrowser.sort.modified', 'Modified'],
-    ['kind', 'assetBrowser.sort.type', 'Type'],
-    ['size', 'assetBrowser.sort.size', 'Size'],
-    ['ctime', 'assetBrowser.sort.created', 'Created'],
+  const SORTS = [
+    { value: 'name', label: 'Name' },
+    { value: 'kind', label: 'Type' },
+    { value: 'size', label: 'Size' },
+    { value: 'mtime', label: 'Modified' },
   ]
 
-  function tr(key, fallback, vars) {
-    if (!aiditor.i18n) return fallback
-    const value = aiditor.i18n.t(key, vars)
-    return value === key ? fallback : value
-  }
-
-  ui.assetBrowser = function (opts) {
+  ui.fileBrowser = function (opts) {
     const o = opts || {}
-    const storageKey = o.storageKey || ''
-    const version = o.version || aiditor.signal(0)
-    const searchSig = aiditor.signal('')
-    const selectedSig = aiditor.signal([])
-    let dir = o.initialDir || ''
-    let query = ''
-    let last = -1
-    let view = load('view', o.view || 'md')
-    let sortBy = load('sortBy', o.sortBy || 'name')
-    let sortDir = load('sortDir', o.sortDir || 'asc')
+    const entries = ui.asSig(o.entries != null ? o.entries : [])
+    const path = ui.asSig(o.path != null ? o.path : '')
+    const selected = ui.asSig(o.selected != null ? o.selected : [])
+    const view = ui.asSig(o.view != null ? o.view : 'icons')
+    const sort = ui.asSig(o.sort != null ? o.sort : { by: 'name', direction: 'asc' })
+    const query = aiditor.signal('')
 
-    const root = ui.h('div', 'aiditor-ui-asset-browser')
-    const bar = ui.h('div', 'aiditor-ui-assetbar')
-    const crumb = ui.h('div', 'aiditor-ui-assetcrumb')
-    const search = ui.searchInput({ value: searchSig, placeholder: o.placeholder || (aiditor.i18n ? aiditor.i18n.text('assetBrowser.search') : 'Search assets...') })
-    const viewBtn = ui.iconButton({ icon: 'grid', title: aiditor.i18n ? aiditor.i18n.text('assetBrowser.view') : 'View', size: 'sm', onClick: openViewMenu })
-    const sortBtn = ui.iconButton({ icon: 'arrow-up-down', title: aiditor.i18n ? aiditor.i18n.text('assetBrowser.sort') : 'Sort', size: 'sm', onClick: openSortMenu })
-    const grid = ui.h('div', 'aiditor-ui-assetgrid')
-    let menuHandle = null
-    let suppressGridClick = false
-    bar.appendChild(crumb)
+    requireWritePath(path, o.onPathChange, 'path/onPathChange')
+    requireWritePath(selected, o.onSelect, 'selected/onSelect')
+    requireWritePath(view, o.onViewChange, 'view/onViewChange')
+    requireWritePath(sort, o.onSortChange, 'sort/onSortChange')
+
+    const getKey = typeof o.getKey === 'function' ? o.getKey : defaultKey
+    const getName = typeof o.getName === 'function' ? o.getName : defaultName
+    const getPath = typeof o.getPath === 'function' ? o.getPath : defaultPath
+    const getKind = typeof o.getKind === 'function' ? o.getKind : defaultKind
+    const getSearchText = typeof o.getSearchText === 'function' ? o.getSearchText : function (entry) { return [getName(entry), getPath(entry), getKind(entry)] }
+
+    const root = ui.h('div', 'aiditor-ui-file-browser')
+    const bar = ui.h('div', 'aiditor-ui-filebar')
+    const crumbs = ui.h('div', 'aiditor-ui-filecrumb')
+    const search = ui.searchInput({ value: query, placeholder: o.placeholder || 'Search files...' })
+    const viewBtn = ui.iconButton({ icon: 'grid', title: 'View', size: 'sm', onClick: openViewMenu })
+    const sortBtn = ui.iconButton({ icon: 'arrow-up-down', title: 'Sort', size: 'sm', onClick: openSortMenu })
+    const grid = ui.h('div', 'aiditor-ui-filegrid')
+    grid.setAttribute('role', 'listbox')
+    grid.tabIndex = 0
+    if (o.multi !== false) grid.setAttribute('aria-multiselectable', 'true')
+    bar.appendChild(crumbs)
     bar.appendChild(search)
     bar.appendChild(viewBtn)
     bar.appendChild(sortBtn)
     root.appendChild(bar)
     root.appendChild(grid)
 
-    ui.bind(root, searchSig, function (v) {
-      query = v || ''
-      selectedSig.set([])
-      paint()
-    })
-    ui.bind(root, version, paint)
-    if (aiditor.i18n) ui.bind(root, aiditor.i18n.locale, paint)
-    ui.bind(root, selectedSig, paintSelection)
-
-    grid.addEventListener('click', function (ev) {
-      if (suppressGridClick) {
-        suppressGridClick = false
-        return
-      }
-      if (ev.target.closest && ev.target.closest('.aiditor-ui-assetitem')) return
-      closeContextMenu()
-      selectedSig.set([])
-      last = -1
-    })
-    grid.addEventListener('contextmenu', function (ev) {
-      if (ev.target.closest && ev.target.closest('.aiditor-ui-assetitem')) return
-      ev.preventDefault()
-      openContextMenu(ev.clientX, ev.clientY, null)
-    })
-    ui.dropzone(grid, {
-      accept: ['Files', 'application/aiditor.asset.entry+json'],
-      canDrop: function () { return true },
-      onDrop: function (d) { handleDrop(d, dir) },
-    })
-
-    function paint() {
-      version()
-      if (o.existsDir && dir && !o.existsDir(dir)) {
-        dir = ''
-        selectedSig.set([])
-        last = -1
-      }
-      renderCrumb()
-      const rows = sorted(o.children ? (o.children(dir, query) || []) : [])
-      grid.className = 'aiditor-ui-assetgrid aiditor-ui-assetgrid-' + view
-      grid.dataset.view = view
-      ui.disposeChildren(grid)
-      if (!rows.length) {
-        grid.appendChild(ui.h('div', 'aiditor-ui-asset-empty', { text: query ? tr('assetBrowser.empty.search', 'No matching assets.') : tr('assetBrowser.empty.drop', 'Drop files here.') }))
-        return
-      }
-      rows.forEach(function (item, idx) {
-        grid.appendChild(tile(item, idx, rows))
-      })
-      paintSelection()
-    }
-
-    function tile(item, idx, rows) {
-      const el = ui.h('div', 'aiditor-ui-assetitem')
-      el.dataset.key = keyFor(item)
-      el.dataset.kind = item.kind || 'file'
-
-      const thumb = ui.h('div', 'aiditor-ui-assetthumb')
-      if (item.kind === 'folder') {
-        thumb.appendChild(ui.icon({ name: 'folder', size: view === 'list' ? 'sm' : 'lg' }))
-      } else if (item.kind === 'image') {
-        const img = document.createElement('img')
-        img.draggable = false
-        img.src = o.resolveUrl ? (o.resolveUrl(item) || item.url || '') : (item.url || '')
-        thumb.appendChild(img)
-      } else {
-        thumb.appendChild(ui.icon({ name: item.kind === 'audio' ? 'music' : 'file', size: view === 'list' ? 'sm' : 'lg' }))
-      }
-
-      const name = ui.h('div', 'aiditor-ui-assetname', { text: item.name || item.path || item.url || '' })
-      el.appendChild(thumb)
-      el.appendChild(name)
-      if (view === 'list') {
-        el.appendChild(ui.h('div', 'aiditor-ui-assetmeta', { text: typeLabel(item) }))
-        el.appendChild(ui.h('div', 'aiditor-ui-assetmeta', { text: sizeLabel(item.size) }))
-        el.appendChild(ui.h('div', 'aiditor-ui-assetmeta', { text: dateLabel(item.mtime || item.ctime) }))
-      }
-
-      el.addEventListener('click', function (ev) { select(item, idx, rows, ev) })
-      el.addEventListener('dblclick', function () {
-        if (item.kind === 'folder') {
-          dir = item.path || ''
-          selectedSig.set([])
-          paint()
-        } else if (o.onActivate) {
-          o.onActivate(item)
-        }
-      })
-      el.addEventListener('contextmenu', function (ev) {
-        ev.preventDefault()
-        if (selectedSig.peek().indexOf(keyFor(item)) < 0) selectedSig.set([keyFor(item)])
-        openContextMenu(ev.clientX, ev.clientY, item)
-      })
-
-      ui.dragsource(el, {
-        effect: 'copyMove',
-        getData: function () {
-          const entries = selectedEntries()
-          const payload = entries.length && entries.some(function (e) { return keyFor(e) === keyFor(item) })
-            ? entries
-            : [item]
-          const data = {
-            'application/aiditor.asset.entry+json': JSON.stringify(payload.map(serializableEntry)),
-            'text/plain': item.url || item.path || '',
-          }
-          if (item.kind !== 'folder' && item.url) {
-            data['text/uri-list'] = item.url
-            data['application/aiditor.asset+json'] = JSON.stringify({ kind: item.kind, value: item.url })
-            data['application/aiditor.asset.' + (item.kind || 'file') + '+json'] = JSON.stringify({ kind: item.kind, value: item.url })
-          }
-          if (typeof o.targets === 'function') {
-            const targets = o.targets(payload, item) || []
-            if (targets.length) {
-              data['application/x-aiditor-target-list'] = JSON.stringify(targets)
-              data['application/x-aiditor-target'] = JSON.stringify(targets[0])
-            }
-          }
-          return data
-        },
-      })
-
-      if (item.kind === 'folder') {
-        ui.dropzone(el, {
-          accept: ['Files', 'application/aiditor.asset.entry+json'],
-          canDrop: function () { return true },
-          onDrop: function (d) { handleDrop(d, item.path || '') },
-        })
-      }
-      return el
-    }
-
-    function select(item, idx, rows, ev) {
-      const k = keyFor(item)
-      const cur = selectedSig.peek().slice()
-      if (ev.shiftKey && last >= 0) {
-        const a = Math.min(last, idx), b = Math.max(last, idx)
-        selectedSig.set(rows.slice(a, b + 1).map(keyFor))
-      } else if (ev.ctrlKey || ev.metaKey) {
-        const at = cur.indexOf(k)
-        if (at >= 0) cur.splice(at, 1)
-        else cur.push(k)
-        selectedSig.set(cur)
-        last = idx
-      } else {
-        selectedSig.set([k])
-        last = idx
-      }
-      if (o.onSelect) o.onSelect(selectedEntries())
-    }
-
-    function paintSelection() {
-      const sel = new Set(selectedSig.peek())
-      Array.prototype.forEach.call(grid.querySelectorAll('.aiditor-ui-assetitem'), function (el) {
-        el.classList.toggle('is-selected', sel.has(el.dataset.key))
-      })
-    }
-
-    function renderCrumb() {
-      ui.disposeChildren(crumb)
-      const rootLabel = ui.isSignal && ui.isSignal(o.rootLabel) ? o.rootLabel() : (o.rootLabel || tr('assetBrowser.root', 'asset'))
-      crumb.appendChild(crumbButton(rootLabel, ''))
-      let cur = ''
-      parts(dir).forEach(function (p) {
-        cur = cur ? cur + '/' + p : p
-        crumb.appendChild(ui.h('span', 'aiditor-ui-assetcrumb-sep', { text: '/' }))
-        crumb.appendChild(crumbButton(p, cur))
-      })
-    }
-
-    function crumbButton(label, path) {
-      const b = ui.h('button', null, { type: 'button', text: label })
-      b.addEventListener('click', function () {
-        dir = path
-        selectedSig.set([])
-        paint()
-      })
-      ui.dropzone(b, {
-        accept: ['Files', 'application/aiditor.asset.entry+json'],
-        canDrop: function () { return true },
-        onDrop: function (d) { handleDrop(d, path) },
-      })
-      return b
-    }
-
-    function handleDrop(data, targetDir) {
-      const entries = readEntries(data)
-      if (entries.length && o.moveEntries) {
-        const ret = o.moveEntries(entries, targetDir || '')
-        ret && ret.then ? ret.then(done) : done()
-        return
-      }
-      if (data.files && data.files.length && o.importFiles) {
-        const ret = o.importFiles(data.files, targetDir || '')
-        ret && ret.then ? ret.then(done) : done()
-        return
-      }
-    }
-    function done() { selectedSig.set([]); paint() }
-
-    function openContextMenu(x, y, item) {
-      closeContextMenu()
-      menuHandle = ui.contextMenu({ x: x, y: y }, contextItems(item))
-    }
-
-    function closeContextMenu() {
-      if (!menuHandle) return
-      menuHandle.close()
-      menuHandle = null
-    }
-
-    function contextItems(item) {
-      const picked = selectedEntries()
-      const rows = item && picked.length ? picked : (item ? [item] : [])
-      const hasRows = rows.length > 0
-      const single = rows.length === 1 ? rows[0] : null
-      if (!hasRows) {
-        return [
-          { label: tr('common.new_folder', 'New Folder'), icon: 'folder', onSelect: createFolder },
-          { label: tr('common.add_files', 'Add Files'), icon: 'plus', onSelect: pickFiles },
-          { type: 'divider' },
-          { label: tr('common.view', 'View'), icon: 'grid', items: viewItems() },
-          { label: tr('common.sort', 'Sort'), icon: 'arrow-up-down', items: sortItems() },
-        ]
-      }
-      const extra = typeof o.actions === 'function' ? (o.actions(rows, item) || []) : []
-      const items = []
-      if (single && o.rename) {
-        items.push({ label: tr('common.rename', 'Rename'), icon: 'edit', onSelect: function () {
-          const ret = o.rename(single)
-          ret && ret.then ? ret.then(done) : done()
-        } })
-      }
-      if (o.remove) {
-        items.push({ label: tr('common.delete', 'Delete'), icon: 'trash', danger: true, onSelect: function () {
-          const ret = o.remove(rows)
-          ret && ret.then ? ret.then(done) : done()
-        } })
-      }
-      if (single) {
-        items.push({ label: tr('common.copy_path', 'Copy Path'), icon: 'copy', onSelect: function () { ui.copyText(pathFor(single)) } })
-      }
-      if (extra.length) {
-        items.push({ type: 'divider' })
-        extra.forEach(function (it) { items.push(it) })
-      }
-      return items
-    }
-
-    function openViewMenu() { ui.menu({ anchor: viewBtn, items: viewItems(), side: 'bottom', align: 'end' }) }
-    function openSortMenu() { ui.menu({ anchor: sortBtn, items: sortItems(), side: 'bottom', align: 'end' }) }
-    function viewItems() {
-      return VIEW.map(function (v) {
-        return { label: (view === v[0] ? '* ' : '') + tr(v[1], v[2]), onSelect: function () { view = v[0]; save('view', view); paint() } }
-      })
-    }
-    function sortItems() {
-      return SORT.map(function (s) {
-        return { label: (sortBy === s[0] ? '* ' : '') + tr(s[1], s[2]), onSelect: function () { sortBy = s[0]; save('sortBy', sortBy); paint() } }
-      }).concat([
-        { type: 'divider' },
-        { label: (sortDir === 'asc' ? '* ' : '') + tr('assetBrowser.sort.asc', 'Ascending'), onSelect: function () { sortDir = 'asc'; save('sortDir', sortDir); paint() } },
-        { label: (sortDir === 'desc' ? '* ' : '') + tr('assetBrowser.sort.desc', 'Descending'), onSelect: function () { sortDir = 'desc'; save('sortDir', sortDir); paint() } },
-      ])
-    }
-
-    function pickFiles() {
-      if (!o.importFiles) return
-      const input = document.createElement('input')
-      input.type = 'file'
-      input.multiple = true
-      input.onchange = function () {
-        if (input.files && input.files.length) {
-          const ret = o.importFiles(input.files, dir)
-          if (ret && ret.then) ret.then(done)
-          else done()
-        }
-      }
-      input.click()
-    }
-
-    function createFolder() {
-      if (!o.createFolder) return
-      ui.prompt({
-        title: tr('common.new_folder', 'New Folder'),
-        message: tr('assetBrowser.folderName', 'Folder name'),
-      }).then(function (name) {
-        if (!name) return
-        const ret = o.createFolder(dir, name)
-        if (ret && ret.then) ret.then(done)
-        else done()
-      })
-    }
-
-    function selectedEntries() {
-      const sel = new Set(selectedSig.peek())
-      return (o.children ? o.children(dir, query) || [] : []).filter(function (it) { return sel.has(keyFor(it)) })
-    }
-
+    const itemMap = new Map()
+    let visible = []
+    let anchorKey = null
+    let focusedKey = null
+    let menu = null
     let marquee = null
     let marqueeStart = null
     let marqueeBase = null
     let marqueeMoved = false
-    grid.addEventListener('pointerdown', function (ev) {
-      if (ev.target.closest && ev.target.closest('.aiditor-ui-assetitem')) return
-      closeContextMenu()
-      if (ev.button !== 0) return
-      marqueeStart = pointInGrid(ev)
-      marqueeBase = (ev.ctrlKey || ev.metaKey) ? new Set(selectedSig.peek()) : new Set()
-      marqueeMoved = false
-      try { grid.setPointerCapture(ev.pointerId) } catch (_) {}
-      ev.preventDefault()
+    let suppressGridClick = false
+
+    const visibleSig = aiditor.derived(function () {
+      return sortEntries(filterEntries(entries(), query(), getName, getPath, getKind, getSearchText), sort(), getName, getPath, getKind, getSearchText, o)
     })
-    grid.addEventListener('pointermove', function (ev) {
-      if (!marqueeStart) return
-      const cur = pointInGrid(ev)
-      const rect = rectFromPoints(marqueeStart, cur)
-      marqueeMoved = marqueeMoved || rect.width > 3 || rect.height > 3
-      if (!marqueeMoved) return
-      if (!marquee) {
-        marquee = ui.h('div', 'aiditor-ui-asset-marquee')
-        grid.appendChild(marquee)
-      }
-      marquee.style.left = rect.left + 'px'
-      marquee.style.top = rect.top + 'px'
-      marquee.style.width = rect.width + 'px'
-      marquee.style.height = rect.height + 'px'
-      const next = new Set(marqueeBase)
-      const gridRect = grid.getBoundingClientRect()
-      Array.prototype.forEach.call(grid.querySelectorAll('.aiditor-ui-assetitem'), function (el) {
-        const r = el.getBoundingClientRect()
-        const box = {
-          left: r.left - gridRect.left + grid.scrollLeft,
-          top: r.top - gridRect.top + grid.scrollTop,
-          width: r.width,
-          height: r.height,
-        }
-        if (intersects(rect, box)) next.add(el.dataset.key)
-      })
-      selectedSig.set(Array.from(next))
+    ui.collect(root, visibleSig.dispose)
+    ui.bind(root, visibleSig, reconcile)
+    ui.bind(root, selected, refreshSelection)
+    ui.bind(root, path, renderCrumbs)
+    ui.bind(root, view, function (value) {
+      const mode = value === 'list' ? 'list' : 'icons'
+      grid.className = 'aiditor-ui-filegrid aiditor-ui-filegrid-' + mode
+      grid.dataset.view = mode
+      viewBtn.replaceChildren(ui.icon({ name: mode === 'list' ? 'list' : 'grid', size: 'sm' }))
     })
+
+    grid.addEventListener('click', function (ev) {
+      if (suppressGridClick) { suppressGridClick = false; return }
+      if (closestItem(ev.target)) return
+      closeMenu()
+      writeSelected([], { reason: 'clear', event: ev })
+      anchorKey = null
+      focusedKey = null
+    })
+    grid.addEventListener('contextmenu', function (ev) {
+      if (closestItem(ev.target)) return
+      openContextMenu(ev, null)
+    })
+    grid.addEventListener('keydown', onKeyDown)
+    grid.addEventListener('pointerdown', beginMarquee)
+    grid.addEventListener('pointermove', moveMarquee)
     grid.addEventListener('pointerup', endMarquee)
     grid.addEventListener('pointercancel', endMarquee)
 
+    if (typeof o.onDrop === 'function') {
+      ui.dropzone(grid, {
+        accept: o.dropTypes || null,
+        signal: o.signal,
+        maxEntries: o.maxDropEntries,
+        maxDepth: o.maxDropDepth,
+        canDrop: function (data, ev) {
+          if (typeof o.canDrop !== 'function') return true
+          const row = ev && closestItem(ev.target)
+          const state = row && itemMap.get(row.dataset.key)
+          return !!o.canDrop(dropContext(data, state ? state.entry.peek() : null))
+        },
+        onDrop: function (data, ev) {
+          const row = closestItem(ev.target)
+          const entry = row && itemMap.get(row.dataset.key)
+          aiditor.safeCall({ scope: 'ui.fileBrowser', action: 'drop' }, function () {
+            o.onDrop(dropContext(data, entry ? entry.entry.peek() : null), ev)
+          })
+        },
+      })
+    }
+
+    ui.collect(root, function () {
+      closeMenu()
+      itemMap.forEach(disposeItem)
+      itemMap.clear()
+    })
+
+    root.__aiditorFileBrowser = {
+      focus: function () { grid.focus() },
+      getVisibleEntries: function () { return visible.slice() },
+      getSelectedEntries: selectedEntries,
+    }
+    return root
+
+    function reconcile(rows) {
+      visible = rows || []
+      const retained = new Set()
+      for (let i = 0; i < visible.length; i++) {
+        const entry = visible[i]
+        const key = String(getKey(entry, i))
+        let state = itemMap.get(key)
+        if (!state) {
+          state = createItem(entry, i, key)
+          itemMap.set(key, state)
+        } else {
+          state.entry.set(entry)
+          state.index.set(i)
+        }
+        retained.add(key)
+      }
+      itemMap.forEach(function (state, key) {
+        if (retained.has(key)) return
+        disposeItem(state)
+        itemMap.delete(key)
+      })
+
+      let cursor = grid.firstChild
+      for (let i = 0; i < visible.length; i++) {
+        const key = String(getKey(visible[i], i))
+        const el = itemMap.get(key).el
+        if (el === cursor) cursor = cursor.nextSibling
+        else {
+          grid.insertBefore(el, cursor)
+          cursor = el.nextSibling
+        }
+      }
+      const empty = grid.querySelector('.aiditor-ui-file-empty')
+      if (!visible.length) {
+        if (!empty) grid.appendChild(ui.h('div', 'aiditor-ui-file-empty', { text: query.peek() ? (o.emptySearchText || 'No matching files.') : (o.emptyText || 'No files.') }))
+      } else if (empty) {
+        empty.remove()
+      }
+      pruneSelection()
+      refreshSelection()
+    }
+
+    function createItem(entry, index, key) {
+      const entrySig = aiditor.signal(entry)
+      const indexSig = aiditor.signal(index)
+      const el = ui.h('div', 'aiditor-ui-fileitem')
+      el.dataset.key = key
+      el.setAttribute('role', 'option')
+      const ctx = {
+        entry: entrySig,
+        index: indexSig,
+        selected: aiditor.derived(function () { return (selected() || []).map(String).indexOf(key) >= 0 }),
+        view: view,
+        select: function (event) { selectEntry(entrySig.peek(), indexSig.peek(), event || {}) },
+        activate: function (event) { activateEntry(entrySig.peek(), event) },
+      }
+      ui.collect(el, ctx.selected.dispose)
+      let content = null
+      if (typeof o.renderItem === 'function') {
+        content = aiditor.safeCall({ scope: 'ui.fileBrowser', action: 'renderItem', key: key }, function () { return o.renderItem(entry, index, ctx) })
+      }
+      if (!content) content = defaultItemContent(entrySig, view, getName, getKind, o)
+      el.appendChild(content)
+      ui.collect(el, function () { ui.dispose(content) })
+      ui.bind(el, entrySig, function (current) {
+        el.dataset.kind = getKind(current) === 'directory' ? 'directory' : 'file'
+        el.title = getPath(current) || getName(current)
+      })
+      ui.bind(el, ctx.selected, function (isSelected) {
+        el.classList.toggle('is-selected', isSelected)
+        el.setAttribute('aria-selected', isSelected ? 'true' : 'false')
+      })
+      el.addEventListener('click', function (ev) { selectEntry(entrySig.peek(), indexSig.peek(), ev) })
+      el.addEventListener('dblclick', function (ev) { activateEntry(entrySig.peek(), ev) })
+      el.addEventListener('contextmenu', function (ev) { openContextMenu(ev, entrySig.peek()) })
+      if (typeof o.dragData === 'function') {
+        ui.dragsource(el, {
+          effect: o.dragEffect || 'copyMove',
+          getData: function () {
+            return o.dragData(itemContext(entrySig.peek(), evSelection(entrySig.peek()), null)) || {}
+          },
+        })
+      }
+      return { el: el, entry: entrySig, index: indexSig }
+    }
+
+    function disposeItem(state) { ui.dispose(state.el) }
+
+    function selectEntry(entry, index, ev) {
+      const key = String(getKey(entry, index))
+      const current = (selected.peek() || []).map(String)
+      let next
+      if (o.multi !== false && ev.shiftKey && anchorKey != null) {
+        const from = visible.findIndex(function (item, i) { return String(getKey(item, i)) === anchorKey })
+        const lo = Math.min(from < 0 ? index : from, index)
+        const hi = Math.max(from < 0 ? index : from, index)
+        next = visible.slice(lo, hi + 1).map(function (item, i) { return String(getKey(item, lo + i)) })
+      } else if (o.multi !== false && (ev.ctrlKey || ev.metaKey)) {
+        next = current.slice()
+        const at = next.indexOf(key)
+        if (at >= 0) next.splice(at, 1)
+        else next.push(key)
+        anchorKey = key
+      } else {
+        next = [key]
+        anchorKey = key
+      }
+      focusedKey = key
+      writeSelected(next, { reason: 'select', event: ev })
+    }
+
+    function activateEntry(entry, ev) {
+      if (getKind(entry) === 'directory') {
+        writeSelected([], { reason: 'navigate', event: ev })
+        writePath(getPath(entry), { entry: entry, event: ev })
+        return
+      }
+      if (typeof o.onActivate === 'function') {
+        aiditor.safeCall({ scope: 'ui.fileBrowser', action: 'activate' }, function () { o.onActivate(entry, { path: path.peek(), event: ev }) })
+      }
+    }
+
+    function writeSelected(keys, meta) {
+      if (typeof selected.set === 'function') selected.set(keys)
+      if (typeof o.onSelect === 'function') o.onSelect(entriesForKeys(keys), Object.assign({ keys: keys.slice(), path: path.peek() }, meta || {}))
+    }
+
+    function writePath(next, meta) {
+      if (typeof path.set === 'function') path.set(next)
+      if (typeof o.onPathChange === 'function') o.onPathChange(next, meta || {})
+    }
+
+    function writeView(next) {
+      if (typeof view.set === 'function') view.set(next)
+      if (typeof o.onViewChange === 'function') o.onViewChange(next)
+    }
+
+    function writeSort(next) {
+      if (typeof sort.set === 'function') sort.set(next)
+      if (typeof o.onSortChange === 'function') o.onSortChange(next)
+    }
+
+    function entriesForKeys(keys) {
+      const wanted = new Set((keys || []).map(String))
+      const source = entries.peek() || []
+      return source.filter(function (entry, index) { return wanted.has(String(getKey(entry, index))) })
+    }
+    function selectedEntries() { return entriesForKeys(selected.peek() || []) }
+
+    function pruneSelection() {
+      const source = entries.peek() || []
+      const valid = new Set(source.map(function (entry, index) { return String(getKey(entry, index)) }))
+      const current = (selected.peek() || []).map(String)
+      const next = current.filter(function (key) { return valid.has(key) })
+      if (next.length !== current.length) writeSelected(next, { reason: 'entries-changed' })
+    }
+
+    function refreshSelection() {
+      itemMap.forEach(function (state, key) {
+        const isSelected = (selected.peek() || []).map(String).indexOf(key) >= 0
+        state.el.classList.toggle('is-selected', isSelected)
+        state.el.setAttribute('aria-selected', isSelected ? 'true' : 'false')
+        state.el.classList.toggle('is-focused', key === focusedKey)
+      })
+    }
+
+    function renderCrumbs(currentPath) {
+      ui.disposeChildren(crumbs)
+      const parsed = pathParts(currentPath)
+      crumbs.appendChild(crumbButton(readValue(o.rootLabel, 'Files'), parsed.root))
+      let current = parsed.root
+      for (let i = 0; i < parsed.parts.length; i++) {
+        current = current ? joinPath(current, parsed.parts[i]) : parsed.parts[i]
+        crumbs.appendChild(ui.h('span', 'aiditor-ui-filecrumb-sep', { text: '/' }))
+        crumbs.appendChild(crumbButton(parsed.parts[i], current))
+      }
+    }
+
+    function crumbButton(label, targetPath) {
+      const button = ui.h('button', null, { type: 'button', text: label })
+      button.addEventListener('click', function () {
+        writeSelected([], { reason: 'navigate' })
+        writePath(targetPath, { source: 'breadcrumb' })
+      })
+      return button
+    }
+
+    function openViewMenu() {
+      ui.menu({ anchor: viewBtn, side: 'bottom', align: 'end', items: VIEWS.map(function (item) {
+        return { label: (view.peek() === item.value ? '* ' : '') + item.label, icon: item.icon, onSelect: function () { writeView(item.value) } }
+      }) })
+    }
+
+    function openSortMenu() {
+      const current = sort.peek() || {}
+      const items = SORTS.map(function (item) {
+        return { label: (current.by === item.value ? '* ' : '') + item.label, onSelect: function () { writeSort({ by: item.value, direction: current.direction || 'asc' }) } }
+      })
+      items.push({ type: 'divider' })
+      items.push({ label: (current.direction !== 'desc' ? '* ' : '') + 'Ascending', onSelect: function () { writeSort({ by: current.by || 'name', direction: 'asc' }) } })
+      items.push({ label: (current.direction === 'desc' ? '* ' : '') + 'Descending', onSelect: function () { writeSort({ by: current.by || 'name', direction: 'desc' }) } })
+      ui.menu({ anchor: sortBtn, side: 'bottom', align: 'end', items: items })
+    }
+
+    function openContextMenu(ev, targetEntry) {
+      if (typeof o.contextActions !== 'function') return
+      if (targetEntry) {
+        const key = String(getKey(targetEntry))
+        const current = (selected.peek() || []).map(String)
+        if (current.indexOf(key) < 0) writeSelected([key], { reason: 'context', event: ev })
+      }
+      const selection = evSelection(targetEntry)
+      const actionCtx = itemContext(targetEntry, selection, ev)
+      const actions = aiditor.safeCall({ scope: 'ui.fileBrowser', action: 'contextActions' }, function () { return o.contextActions(actionCtx) })
+      if (!actions || (Array.isArray(actions) && !ui._actionSurface.hasMenuItems(actions, actionCtx))) return
+      ev.preventDefault()
+      closeMenu()
+      menu = ui.actionMenu({
+        anchor: targetEntry ? itemMap.get(String(getKey(targetEntry))).el : grid,
+        point: { x: ev.clientX, y: ev.clientY },
+        actions: actions,
+        ctx: actionCtx,
+        behavior: 'context',
+        onDismiss: function () { menu = null },
+      })
+    }
+
+    function closeMenu() { const current = menu; menu = null; if (current && current.close) current.close() }
+
+    function evSelection(targetEntry) {
+      const picked = selectedEntries()
+      if (!targetEntry) return picked
+      const key = String(getKey(targetEntry))
+      for (let i = 0; i < picked.length; i++) if (String(getKey(picked[i])) === key) return picked
+      return [targetEntry]
+    }
+
+    function itemContext(targetEntry, selection, ev) {
+      return { entry: targetEntry, entries: selection, path: path.peek(), selectedKeys: (selected.peek() || []).slice(), event: ev || null }
+    }
+
+    function dropContext(data, targetEntry) {
+      const targetPath = targetEntry && getKind(targetEntry) === 'directory' ? getPath(targetEntry) : path.peek()
+      return Object.assign({}, itemContext(targetEntry, selectedEntries(), null), { data: data, targetPath: targetPath })
+    }
+
+    function onKeyDown(ev) {
+      if (!visible.length) return
+      const current = focusedKey == null ? -1 : visible.findIndex(function (entry, i) { return String(getKey(entry, i)) === focusedKey })
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowLeft') {
+        ev.preventDefault()
+        const forward = ev.key === 'ArrowDown' || ev.key === 'ArrowRight'
+        const next = Math.max(0, Math.min(visible.length - 1, current < 0 ? (forward ? 0 : visible.length - 1) : current + (forward ? 1 : -1)))
+        selectEntry(visible[next], next, ev)
+        const state = itemMap.get(String(getKey(visible[next], next)))
+        if (state && state.el.scrollIntoView) state.el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        return
+      }
+      if (ev.key === 'Enter' && current >= 0) { ev.preventDefault(); activateEntry(visible[current], ev); return }
+      if (ev.key === ' ' && current >= 0) { ev.preventDefault(); selectEntry(visible[current], current, ev); return }
+      if (ev.key === 'Escape') { ev.preventDefault(); writeSelected([], { reason: 'escape', event: ev }) }
+    }
+
+    function beginMarquee(ev) {
+      if (closestItem(ev.target) || ev.button !== 0) return
+      closeMenu()
+      marqueeStart = pointInGrid(ev, grid)
+      marqueeBase = (ev.ctrlKey || ev.metaKey) ? new Set((selected.peek() || []).map(String)) : new Set()
+      marqueeMoved = false
+      grid.setPointerCapture(ev.pointerId)
+      ev.preventDefault()
+    }
+
+    function moveMarquee(ev) {
+      if (!marqueeStart) return
+      const rect = rectFromPoints(marqueeStart, pointInGrid(ev, grid))
+      marqueeMoved = marqueeMoved || rect.width > 3 || rect.height > 3
+      if (!marqueeMoved) return
+      if (!marquee) { marquee = ui.h('div', 'aiditor-ui-file-marquee'); grid.appendChild(marquee) }
+      setRect(marquee, rect)
+      const next = new Set(marqueeBase)
+      const gridRect = grid.getBoundingClientRect()
+      itemMap.forEach(function (state, key) {
+        const r = state.el.getBoundingClientRect()
+        if (intersects(rect, { left: r.left - gridRect.left + grid.scrollLeft, top: r.top - gridRect.top + grid.scrollTop, width: r.width, height: r.height })) next.add(key)
+      })
+      writeSelected(Array.from(next), { reason: 'marquee', event: ev })
+    }
+
     function endMarquee(ev) {
       if (!marqueeStart) return
-      try { grid.releasePointerCapture(ev.pointerId) } catch (_) {}
+      grid.releasePointerCapture(ev.pointerId)
       suppressGridClick = marqueeMoved
       marqueeStart = null
       marqueeBase = null
       marqueeMoved = false
       if (marquee) { marquee.remove(); marquee = null }
-      if (o.onSelect) o.onSelect(selectedEntries())
     }
 
-    function sorted(rows) {
-      return rows.slice().sort(function (a, b) {
-        if (a.kind === 'folder' && b.kind !== 'folder') return -1
-        if (a.kind !== 'folder' && b.kind === 'folder') return 1
-        let av = valueFor(a, sortBy), bv = valueFor(b, sortBy)
-        let cmp = 0
-        if (typeof av === 'number' || typeof bv === 'number') cmp = (Number(av) || 0) - (Number(bv) || 0)
-        else cmp = String(av || '').localeCompare(String(bv || ''), undefined, { numeric: true })
-        return sortDir === 'desc' ? -cmp : cmp
-      })
+    function closestItem(target) {
+      return target && target.closest ? target.closest('.aiditor-ui-fileitem') : null
     }
-
-    function keyFor(item) { return item.kind === 'folder' ? 'folder:' + (item.path || '') : item.url }
-    function pathFor(item) { return item.kind === 'folder' ? 'asset://' + (item.path || '') : (item.url || item.path || '') }
-    function serializableEntry(item) { return { kind: item.kind, path: item.path || '', url: item.url || '', name: item.name || '' } }
-    function readEntries(data) {
-      return data && Array.isArray(data.assetEntries) ? data.assetEntries : []
-    }
-    function parts(path) { return String(path || '').split('/').filter(Boolean) }
-    function typeLabel(it) { return it.kind === 'folder' ? tr('assetBrowser.kind.folder', 'Folder') : (it.kind || 'file') }
-    function valueFor(it, key) { return key === 'kind' ? typeLabel(it) : key === 'size' ? it.size : key === 'mtime' ? it.mtime : key === 'ctime' ? it.ctime : it.name }
-    function sizeLabel(n) { n = Number(n) || 0; return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? Math.round(n / 1024) + ' KB' : (n ? n + ' B' : '') }
-    function dateLabel(t) { return t ? new Date(t).toLocaleDateString() : '' }
-    function pointInGrid(ev) {
-      const r = grid.getBoundingClientRect()
-      return { x: ev.clientX - r.left + grid.scrollLeft, y: ev.clientY - r.top + grid.scrollTop }
-    }
-    function rectFromPoints(a, b) {
-      const left = Math.min(a.x, b.x)
-      const top = Math.min(a.y, b.y)
-      return { left: left, top: top, width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) }
-    }
-    function intersects(a, b) {
-      return a.left <= b.left + b.width && a.left + a.width >= b.left
-          && a.top <= b.top + b.height && a.top + a.height >= b.top
-    }
-    function load(k, fallback) { try { return storageKey ? (localStorage.getItem(storageKey + '.' + k) || fallback) : fallback } catch (_) { return fallback } }
-    function save(k, v) { try { if (storageKey) localStorage.setItem(storageKey + '.' + k, v) } catch (_) {} }
-
-    paint()
-    return root
   }
-  ui.fileBrowser = ui.assetBrowser
+
+  function defaultItemContent(entrySig, viewSig, getName, getKind, opts) {
+    const wrap = ui.h('div', 'aiditor-ui-fileitem-content')
+    const thumb = ui.h('div', 'aiditor-ui-filethumb')
+    const name = ui.h('div', 'aiditor-ui-filename')
+    const kind = ui.h('div', 'aiditor-ui-filemeta')
+    const size = ui.h('div', 'aiditor-ui-filemeta')
+    const date = ui.h('div', 'aiditor-ui-filemeta')
+    wrap.appendChild(thumb); wrap.appendChild(name); wrap.appendChild(kind); wrap.appendChild(size); wrap.appendChild(date)
+    const displaySig = aiditor.derived(function () {
+      return { entry: entrySig(), view: viewSig() === 'list' ? 'list' : 'icons' }
+    })
+    ui.collect(wrap, displaySig.dispose)
+    ui.bind(wrap, displaySig, function (state) {
+      const entry = state.entry
+      ui.disposeChildren(thumb)
+      const thumbnail = typeof opts.getThumbnail === 'function' ? opts.getThumbnail(entry) : entry.thumbnail
+      if (thumbnail) {
+        const img = document.createElement('img'); img.draggable = false; img.src = thumbnail; thumb.appendChild(img)
+      } else {
+        const icon = typeof opts.getIcon === 'function' ? opts.getIcon(entry) : entry.icon
+        thumb.appendChild(ui.icon({ name: icon || (getKind(entry) === 'directory' ? 'folder' : 'file'), size: state.view === 'list' ? 'sm' : 'lg' }))
+      }
+      name.textContent = getName(entry)
+      kind.textContent = getKind(entry) === 'directory' ? 'Directory' : (entry.mime || 'File')
+      size.textContent = getKind(entry) === 'directory' ? '' : sizeLabel(entry.size)
+      date.textContent = dateLabel(entry.mtime)
+    })
+    return wrap
+  }
+
+  function requireWritePath(sig, callback, label) {
+    if (typeof sig.set !== 'function' && typeof callback !== 'function') throw new Error('ui.fileBrowser: writable ' + label + ' is required')
+  }
+  function defaultKey(entry) { return entry.id != null ? entry.id : (entry.path != null ? entry.path : entry.name) }
+  function defaultName(entry) { return String(entry.name != null ? entry.name : defaultKey(entry)) }
+  function defaultPath(entry) { return String(entry.path != null ? entry.path : defaultKey(entry)) }
+  function defaultKind(entry) { return entry.kind === 'directory' || entry.kind === 'folder' ? 'directory' : 'file' }
+  function readValue(value, fallback) { return ui.isSignal(value) ? value.peek() : (value != null ? value : fallback) }
+
+  function filterEntries(entries, query, getName, getPath, getKind, getSearchText) {
+    const q = String(query || '').trim().toLowerCase()
+    if (!q) return (entries || []).slice()
+    return (entries || []).filter(function (entry) {
+      const raw = getSearchText(entry)
+      const parts = Array.isArray(raw) ? raw : [raw]
+      return parts.join(' ').toLowerCase().indexOf(q) >= 0
+    })
+  }
+
+  function sortEntries(entries, sort, getName, getPath, getKind, getSearchText, opts) {
+    const spec = sort || { by: 'name', direction: 'asc' }
+    return entries.slice().sort(function (a, b) {
+      if (opts.directoriesFirst !== false) {
+        const ad = getKind(a) === 'directory', bd = getKind(b) === 'directory'
+        if (ad !== bd) return ad ? -1 : 1
+      }
+      if (typeof opts.compare === 'function') return opts.compare(a, b, spec)
+      const av = sortValue(a, spec.by, getName, getPath, getKind)
+      const bv = sortValue(b, spec.by, getName, getPath, getKind)
+      const cmp = typeof av === 'number' || typeof bv === 'number'
+        ? (Number(av) || 0) - (Number(bv) || 0)
+        : String(av || '').localeCompare(String(bv || ''), undefined, { numeric: true })
+      return spec.direction === 'desc' ? -cmp : cmp
+    })
+  }
+
+  function sortValue(entry, by, getName, getPath, getKind) {
+    if (by === 'kind') return getKind(entry)
+    if (by === 'size') return entry.size
+    if (by === 'mtime') return entry.mtime
+    if (by === 'path') return getPath(entry)
+    return getName(entry)
+  }
+
+  function pathParts(path) {
+    const value = String(path || '').replace(/\\/g, '/')
+    const match = /^([^/]+:\/\/)(.*)$/.exec(value)
+    return { root: match ? match[1] : '', parts: (match ? match[2] : value).split('/').filter(Boolean) }
+  }
+  function joinPath(base, part) { return base && /:\/\/$/.test(base) ? base + part : (base ? base + '/' + part : part) }
+  function sizeLabel(value) { const n = Number(value) || 0; return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : (n ? n + ' B' : '') }
+  function dateLabel(value) { return value ? new Date(value).toLocaleDateString() : '' }
+  function pointInGrid(ev, grid) { const r = grid.getBoundingClientRect(); return { x: ev.clientX - r.left + grid.scrollLeft, y: ev.clientY - r.top + grid.scrollTop } }
+  function rectFromPoints(a, b) { return { left: Math.min(a.x, b.x), top: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) } }
+  function setRect(el, rect) { el.style.left = rect.left + 'px'; el.style.top = rect.top + 'px'; el.style.width = rect.width + 'px'; el.style.height = rect.height + 'px' }
+  function intersects(a, b) { return a.left <= b.left + b.width && a.left + a.width >= b.left && a.top <= b.top + b.height && a.top + a.height >= b.top }
+
+  // Historical public spelling; both names intentionally share one neutral
+  // contract and implementation.
+  ui.assetBrowser = ui.fileBrowser
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ui/data/changeReview.js ---- */
@@ -21479,6 +22054,7 @@
     const groupsSig = aiditor.signal({})
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
+    const fieldMessagesSig = aiditor.signal({})
     let currentInspection = null
     let currentDispose = null
     let currentTargets = []
@@ -21486,6 +22062,9 @@
     let currentSubscribe = null
     let mode = ''
     let customEl = null
+    let fieldMessageDispose = null
+    let fieldMessageController = null
+    let fieldMessageGeneration = 0
     ui.collect(root, filteredSchemaSig.dispose)
 
     function clearBody() {
@@ -21601,6 +22180,7 @@
           targets: valuesSig,
           disabled: disabledSig,
           defaults: function () { return currentInspection && currentInspection.defaults },
+          fieldMessages: fieldMessagesSig,
           groups: groupsSig,
           groupActions: function (groupCtx) {
             const fn = currentInspection && currentInspection.groupActions
@@ -21674,11 +22254,55 @@
       disabledSig.set(!!inspection.readonly || !inspection.write)
     }
 
+    function setFieldMessages(inspection, targets) {
+      if (fieldMessageDispose) fieldMessageDispose()
+      fieldMessageDispose = null
+      if (fieldMessageController) fieldMessageController.abort()
+      fieldMessageController = null
+      const generation = ++fieldMessageGeneration
+      fieldMessagesSig.set({})
+      const source = inspection && inspection.fieldMessages
+      if (!source) return
+      if (ui.isSignal(source)) {
+        fieldMessageDispose = aiditor.effect(function () { fieldMessagesSig.set(source() || {}) })
+        return
+      }
+      const controller = new AbortController()
+      fieldMessageController = controller
+      const messageCtx = {
+        targets: targets,
+        primary: targets[0],
+        values: inspection.values || [],
+        panel: ctx.panel,
+        bus: ctx.bus,
+        refresh: refresh,
+        signal: controller.signal,
+      }
+      const result = typeof source === 'function'
+        ? aiditor.safeCall({ scope: 'inspector', action: 'fieldMessages', type: inspection.type }, function () { return source(messageCtx) })
+        : source
+      if (!result || typeof result.then !== 'function') {
+        if (generation === fieldMessageGeneration) fieldMessagesSig.set(result || {})
+        fieldMessageController = null
+        return
+      }
+      Promise.resolve(result).then(function (messages) {
+        if (controller.signal.aborted || generation !== fieldMessageGeneration) return
+        fieldMessagesSig.set(messages || {})
+      }).catch(function (err) {
+        if (controller.signal.aborted || generation !== fieldMessageGeneration) return
+        aiditor.reportError(err, { scope: 'inspector', action: 'fieldMessages', type: inspection.type })
+      }).finally(function () {
+        if (fieldMessageController === controller) fieldMessageController = null
+      })
+    }
+
     function refresh() {
       const targets = aiditor.inspector.selection()
       if (!targets.length) {
         currentInspection = null
         currentTargets = []
+        setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         mountEmpty('Inspector', '', 'Select something to inspect.')
@@ -21688,6 +22312,7 @@
       if (!inspection) {
         currentInspection = null
         currentTargets = targets
+        setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
@@ -21695,6 +22320,7 @@
       }
       currentInspection = inspection
       currentTargets = targets
+      setFieldMessages(inspection, targets)
       title.textContent = titleOf(targets, inspection)
       subtitle.textContent = subtitleOf(targets, inspection)
       setHeaderActions(inspection, targets)
@@ -21705,7 +22331,11 @@
 
     ctx.onCleanup(function () {
       if (currentDispose) currentDispose()
+      if (fieldMessageDispose) fieldMessageDispose()
+      if (fieldMessageController) fieldMessageController.abort()
       currentDispose = null
+      fieldMessageDispose = null
+      fieldMessageController = null
       currentSubKey = ''
       currentSubscribe = null
       clearBody()

@@ -154,6 +154,7 @@ compatibility decision, including mixed-type cases.
 | `groups` | Optional property group metadata passed to `ui.propertyForm`. |
 | `groupActions(groupCtx)` | Optional per-group `UiAction[]` factory passed to `ui.propertyForm`. Returning `null` / `undefined` uses `groups[groupId].actions`; returning `[]` explicitly renders no actions. |
 | `fieldContextActions(fieldCtx)` | Optional field-row context-menu strategy passed to `ui.propertyForm`. Returns `UiAction[]` or `Promise<UiAction[]>`. |
+| `fieldMessages` | Optional field-path message map, signal, promise, or async resolver. |
 | `filePathActions(fieldCtx)` | Optional action strategy appended to `filepath` / `img` / `snd` input menus. |
 | `read(target)` | Optional alternative to `values`; called for each target. |
 | `hasField(target, field, value, index)` | Optional field existence override. Default is own-property check on value. |
@@ -301,6 +302,47 @@ be returned explicitly by the provider.
 
 This keeps schema declarations focused on type/rendering while the provider
 owns environment-specific file behavior.
+
+## Field Messages
+
+Schema-driven inspections may publish messages by logical field path:
+
+```js
+return {
+  schema,
+  values,
+  fieldMessages: aiditor.signal({
+    'transform.position[0]': [
+      { kind: 'warning', message: 'Value is outside the recommended range.' },
+    ],
+  }),
+  write,
+}
+```
+
+The value can be a plain map, a signal, a promise, or a function receiving the
+current Inspector context and an `AbortSignal`. A new inspection refresh clears
+stale pending output, aborts the previous request, and ignores late results.
+Setting a signal to `{}` clears all messages without rebuilding field editors.
+
+Map keys use the same canonical logical paths as Inspector path changes,
+including struct segments, array indices, and dictionary keys. Each value is a
+message or message array:
+
+```js
+{ kind: 'info' | 'warning' | 'error', message: string, code?: string }
+```
+
+`propertyForm({ fieldMessages })` and `structInput` render messages in stable
+field chrome beneath the editor. Nested `struct`, `array`, and `dict` renderers
+reuse the same root message map and field-path composition; providers do not
+render nested prompts manually. Error messages set `aria-invalid`, and all
+message changes are associated with the field control through
+`aria-describedby` and announced politely.
+
+Field messages are presentation state. They do not change values, block writes,
+enter history, or define domain validation policy. A provider decides when a
+message is produced and whether an edit is allowed.
 
 ## Change Shape
 

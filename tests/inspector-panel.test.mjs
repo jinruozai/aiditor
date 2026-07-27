@@ -156,6 +156,7 @@ const selectionValue = {
   color: '#ffffff',
 }
 let inspectorFieldCtx = null
+const fieldMessages = aiditor.signal({ name: [{ kind: 'info', message: 'Current display name.' }] })
 
 aiditor.inspector.registerProvider('case.light', {
   inspect() {
@@ -175,6 +176,7 @@ aiditor.inspector.registerProvider('case.light', {
         inspectorFieldCtx = fieldCtx
         return [{ id: 'copy-field', label: 'Copy field', args: { field: fieldCtx.field } }]
       },
+      fieldMessages: fieldMessages,
       schema: {
         name: { type: 'string', label: 'Name', desc: 'Readable display name' },
         position: { type: 'vector', label: 'Position', group: 'transform', desc: 'World space location' },
@@ -222,6 +224,9 @@ assert.equal(search.hidden, false)
 assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
 assert.equal(formOptions.groups.peek().transform.label, 'Transform')
 assert.equal(formOptions.groups.peek().transform.actions.length, 1)
+assert.equal(formOptions.fieldMessages.peek().name[0].message, 'Current display name.')
+fieldMessages.set({ color: [{ kind: 'warning', message: 'Check tint.' }] })
+assert.equal(formOptions.fieldMessages.peek().color[0].kind, 'warning')
 const groupActionCtx = formOptions.groupActionCtx({ groupId: 'render', label: 'Render', fields: ['color'], targets: [selectionValue], ctx: null })
 assert.equal(groupActionCtx.source, 'inspector')
 assert.equal(groupActionCtx.targets[0].id, 'fill_light')
@@ -264,6 +269,33 @@ assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'r
 
 aiditor.inspector.select({ type: 'case.custom', id: 'custom' })
 assert.equal(search.hidden, true)
+
+let asyncSignal = null
+let resolveAsyncMessages = null
+aiditor.inspector.registerProvider('case.async-messages', {
+  inspect() {
+    return {
+      title: 'Async',
+      schema: { value: { type: 'string' } },
+      values: [{ value: '' }],
+      fieldMessages: function (messageCtx) {
+        asyncSignal = messageCtx.signal
+        return new Promise(function (resolve) { resolveAsyncMessages = resolve })
+      },
+      write() {},
+    }
+  },
+})
+aiditor.inspector.select({ type: 'case.async-messages', id: 'async' })
+assert.deepEqual(formOptions.fieldMessages.peek(), {})
+resolveAsyncMessages({ value: [{ kind: 'error', message: 'Required.' }] })
+await new Promise(function (resolve) { setImmediate(resolve) })
+assert.equal(formOptions.fieldMessages.peek().value[0].message, 'Required.')
+aiditor.inspector.refresh()
+assert.equal(asyncSignal.aborted, false)
+const pendingSignal = asyncSignal
+aiditor.inspector.select({ type: 'case.custom', id: 'custom' })
+assert.equal(pendingSignal.aborted, true)
 
 const formCss = readFileSync('src/style/ui-form.css', 'utf8')
 const containerCss = readFileSync('src/style/ui-container.css', 'utf8')

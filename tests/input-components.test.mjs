@@ -70,6 +70,7 @@ class FakeEl {
     if (name === 'class') this.classList.set(value)
     else this[name] = String(value)
   }
+  getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null }
   removeAttribute(name) {
     delete this.attributes[name]
     if (name === 'class') this.classList.set('')
@@ -687,6 +688,45 @@ function contextmenu(el, target, extra) {
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-visible').length, 1)
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-hidden').length, 1)
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-sr-only').length, 1)
+}
+
+{
+  const targets = aiditor.signal([{ transform: [['1', '2'], 'enabled'] }])
+  const messages = aiditor.signal({
+    'transform.pos.x': [{ kind: 'error', message: 'X is required.', code: 'required' }],
+  })
+  const form = ui.propertyForm({
+    targets,
+    fieldMessages: messages,
+    schema: {
+      transform: {
+        type: 'struct',
+        struct_def: {
+          pos: {
+            type: 'struct',
+            struct_def: { x: 'string', y: 'string' },
+          },
+          state: 'string',
+        },
+      },
+    },
+  })
+  const input = form.querySelector('input')
+  const messageBox = form.querySelector('.aiditor-ui-field-messages')
+  assert.equal(messageBox.querySelector('.aiditor-ui-field-message-error').textContent, 'X is required.')
+  assert.equal(input.attributes['aria-invalid'], 'true')
+  assert.equal(input.attributes['aria-describedby'], messageBox.id)
+  input.focus()
+
+  messages.set({ 'transform.pos.x': [{ kind: 'warning', message: 'Check X.' }] })
+  assert.equal(form.querySelector('input'), input)
+  assert.equal(document.activeElement, input)
+  assert.equal(messageBox.querySelector('.aiditor-ui-field-message-warning').textContent, 'Check X.')
+  assert.equal(input.attributes['aria-invalid'], undefined)
+
+  messages.set({})
+  assert.equal(messageBox.hidden, true)
+  assert.equal(input.attributes['aria-describedby'], undefined)
 }
 
 {
@@ -1314,6 +1354,11 @@ function contextmenu(el, target, extra) {
     css,
     /\.aiditor-ui-color-channel-input\s*{/,
     'color channels should use standard numberInput, not a custom raw input'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-field-message-error\s*{[^}]*color:\s*var\(--aiditor-error\);/s,
+    'field error messages should use the shared semantic danger token'
   )
 }
 

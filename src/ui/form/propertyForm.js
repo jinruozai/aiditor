@@ -18,6 +18,7 @@
 //   fieldActions?:(fieldCtx) => UiAction[]            optional per-field row actions
 //   fieldContextActions?:(fieldCtx) => UiAction[]|Promise<UiAction[]>
 //                                                     optional per-field context-menu actions
+//   fieldMessages?:signal<object>|object              fieldPath -> FieldMessage[]
 //   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
 //                                                     filepath/img/snd editors
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
@@ -82,6 +83,7 @@
     const fieldActions = typeof o.fieldActions === 'function' ? o.fieldActions : null
     const fieldContextActions = typeof o.fieldContextActions === 'function' ? o.fieldContextActions : null
     const filePathActions = typeof o.filePathActions === 'function' ? o.filePathActions : null
+    const fieldMessages = ui.isSignal(o.fieldMessages) ? o.fieldMessages : aiditor.signal(o.fieldMessages || {})
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const ctx       = o.ctx
@@ -145,6 +147,7 @@
           const label = fieldLabel(raw, fname)
           const action = fieldActionSignals(fname, label, raw, subFd)
           const reset = resetActionSignal(fname, defaults)
+          const messages = messagesForPath(fieldMessages, fname)
           return {
             key:     fname,
             label:   label.value,
@@ -159,8 +162,9 @@
             actionCtx: action.ctx,
             contextActions: action.contextActions,
             contextCtx: action.ctx,
+            messages: messages,
             editor:  function (slotSig, write, innerCtx) {
-              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions), subFd,
+              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions, fieldMessages), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
           }
@@ -354,14 +358,22 @@
     return out
   }
 
-  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions) {
+  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions, fieldMessages) {
     const out = fieldCtx(ctx, field)
     out.field = field
     out.label = label && label.value || field
     out.rawField = raw
     out.resolvedField = resolved
+    out.fieldMessages = fieldMessages
     if (filePathActions) out.filePathActions = filePathActions
     return out
+  }
+
+  function messagesForPath(messages, path) {
+    return aiditor.derived(function () {
+      const map = messages() || {}
+      return map[path] || []
+    })
   }
 
   function fieldDisabled(targets, requireAllTargets, canEdit, field, raw) {

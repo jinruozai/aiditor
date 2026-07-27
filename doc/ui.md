@@ -407,11 +407,26 @@ item remains visibly selected while the pointer is over it. Green/success colors
 are reserved for status, confirmation, running/done indicators, and valid drop
 feedback.
 
-`aiditor.ui.fileBrowser` is the neutral file/list/grid browser primitive for
-workspace-like entries. `aiditor.ui.assetBrowser` remains as a compatibility
-alias for existing asset-oriented hosts. Both names use the same storage-agnostic
-component; callers provide listing, preview URL, import, move, rename, and delete
-hooks.
+`aiditor.ui.fileBrowser` is the neutral current-directory list/icon browser.
+It supports controlled path, selection, view and sort state plus generic
+activation, context action, drag source and drop target hooks. It does not load
+directories or own file mutations. Compose it with `aiditor.ui.tree` when an
+expandable directory outline is required. `aiditor.ui.assetBrowser` is an
+alternate name for the same neutral primitive, not a second asset model. See
+[file-browser.md](./file-browser.md).
+
+`aiditor.ui.tree` accepts optional `loadChildren(node, signal)` for nodes that
+declare `hasChildren:true`. Lazy children are cached by node id without
+mutating caller data. Loading/error/retry state is exposed through row context,
+and the imperative tree handle can invalidate or retry one branch. Collapsing,
+invalidating, removing, or disposing a loading branch cancels it. Search and
+`expandAll()` only traverse already available nodes.
+
+`aiditor.ui.dropzone` normalizes external files and recursively readable
+directories into neutral `{ kind, name, relativePath, file? }` entries. Browser
+file-system handles remain private implementation details. Directory support is
+feature-detected through `aiditor.ui.dnd.capabilities()`; partial read failures
+are returned as structured errors and traversal is cancellable.
 
 `aiditor.ui.arrayEditor` is the generic array-row interaction primitive. It owns
 selection, active item, key-based row identity, optional add/delete/duplicate,

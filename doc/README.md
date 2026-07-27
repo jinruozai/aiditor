@@ -139,6 +139,7 @@ extension runtime, AI panels, or AI-specific styles.
 - [dict-input.md](./dict-input.md): generic dynamic key-value dictionary editor design and its relationship to `structInput`.
 - [property-list.md](./property-list.md): keyed object property list design, field row actions, and reconcile stability contract.
 - [inspector.md](./inspector.md): ordered selection, provider protocol, multi-target property editing, and the built-in Inspector panel.
+- [file-browser.md](./file-browser.md): neutral file browsing, lazy trees, and external file/directory drop normalization.
 - [ai.md](./ai.md): optional AI Host and the public AI concept model.
 - [ai-runtime.md](./ai-runtime.md): agents, skills, messages, queues, live run state, compaction, and persistence.
 - [ai-skills.md](./ai-skills.md): SkillSpec, activation attribution, owner lifecycle, progressive disclosure, and bounded `SKILL.md` packages.

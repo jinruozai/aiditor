@@ -214,6 +214,7 @@
         collapsed: rawObj && rawObj.collapsed,
         onToggle: rawObj && rawObj.onToggle,
         actions: rawObj && rawObj.actions,
+        messages: messagesForContext(withFieldPath(a.ctx, fname)),
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, withFieldPath(ctx, fname)) },
       }
     })
@@ -421,6 +422,15 @@
   function readFieldPath(ctx) {
     const path = ctx && ctx.fieldPath
     return typeof path === 'function' ? path() : path
+  }
+
+  function messagesForContext(ctx) {
+    const source = ctx && ctx.fieldMessages
+    if (!ui.isSignal(source)) return null
+    return aiditor.derived(function () {
+      const map = source() || {}
+      return map[readFieldPath(ctx)] || []
+    })
   }
 
   function appendFieldPath(base, segment) {

@@ -87,6 +87,7 @@
     const groupsSig = aiditor.signal({})
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
+    const fieldMessagesSig = aiditor.signal({})
     let currentInspection = null
     let currentDispose = null
     let currentTargets = []
@@ -94,6 +95,9 @@
     let currentSubscribe = null
     let mode = ''
     let customEl = null
+    let fieldMessageDispose = null
+    let fieldMessageController = null
+    let fieldMessageGeneration = 0
     ui.collect(root, filteredSchemaSig.dispose)
 
     function clearBody() {
@@ -209,6 +213,7 @@
           targets: valuesSig,
           disabled: disabledSig,
           defaults: function () { return currentInspection && currentInspection.defaults },
+          fieldMessages: fieldMessagesSig,
           groups: groupsSig,
           groupActions: function (groupCtx) {
             const fn = currentInspection && currentInspection.groupActions
@@ -282,11 +287,55 @@
       disabledSig.set(!!inspection.readonly || !inspection.write)
     }
 
+    function setFieldMessages(inspection, targets) {
+      if (fieldMessageDispose) fieldMessageDispose()
+      fieldMessageDispose = null
+      if (fieldMessageController) fieldMessageController.abort()
+      fieldMessageController = null
+      const generation = ++fieldMessageGeneration
+      fieldMessagesSig.set({})
+      const source = inspection && inspection.fieldMessages
+      if (!source) return
+      if (ui.isSignal(source)) {
+        fieldMessageDispose = aiditor.effect(function () { fieldMessagesSig.set(source() || {}) })
+        return
+      }
+      const controller = new AbortController()
+      fieldMessageController = controller
+      const messageCtx = {
+        targets: targets,
+        primary: targets[0],
+        values: inspection.values || [],
+        panel: ctx.panel,
+        bus: ctx.bus,
+        refresh: refresh,
+        signal: controller.signal,
+      }
+      const result = typeof source === 'function'
+        ? aiditor.safeCall({ scope: 'inspector', action: 'fieldMessages', type: inspection.type }, function () { return source(messageCtx) })
+        : source
+      if (!result || typeof result.then !== 'function') {
+        if (generation === fieldMessageGeneration) fieldMessagesSig.set(result || {})
+        fieldMessageController = null
+        return
+      }
+      Promise.resolve(result).then(function (messages) {
+        if (controller.signal.aborted || generation !== fieldMessageGeneration) return
+        fieldMessagesSig.set(messages || {})
+      }).catch(function (err) {
+        if (controller.signal.aborted || generation !== fieldMessageGeneration) return
+        aiditor.reportError(err, { scope: 'inspector', action: 'fieldMessages', type: inspection.type })
+      }).finally(function () {
+        if (fieldMessageController === controller) fieldMessageController = null
+      })
+    }
+
     function refresh() {
       const targets = aiditor.inspector.selection()
       if (!targets.length) {
         currentInspection = null
         currentTargets = []
+        setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         mountEmpty('Inspector', '', 'Select something to inspect.')
@@ -296,6 +345,7 @@
       if (!inspection) {
         currentInspection = null
         currentTargets = targets
+        setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
@@ -303,6 +353,7 @@
       }
       currentInspection = inspection
       currentTargets = targets
+      setFieldMessages(inspection, targets)
       title.textContent = titleOf(targets, inspection)
       subtitle.textContent = subtitleOf(targets, inspection)
       setHeaderActions(inspection, targets)
@@ -313,7 +364,11 @@
 
     ctx.onCleanup(function () {
       if (currentDispose) currentDispose()
+      if (fieldMessageDispose) fieldMessageDispose()
+      if (fieldMessageController) fieldMessageController.abort()
       currentDispose = null
+      fieldMessageDispose = null
+      fieldMessageController = null
       currentSubKey = ''
       currentSubscribe = null
       clearBody()

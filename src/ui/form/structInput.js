@@ -30,6 +30,7 @@
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
+  let messageId = 0
   const EDITOR_CONTEXT_SELECTOR = [
     'input',
     'textarea',
@@ -98,6 +99,7 @@
       const editor = f.editor(fieldSig, writeSlot, ctx)
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
+      if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
 
       if (f.labelActions) {
         const labelActions = ui.h('div', 'aiditor-ui-struct-input-label-actions')
@@ -158,6 +160,88 @@
     if (f.label === false || f.labelMode === 'hidden') return 'hidden'
     if (f.labelMode === 'sr-only') return 'sr-only'
     return 'visible'
+  }
+
+  function bindFieldMessages(root, row, cell, editor, source) {
+    const sig = ui.isSignal(source) ? source : aiditor.signal(source || [])
+    const box = ui.h('div', 'aiditor-ui-field-messages')
+    const id = 'aiditor-field-messages-' + (++messageId)
+    box.id = id
+    box.setAttribute('role', 'status')
+    box.setAttribute('aria-live', 'polite')
+    box.hidden = true
+    cell.appendChild(box)
+    const control = messageControl(editor)
+    const previousDescribedBy = control && control.getAttribute ? control.getAttribute('aria-describedby') : null
+    const previousInvalid = control && control.getAttribute ? control.getAttribute('aria-invalid') : null
+    ui.bind(box, sig, function (value) {
+      const messages = normalizeMessages(value)
+      ui.disposeChildren(box)
+      let hasError = false
+      for (let i = 0; i < messages.length; i++) {
+        const item = messages[i]
+        if (item.kind === 'error') hasError = true
+        const line = ui.h('div', 'aiditor-ui-field-message aiditor-ui-field-message-' + item.kind, { text: item.message })
+        if (item.code) line.dataset.code = item.code
+        box.appendChild(line)
+      }
+      box.hidden = messages.length === 0
+      row.classList.toggle('aiditor-ui-struct-input-row-has-message', messages.length > 0)
+      row.classList.toggle('aiditor-ui-struct-input-row-has-error', hasError)
+      if (control && control.setAttribute) {
+        const describedBy = describedByValue(previousDescribedBy, id, messages.length > 0)
+        if (describedBy) control.setAttribute('aria-describedby', describedBy)
+        else control.removeAttribute('aria-describedby')
+        if (hasError) control.setAttribute('aria-invalid', 'true')
+        else if (previousInvalid != null) control.setAttribute('aria-invalid', previousInvalid)
+        else control.removeAttribute('aria-invalid')
+      }
+    })
+    if (sig !== source && sig.dispose) ui.collect(root, sig.dispose)
+    if (source && source.dispose) ui.collect(root, source.dispose)
+  }
+
+  function normalizeMessages(value) {
+    const list = Array.isArray(value) ? value : (value ? [value] : [])
+    const out = []
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i]
+      if (!item || item.message == null) continue
+      const kind = item.kind === 'error' || item.kind === 'warning' ? item.kind : 'info'
+      out.push({ kind: kind, message: String(item.message), code: item.code == null ? '' : String(item.code) })
+    }
+    return out
+  }
+
+  function messageControl(editor) {
+    if (!editor) return null
+    const composite = [
+      'aiditor-ui-struct-input',
+      'aiditor-ui-array-editor',
+      'aiditor-ui-dict-input',
+      'aiditor-ui-vec',
+      'aiditor-ui-color',
+      'aiditor-ui-gradient',
+      'aiditor-ui-curve',
+    ]
+    for (let i = 0; i < composite.length; i++) {
+      if (editor.classList && editor.classList.contains(composite[i])) return editor
+    }
+    const tags = ['input', 'textarea', 'select', '[role="textbox"]', '[role="spinbutton"]', '[role="combobox"]']
+    for (let i = 0; i < tags.length; i++) {
+      if (editor.matches && editor.matches(tags[i])) return editor
+      if (editor.querySelector) {
+        const found = editor.querySelector(tags[i])
+        if (found) return found
+      }
+    }
+    return editor
+  }
+
+  function describedByValue(previous, id, active) {
+    const parts = String(previous || '').split(/\s+/).filter(function (part) { return part && part !== id })
+    if (active) parts.push(id)
+    return parts.join(' ')
   }
 
   function fieldLabel(f) {

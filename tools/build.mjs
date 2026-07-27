@@ -195,7 +195,7 @@ const JS_ORDER = [
   'ui/data/table.js',
   'ui/data/breadcrumbs.js',
   'ui/data/progressBar.js',
-  'ui/data/assetBrowser.js',
+  'ui/data/fileBrowser.js',
   'ui/data/changeReview.js',
 
   // Layer 11 - UI library: overlays

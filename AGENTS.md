@@ -942,7 +942,7 @@ git diff --check
   - `workspace.move`
   - `workspace.delete`
   这些都是泛用文件操作,带 preview/apply;没有引入 project/asset 概念。
-- `src/ui/data/assetBrowser.js` 暴露 `aiditor.ui.fileBrowser = aiditor.ui.assetBrowser`。`fileBrowser` 是中性 primitive 名称,`assetBrowser` 保持兼容旧宿主。
+- `src/ui/data/fileBrowser.js` 实现中性的 `aiditor.ui.fileBrowser`;`aiditor.ui.assetBrowser` 是同一份通用合同的别名,不引入第二套 asset 模型。
 - 文档已对齐:
   - `doc/workspace.md`
   - `doc/resource-versioning.md`
