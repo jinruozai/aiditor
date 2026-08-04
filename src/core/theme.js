@@ -18,6 +18,7 @@
     { id: 'hadal', label: 'Abyss', scheme: 'dark' },
     { id: 'forest', label: 'Forest', scheme: 'dark' },
     { id: 'sakura', label: 'Sakura', scheme: 'light' },
+    { id: 'toybox-purple', label: 'Toybox Purple', scheme: 'light' },
     { id: 'neon', label: 'Neon', scheme: 'dark' },
     { id: 'linen', label: 'Linen', scheme: 'light' },
     { id: 'light', label: 'Light', scheme: 'light' },

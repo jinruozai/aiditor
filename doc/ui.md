@@ -1136,3 +1136,14 @@ This gives the theme a near-black editor stage, cyan neon rails, restrained
 edge glow, magenta focus/selection energy, yellow arcade accents, sparse
 geometric background energy, and direction-aware yellow dock tabs while keeping
 ordinary fields readable and editor-dense.
+
+The built-in `toybox-purple` theme applies the same appearance contract in a
+compact light editor language. Purple owns focus, selection, primary actions,
+and active Dock tabs. Gold is a restrained secondary register for warning and
+attention emphasis instead of a global hover color. Pink stays an
+optional supporting accent, while mint/blue/coral retain success, information,
+and danger semantics. Lavender-gray work surfaces, short colored-base shadows,
+and narrow top highlights preserve the dimensional toybox character without
+turning dense editor views into large website cards. In this theme, Inspector
+Property Form groups use a parent-owned `2px` gap so expanded and collapsed
+sections keep the same compact rhythm.

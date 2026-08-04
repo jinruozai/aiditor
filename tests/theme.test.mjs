@@ -63,11 +63,15 @@ const uiFormCss = readFileSync('src/style/ui-form.css', 'utf8')
 const themeModes = aiditor.theme.modeIds()
 const themeSourceFiles = ['src/style/theme.css'].concat(themeModes.map((mode) => 'src/style/themes/' + mode + '.css'))
 const themeCss = themeSourceFiles.map((file) => readFileSync(file, 'utf8')).join('\n')
+const toyboxPurpleSource = readFileSync('src/style/themes/toybox-purple.css', 'utf8')
 assert.ok(aiditor.theme.hasMode('neon'))
 assert.equal(aiditor.theme.hasMode('missing-theme'), false)
 assert.deepEqual(aiditor.theme.modeOptions().map((mode) => mode.value), themeModes)
 assert.equal(aiditor.theme.modeOptions().find((mode) => mode.value === 'neon').label, 'Neon')
 assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'neon').scheme, 'dark')
+assert.equal(aiditor.theme.modeOptions().find((mode) => mode.value === 'toybox-purple').label, 'Toybox Purple')
+assert.equal(aiditor.theme.modes().find((mode) => mode.id === 'toybox-purple').scheme, 'light')
+assert.equal(aiditor.theme.hasMode('clay'), false)
 for (const mode of themeModes) {
   assert.ok(themeSourceFiles.includes('src/style/themes/' + mode + '.css'), mode + ' theme file should be listed')
 }
@@ -117,7 +121,7 @@ for (const token of [
 ]) {
   assert.match(themeCss, new RegExp(token.replace(/-/g, '\\-')))
 }
-for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura', 'neon']) {
+for (const mode of ['linen', 'abyss', 'hadal', 'forest', 'sakura', 'toybox-purple', 'neon']) {
   assert.match(themeCss, new RegExp('data-aiditor-theme="' + mode + '"'))
   for (const token of [
     '--aiditor-surface-canvas',
@@ -181,6 +185,43 @@ assert.match(neonBlock, /--aiditor-dock-tab-indicator-bg:\s*var\(--aiditor-state
 assert.match(neonBlock, /--aiditor-button-bg:\s*linear-gradient\(180deg, #125bff 0%, #0837a8 100%\)/)
 assert.match(neonBlock, /--aiditor-button-active-bg:\s*#facf01/)
 assert.match(neonBlock, /--aiditor-button-active-fg:\s*#171000/)
+
+const toyboxPurpleBlock = themeBlock('toybox-purple')
+assert.match(toyboxPurpleBlock, /--aiditor-surface-canvas:\s*#e9e5f0/)
+assert.match(toyboxPurpleBlock, /--aiditor-brand:\s*#6b4de6/)
+assert.match(toyboxPurpleBlock, /--aiditor-dock-tab-active-bg:\s*linear-gradient\(180deg, #8e73ff, #6b4de6\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-dock-tab-indicator-bg:\s*transparent/)
+assert.match(toyboxPurpleBlock, /--aiditor-dock-tab-indicator-opacity:\s*0/)
+assert.match(toyboxPurpleBlock, /--aiditor-button-primary-bg:\s*linear-gradient\(180deg, #8e73ff, #6b4de6\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-button-hover-bg:\s*linear-gradient\(180deg, #f5f2ff, #e8e2fa\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-button-active-bg:\s*#ddd4f6/)
+assert.match(toyboxPurpleBlock, /--aiditor-stroke-hover:\s*#8e73ff/)
+assert.match(toyboxPurpleBlock, /--aiditor-shadow-control:[\s\S]*0 3px 0 #d3cddd/)
+assert.match(
+  toyboxPurpleSource,
+  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form\s*\{[^}]*gap:\s*2px;/s,
+  'Toybox Purple Inspector Property Form should own a uniform 2px section gap'
+)
+assert.doesNotMatch(
+  toyboxPurpleSource,
+  /\.aiditor-ui-property-section[^}]*\{[^}]*margin(?:-\w+)?:/s,
+  'Toybox Purple property sections should not create spacing with margins'
+)
+assert.match(
+  toyboxPurpleSource,
+  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form \.aiditor-ui-property-section:not\(\.aiditor-ui-section-collapsed\)\s*>\s*\.aiditor-ui-section-head[^{]*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\) var\(--aiditor-radius-surface\) 0 0;/s,
+  'expanded Toybox Purple property section headers should connect squarely to their body'
+)
+assert.match(
+  toyboxPurpleSource,
+  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form \.aiditor-ui-property-section\.aiditor-ui-section-collapsed\s*>\s*\.aiditor-ui-section-head[^{]*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\);/s,
+  'collapsed Toybox Purple property section headers should keep all four corners rounded'
+)
+assert.match(
+  toyboxPurpleSource,
+  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form \.aiditor-ui-property-form-struct \.aiditor-ui-struct-input-cell\s*>\s*\.aiditor-ui-slot\s*>\s*\.aiditor-ui-struct-input[^{]*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s,
+  'nested Toybox Purple property composites should not render a second surface edge'
+)
 
 function themeBlock(mode) {
   const marker = '.aiditor-root[data-aiditor-theme="' + mode + '"] {'

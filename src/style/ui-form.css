@@ -1775,8 +1775,10 @@
    keep the compact base layout above. */
 .aiditor-ui-property-form .aiditor-ui-property-form-struct {
   border: 0;
+  border-radius: 0;
   padding: 0 var(--aiditor-space-1);
   background: transparent;
+  box-shadow: none;
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row {
   grid-template-columns: minmax(64px, 76px) minmax(0, 1fr);

@@ -1,0 +1,230 @@
+/* Toybox Purple theme - lavender work surfaces with playful, disciplined color. */
+:root[data-aiditor-theme="toybox-purple"],
+.aiditor-root[data-aiditor-theme="toybox-purple"] {
+  color-scheme: light;
+
+  --aiditor-surface-canvas: #e9e5f0;
+  --aiditor-surface-lower:  #f4f1f7;
+  --aiditor-surface-frame:  #d8d1e3;
+  --aiditor-surface-panel:  #fffdfd;
+  --aiditor-surface-field:  #f1eef6;
+  --aiditor-surface-hover:  #ece7fa;
+  --aiditor-surface-active: #e3dcf7;
+  --aiditor-surface-raised: #ffffff;
+
+  --aiditor-text-primary:  #17213a;
+  --aiditor-text-body:     #28334c;
+  --aiditor-text-label:    #43506a;
+  --aiditor-text-muted:    #5f6b82;
+  --aiditor-text-disabled: #8991a4;
+
+  --aiditor-stroke-subtle: #d8d2e3;
+  --aiditor-stroke-strong: #b8aecb;
+  --aiditor-stroke-field:  #c9c2d4;
+  --aiditor-stroke-hover:  #8e73ff;
+
+  --aiditor-brand:          #6b4de6;
+  --aiditor-brand-hover:    #846bf0;
+  --aiditor-brand-contrast: #ffffff;
+
+  --aiditor-state-success: #17b978;
+  --aiditor-state-warning: #ffaa17;
+  --aiditor-state-danger:  #e63349;
+  --aiditor-state-info:    #3387dc;
+
+  --aiditor-c-00: #e9e5f0;
+  --aiditor-c-01: #f4f1f7;
+  --aiditor-c-02: #fffdfd;
+  --aiditor-c-03: #f1eef6;
+  --aiditor-c-04: #ece7fa;
+  --aiditor-c-05: #e3dcf7;
+  --aiditor-c-06: #b8aecb;
+  --aiditor-c-07: #846bf0;
+  --aiditor-c-08: #8991a4;
+  --aiditor-c-09: #5f6b82;
+  --aiditor-c-10: #43506a;
+  --aiditor-c-11: #17213a;
+
+  --aiditor-c-accent:      var(--aiditor-brand);
+  --aiditor-c-accent-soft: var(--aiditor-brand-hover);
+  --aiditor-c-success: var(--aiditor-state-success);
+  --aiditor-c-warn:    var(--aiditor-state-warning);
+  --aiditor-c-error:   var(--aiditor-state-danger);
+  --aiditor-c-info:    var(--aiditor-state-info);
+
+  --aiditor-bg-0: var(--aiditor-surface-canvas);
+  --aiditor-bg-1: var(--aiditor-surface-panel);
+  --aiditor-bg-2: var(--aiditor-surface-field);
+  --aiditor-bg-3: var(--aiditor-surface-hover);
+  --aiditor-bg-4: var(--aiditor-surface-active);
+  --aiditor-bg-raised: var(--aiditor-surface-raised);
+
+  --aiditor-fg-0: var(--aiditor-text-primary);
+  --aiditor-fg-1: var(--aiditor-text-body);
+  --aiditor-fg-2: var(--aiditor-text-label);
+  --aiditor-fg-3: var(--aiditor-text-muted);
+
+  --aiditor-border:        var(--aiditor-stroke-subtle);
+  --aiditor-border-strong: var(--aiditor-stroke-strong);
+  --aiditor-border-input:  var(--aiditor-stroke-field);
+  --aiditor-border-hover:  var(--aiditor-stroke-hover);
+
+  --aiditor-accent:      var(--aiditor-brand);
+  --aiditor-accent-soft: var(--aiditor-brand-hover);
+  --aiditor-accent-fg:   var(--aiditor-brand-contrast);
+  --aiditor-accent-bg:   color-mix(in srgb, var(--aiditor-brand) 14%, transparent);
+  --aiditor-accent-bg-strong: color-mix(in srgb, var(--aiditor-brand) 24%, transparent);
+
+  --aiditor-hover:       color-mix(in srgb, var(--aiditor-brand) 8%, transparent);
+  --aiditor-active:      color-mix(in srgb, var(--aiditor-brand) 14%, transparent);
+  --aiditor-selected:    linear-gradient(180deg, #8e73ff, #6b4de6);
+  --aiditor-selected-hover: linear-gradient(180deg, #9983ff, #7658ea);
+  --aiditor-selected-border: #4930b3;
+  --aiditor-selected-fg: #ffffff;
+  --aiditor-scrim:       color-mix(in srgb, #1c2944 40%, transparent);
+
+  --aiditor-success:    var(--aiditor-c-success);
+  --aiditor-success-bg: color-mix(in srgb, var(--aiditor-c-success) 14%, transparent);
+  --aiditor-success-fg: #f7fff9;
+  --aiditor-warn:       var(--aiditor-c-warn);
+  --aiditor-warn-bg:    color-mix(in srgb, var(--aiditor-c-warn) 18%, transparent);
+  --aiditor-warn-fg:    #3f2900;
+  --aiditor-error:      var(--aiditor-c-error);
+  --aiditor-error-bg:   color-mix(in srgb, var(--aiditor-c-error) 13%, transparent);
+  --aiditor-error-fg:   #fff8f9;
+  --aiditor-info:       var(--aiditor-c-info);
+  --aiditor-info-bg:    color-mix(in srgb, var(--aiditor-c-info) 13%, transparent);
+  --aiditor-info-fg:    #f7fbff;
+
+  --aiditor-radius-control: 7px;
+  --aiditor-radius-surface: 10px;
+  --aiditor-radius-overlay: 12px;
+  --aiditor-radius-tab: 8px;
+  --aiditor-radius-chip: 8px;
+
+  --aiditor-border-w: 1px;
+  --aiditor-border-w-strong: 1px;
+  --aiditor-border-w-focus: 2px;
+  --aiditor-control-border-w: var(--aiditor-border-w);
+  --aiditor-surface-border-w: var(--aiditor-border-w);
+  --aiditor-overlay-border-w: var(--aiditor-border-w);
+  --aiditor-dock-border-w: var(--aiditor-border-w);
+  --aiditor-toolbar-border-w: var(--aiditor-border-w);
+
+  --aiditor-shadow-control:
+    0 3px 0 #d3cddd,
+    inset 0 1px 0 rgba(255,255,255,.92);
+  --aiditor-shadow-surface:
+    0 2px 0 #ddd7e7,
+    inset 0 1px 0 rgba(255,255,255,.78);
+  --aiditor-shadow-overlay:
+    0 5px 0 #d5cfdf,
+    0 16px 34px rgba(49,37,79,.18),
+    inset 0 1px 0 rgba(255,255,255,.9);
+  --aiditor-shadow-active:
+    0 1px 0 #b8aecb,
+    inset 0 2px 3px rgba(73,48,179,.16);
+
+  --aiditor-root-bg-image: none;
+  --aiditor-root-bg-size: auto;
+  --aiditor-root-bg-position: 0 0;
+  --aiditor-root-bg-blend: normal;
+
+  --aiditor-corner-accent-size: 0px;
+  --aiditor-corner-accent-color: transparent;
+  --aiditor-corner-accent-opacity: 0;
+
+  --aiditor-toolbar-bg: linear-gradient(180deg, #ffffff, #f2eef6);
+  --aiditor-toolbar-border: var(--aiditor-border);
+  --aiditor-dock-border: var(--aiditor-border);
+  --aiditor-chrome-border: var(--aiditor-border);
+  --aiditor-view-bg: var(--aiditor-bg-1);
+  --aiditor-view-radius: var(--aiditor-radius-surface);
+  --aiditor-splitter-bg: var(--aiditor-surface-frame);
+  --aiditor-splitter-active-bg: var(--aiditor-accent);
+
+  --aiditor-dock-tab-bg: transparent;
+  --aiditor-dock-tab-hover-bg: linear-gradient(180deg, #f4f0ff, #e7e0fb);
+  --aiditor-dock-tab-active-bg: linear-gradient(180deg, #8e73ff, #6b4de6);
+  --aiditor-dock-tab-border-w: 1px;
+  --aiditor-dock-tab-border: transparent;
+  --aiditor-dock-tab-hover-border: #b9aef0;
+  --aiditor-dock-tab-active-border: #4930b3;
+  --aiditor-dock-tab-fg: var(--aiditor-fg-2);
+  --aiditor-dock-tab-hover-fg: #4930b3;
+  --aiditor-dock-tab-active-fg: #ffffff;
+  --aiditor-dock-tab-gap: 3px;
+  --aiditor-dock-tab-radius-top: 8px 8px 3px 3px;
+  --aiditor-dock-tab-radius-bottom: 3px 3px 8px 8px;
+  --aiditor-dock-tab-radius-left: 8px 3px 3px 8px;
+  --aiditor-dock-tab-radius-right: 3px 8px 8px 3px;
+  --aiditor-dock-tab-indicator-bg: transparent;
+  --aiditor-dock-tab-indicator-bg-vertical: transparent;
+  --aiditor-dock-tab-indicator-size: 2px;
+  --aiditor-dock-tab-indicator-inset: 7px;
+  --aiditor-dock-tab-indicator-radius: 999px;
+  --aiditor-dock-tab-indicator-opacity: 0;
+  --aiditor-dock-tab-active-overlay-top: linear-gradient(to bottom, rgba(255,255,255,.30), transparent 45%);
+  --aiditor-dock-tab-active-overlay-bottom: linear-gradient(to top, rgba(255,255,255,.24), transparent 45%);
+  --aiditor-dock-tab-active-overlay-left: linear-gradient(to right, rgba(255,255,255,.24), transparent 45%);
+  --aiditor-dock-tab-active-overlay-right: linear-gradient(to left, rgba(255,255,255,.24), transparent 45%);
+  --aiditor-dock-tab-active-shadow-top: 0 3px 0 #4930b3, inset 0 1px 0 rgba(255,255,255,.25);
+  --aiditor-dock-tab-active-shadow-bottom: 0 -3px 0 #4930b3, inset 0 -1px 0 rgba(255,255,255,.22);
+  --aiditor-dock-tab-active-shadow-left: 3px 0 0 #4930b3, inset 1px 0 0 rgba(255,255,255,.22);
+  --aiditor-dock-tab-active-shadow-right: -3px 0 0 #4930b3, inset -1px 0 0 rgba(255,255,255,.22);
+
+  --aiditor-button-bg: linear-gradient(180deg, #ffffff, #efedf5);
+  --aiditor-button-fg: var(--aiditor-fg-1);
+  --aiditor-button-border: #cfc9d8;
+  --aiditor-button-hover-bg: linear-gradient(180deg, #f5f2ff, #e8e2fa);
+  --aiditor-button-hover-fg: #4930b3;
+  --aiditor-button-hover-border: #8e73ff;
+  --aiditor-button-active-bg: #ddd4f6;
+  --aiditor-button-active-fg: #4930b3;
+  --aiditor-button-active-border: #6b4de6;
+  --aiditor-button-primary-bg: linear-gradient(180deg, #8e73ff, #6b4de6);
+  --aiditor-button-primary-fg: #ffffff;
+  --aiditor-button-primary-border: #4930b3;
+  --aiditor-button-primary-hover-bg: linear-gradient(180deg, #9b87ff, #7658ea);
+  --aiditor-button-primary-hover-fg: #ffffff;
+  --aiditor-button-primary-hover-border: #4930b3;
+  --aiditor-button-primary-active-bg: #5f42d4;
+  --aiditor-button-primary-active-fg: #ffffff;
+
+  --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 60%, transparent);
+  --aiditor-highlight-strong: color-mix(in srgb, #ffffff 84%, transparent);
+  --aiditor-shadow-1: 0 1px 2px rgba(49,37,79,.10);
+  --aiditor-shadow-2: 0 2px 8px rgba(49,37,79,.13);
+  --aiditor-shadow-3: 0 5px 16px rgba(49,37,79,.16);
+  --aiditor-shadow-4: 0 10px 32px rgba(49,37,79,.20);
+  --aiditor-shadow-raised:
+    0 4px 0 #cec7da,
+    0 8px 16px rgba(49,37,79,.12),
+    inset 0 1px 0 rgba(255,255,255,.92);
+}
+
+/* Property groups share one compact rhythm without adding section margins. */
+:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form,
+.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form {
+  gap: 2px;
+}
+
+/* Property groups connect their open header to the form body. A collapsed
+   header is independent and keeps the complete toybox silhouette. */
+:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head,
+.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head {
+  border-radius: var(--aiditor-radius-surface) var(--aiditor-radius-surface) 0 0;
+}
+:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head,
+.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
+  border-radius: var(--aiditor-radius-surface);
+}
+
+/* A composite editor nested in a property row is content, not another raised
+   surface. Keep standalone structInput chrome outside Property Form intact. */
+:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
+.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}

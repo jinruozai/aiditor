@@ -237,6 +237,7 @@ const CSS_ORDER = [
   'style/themes/harbor.css',
   'style/themes/linen.css',
   'style/themes/sakura.css',
+  'style/themes/toybox-purple.css',
   'style/themes/abyss.css',
   'style/themes/hadal.css',
   'style/themes/forest.css',

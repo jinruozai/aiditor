@@ -1322,6 +1322,16 @@ function contextmenu(el, target, extra) {
   const css = readFileSync('src/style/ui-form.css', 'utf8')
   assert.match(
     css,
+    /\.aiditor-ui-property-form \.aiditor-ui-property-form-struct\s*{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*padding:\s*0 var\(--aiditor-space-1\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
+    'propertyForm top-level structs must remove the complete structInput chrome'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-struct-input,\s*\.aiditor-ui-dict-input,[^{]*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\);[^}]*box-shadow:\s*var\(--aiditor-shadow-surface\);/s,
+    'standalone structInput must retain its normal radius and surface shadow'
+  )
+  assert.match(
+    css,
     /\.aiditor-ui-struct-input-row-layout-block,\s*\.aiditor-ui-struct-input-row-layout-section\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
     'block and section struct rows must put the editor on a full-width line'
   )
