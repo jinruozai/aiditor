@@ -1065,6 +1065,19 @@ Non-goals:
   focusable, and text-safe in dense editor UIs.
 - No per-component explosion such as `--aiditor-button-neon-corner-size`.
 
+### Lightweight distribution
+
+Theme consumers may load `dist/aiditor-theme.css` alone and select a built-in
+mode with `data-aiditor-theme`. Loading `dist/aiditor-theme.js` additionally
+provides `aiditor.theme` metadata and runtime switching.
+
+Consumers that need generic controls without the editor shell may load the
+standalone `dist/aiditor-widgets.css` and `dist/aiditor-widgets.js`. This slice
+includes themes, signals, command routing, component registration, and every
+generic `aiditor.ui.*` primitive. It excludes Dock, Workspace, History,
+Shortcuts, Settings, built-in panel components, AI Host, and Extension Runtime.
+It is an alternative to Kernel/Core/Full, not an add-on for them.
+
 The Neon arcade theme should therefore be expressed by assigning these
 shared appearance roles:
 

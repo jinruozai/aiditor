@@ -125,13 +125,17 @@ aiditor/
 
   tools/
     build.mjs                      # § 2.2 零构建承诺的载体:cat 带 banner,
-                                   # 拼出 core/full 双 bundle;支持 --watch
+                                   # 拼出轻量切片和 classic bundles;支持 --watch
 
   dist/                            # 已 commit 的 bundle 产物(保证零环境双击运行)
-    aiditor-core.js / .css              # Core/UI/Dock
-    aiditor-full.js / .css              # Core/UI/Dock + AI Host + Extension Runtime
-    aiditor.js / .css                   # core alias,保持经典路径可用
-                                   # npm 发布包只包含 core/full 四个 runtime 文件
+    aiditor-theme.js / .css        # 独立主题 runtime + tokens + 内置主题
+    aiditor-widgets.js / .css      # 独立通用 UI + 所需最小基础,不含 Dock/AI
+    aiditor-kernel.js / .css       # Core services + tree + Dock runtime
+    aiditor-ui.js / .css           # Kernel 之上的 UI/panel add-on
+    aiditor-ai.js / .css           # AI Host + Extension Runtime add-on
+    aiditor-core.js / .css         # Kernel + UI
+    aiditor-full.js / .css         # Core + AI Host + Extension Runtime
+    aiditor.js / .css              # core alias,保持经典路径可用
 
   .Codex/
     launch.json                    # Codex Preview 的 dev server 配置

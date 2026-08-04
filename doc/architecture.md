@@ -33,12 +33,20 @@ Source directories should express the same conceptual boundary. Kernel code is
 The distribution expresses the same boundary:
 
 ```text
+aiditor-theme     standalone theme runtime + tokens + built-in themes
+aiditor-widgets   standalone generic UI widgets + minimal shared foundation
 aiditor-kernel    Core services + tree + dock runtime
 aiditor-ui        UI widget and built-in panel add-on
 aiditor-ai        AI Host + Extension Runtime add-on
 aiditor-core      classic Kernel + UI bundle
 aiditor-full      Kernel + UI + AI Host + Extension Runtime
 ```
+
+Theme and Widgets are distribution projections, not additional architecture
+layers. They concatenate the same source files and preserve the same
+`window.aiditor`, signal, registry, command, owner, and cleanup contracts.
+Widgets deliberately excludes editor-shell services and built-in panels; apps
+that need Dock or the full Core/UI contract should use Kernel + UI or Core.
 
 ## Architecture Invariants
 
@@ -51,7 +59,7 @@ file boundary        -> workspace
 file mutation review -> workspace preview/apply
 AI/domain review     -> Operation preview/apply or ChangeSet
 lifecycle owner      -> owner metadata
-distribution unit    -> kernel / ui / ai / core / full bundles
+distribution unit    -> theme / widgets / kernel / ui / ai / core / full bundles
 mutable consistency  -> ResourceVersion + CAS apply
 package format       -> Extension
 privileged boundary  -> Host Adapter

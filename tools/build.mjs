@@ -2,10 +2,10 @@
 //
 // The framework stays zero-build for consumers, so this is not a build tool in
 // the webpack sense: it is `cat` with banners. Source files are IIFEs already;
-// we concatenate them in dependency order into dist/aiditor-core.* and
-// dist/aiditor-full.*. dist/aiditor.* is the Core/UI alias. The output is
-// committed so consumers, including our own demo, can double-click index.html
-// and have it work without ever running node.
+// we concatenate them in dependency order into distribution slices and the
+// classic core/full bundles. dist/aiditor.* is the Core/UI alias. The output
+// is committed so consumers, including our own demo, can double-click
+// index.html and have it work without ever running node.
 //
 // Usage:
 //   node tools/build.mjs            one-shot build
@@ -287,10 +287,43 @@ function isAiCss(rel) {
   return rel === 'style/ui-ai.css'
 }
 
+function isThemeCss(rel) {
+  return rel === 'style/theme.css' || rel.indexOf('style/themes/') === 0
+}
+
+function isWidgetUiJs(rel) {
+  return rel.indexOf('ui/') === 0 && rel.indexOf('ui/panel/') !== 0
+}
+
+function isWidgetCss(rel) {
+  return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css')
+}
+
+// Standalone distribution foundations. These are source projections, not a
+// second runtime: the same files and registries back the classic bundles.
+const THEME_JS_ORDER = [
+  'core/theme.js',
+]
+
+const WIDGET_RUNTIME_JS_ORDER = [
+  'core/signal.js',
+  'core/log.js',
+  'core/names.js',
+  'core/runtime.js',
+  'core/theme.js',
+  'core/bus.js',
+  'core/i18n.js',
+  'core/commands.js',
+  'core/registry.js',
+]
+
 const KERNEL_JS_ORDER = JS_ORDER.filter(isKernelJs)
 const UI_JS_ORDER = JS_ORDER.filter(isUiJs)
 const AI_JS_ORDER = JS_ORDER.filter(isAiJs)
 const CORE_JS_ORDER = JS_ORDER.filter(isCoreJs)
+const WIDGET_JS_ORDER = WIDGET_RUNTIME_JS_ORDER.concat(JS_ORDER.filter(isWidgetUiJs))
+const THEME_CSS_ORDER = CSS_ORDER.filter(isThemeCss)
+const WIDGET_CSS_ORDER = CSS_ORDER.filter(isWidgetCss)
 const KERNEL_CSS_ORDER = CSS_ORDER.filter(isKernelCss)
 const UI_CSS_ORDER = CSS_ORDER.filter(isUiCss)
 const AI_CSS_ORDER = CSS_ORDER.filter(isAiCss)
@@ -321,6 +354,10 @@ function bundle(order, kind) {
 function buildOnce() {
   mkdirSync(DIST, { recursive: true })
   const apiDocs = generateApiDocs()
+  const themeJs   = bundle(THEME_JS_ORDER, 'Theme JS')
+  const themeCss  = bundle(THEME_CSS_ORDER, 'Theme CSS')
+  const widgetJs  = bundle(WIDGET_JS_ORDER, 'Widgets JS')
+  const widgetCss = bundle(WIDGET_CSS_ORDER, 'Widgets CSS')
   const kernelJs  = bundle(KERNEL_JS_ORDER, 'Kernel JS')
   const kernelCss = bundle(KERNEL_CSS_ORDER, 'Kernel CSS')
   const uiJs      = bundle(UI_JS_ORDER, 'UI JS')
@@ -331,6 +368,10 @@ function buildOnce() {
   const coreCss = bundle(CORE_CSS_ORDER, 'Core CSS')
   const fullJs  = bundle(JS_ORDER, 'Full JS')
   const fullCss = bundle(CSS_ORDER, 'Full CSS')
+  writeFileSync(join(DIST, 'aiditor-theme.js'), themeJs.text)
+  writeFileSync(join(DIST, 'aiditor-theme.css'), themeCss.text)
+  writeFileSync(join(DIST, 'aiditor-widgets.js'), widgetJs.text)
+  writeFileSync(join(DIST, 'aiditor-widgets.css'), widgetCss.text)
   writeFileSync(join(DIST, 'aiditor-kernel.js'), kernelJs.text)
   writeFileSync(join(DIST, 'aiditor-kernel.css'), kernelCss.text)
   writeFileSync(join(DIST, 'aiditor-ui.js'), uiJs.text)
@@ -344,6 +385,14 @@ function buildOnce() {
   writeFileSync(join(DIST, 'aiditor.js'), coreJs.text)
   writeFileSync(join(DIST, 'aiditor.css'), coreCss.text)
   const stamp = new Date().toLocaleTimeString()
+  console.log('[' + stamp + '] built dist/aiditor-theme.js (' + themeJs.text.length + ' bytes, ' +
+              (THEME_JS_ORDER.length - themeJs.missing.length) + '/' + THEME_JS_ORDER.length + ' files), ' +
+              'dist/aiditor-theme.css (' + themeCss.text.length + ' bytes, ' +
+              (THEME_CSS_ORDER.length - themeCss.missing.length) + '/' + THEME_CSS_ORDER.length + ' files)')
+  console.log('[' + stamp + '] built dist/aiditor-widgets.js (' + widgetJs.text.length + ' bytes, ' +
+              (WIDGET_JS_ORDER.length - widgetJs.missing.length) + '/' + WIDGET_JS_ORDER.length + ' files), ' +
+              'dist/aiditor-widgets.css (' + widgetCss.text.length + ' bytes, ' +
+              (WIDGET_CSS_ORDER.length - widgetCss.missing.length) + '/' + WIDGET_CSS_ORDER.length + ' files)')
   console.log('[' + stamp + '] built dist/aiditor-kernel.js (' + kernelJs.text.length + ' bytes, ' +
               (KERNEL_JS_ORDER.length - kernelJs.missing.length) + '/' + KERNEL_JS_ORDER.length + ' files), ' +
               'dist/aiditor-kernel.css (' + kernelCss.text.length + ' bytes, ' +
@@ -365,10 +414,13 @@ function buildOnce() {
               'dist/aiditor-full.css (' + fullCss.text.length + ' bytes, ' +
               (CSS_ORDER.length - fullCss.missing.length) + '/' + CSS_ORDER.length + ' files)')
   console.log('[' + stamp + '] generated dist/aiditor-api.json (' + apiDocs.entries.length + ' entries)')
-  if (kernelJs.missing.length || kernelCss.missing.length || uiJs.missing.length || uiCss.missing.length ||
+  if (themeJs.missing.length || themeCss.missing.length || widgetJs.missing.length || widgetCss.missing.length ||
+      kernelJs.missing.length || kernelCss.missing.length || uiJs.missing.length || uiCss.missing.length ||
       aiJs.missing.length || aiCss.missing.length || coreJs.missing.length || coreCss.missing.length ||
       fullJs.missing.length || fullCss.missing.length) {
-    const all = kernelJs.missing.concat(kernelCss.missing, uiJs.missing, uiCss.missing, aiJs.missing, aiCss.missing, coreJs.missing, coreCss.missing, fullJs.missing, fullCss.missing)
+    const all = themeJs.missing.concat(themeCss.missing, widgetJs.missing, widgetCss.missing,
+      kernelJs.missing, kernelCss.missing, uiJs.missing, uiCss.missing, aiJs.missing, aiCss.missing,
+      coreJs.missing, coreCss.missing, fullJs.missing, fullCss.missing)
     console.log('  - skipped (not yet created): ' + all.join(', '))
   }
 }

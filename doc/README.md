@@ -50,6 +50,10 @@ The repository may contain source, tests, demos, internal handoff files, and
 archived notes. The published runtime package should stay small and public:
 
 ```text
+dist/aiditor-theme.js
+dist/aiditor-theme.css
+dist/aiditor-widgets.js
+dist/aiditor-widgets.css
 dist/aiditor-core.js
 dist/aiditor-core.css
 dist/aiditor-full.js
@@ -75,6 +79,8 @@ Optional layers must be optional in distribution as well as in architecture. The
 runtime distribution should provide:
 
 ```text
+aiditor-theme     standalone theme runtime + tokens + built-in themes
+aiditor-widgets   standalone generic UI widgets + minimal shared foundation
 aiditor-kernel    Core services + tree + dock runtime
 aiditor-ui        UI widget and built-in panel add-on
 aiditor-ai        AI Host + Extension Runtime add-on
@@ -85,6 +91,12 @@ aiditor-full      Kernel + UI + AI Host + Extension Runtime
 Host apps that only need dock layout should be able to load the kernel bundle.
 Apps that need the classic UI framework can load `aiditor-core` without AI,
 extension runtime, AI panels, or AI-specific styles.
+
+`aiditor-theme` and `aiditor-widgets` are lightweight source projections, not
+new architecture layers. `aiditor-widgets` includes themes and the shared
+signal/registry helpers required by generic controls, while excluding Dock,
+Workspace, History, Shortcuts, built-in panels, AI Host, and Extension Runtime.
+It is a standalone alternative and must not be combined with Kernel/Core/Full.
 
 ## Core Principles
 

@@ -75,6 +75,18 @@ function isAiCss(rel) {
   return rel === 'style/ui-ai.css'
 }
 
+function isThemeCss(rel) {
+  return rel === 'style/theme.css' || rel.indexOf('style/themes/') === 0
+}
+
+function isWidgetUiJs(rel) {
+  return rel.indexOf('ui/') === 0 && rel.indexOf('ui/panel/') !== 0
+}
+
+function isWidgetCss(rel) {
+  return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css')
+}
+
 function checkCoverage(order, ext) {
   const source = []
   walk(SRC, ext, source)
@@ -86,6 +98,11 @@ function checkCoverage(order, ext) {
 
 const jsOrder = parseOrder('JS_ORDER')
 const cssOrder = parseOrder('CSS_ORDER')
+const themeJsOrder = parseOrder('THEME_JS_ORDER')
+const widgetRuntimeJsOrder = parseOrder('WIDGET_RUNTIME_JS_ORDER')
+const widgetJsOrder = widgetRuntimeJsOrder.concat(jsOrder.filter(isWidgetUiJs))
+const themeCssOrder = cssOrder.filter(isThemeCss)
+const widgetCssOrder = cssOrder.filter(isWidgetCss)
 const kernelJsOrder = jsOrder.filter(isKernelJs)
 const uiJsOrder = jsOrder.filter(isUiJs)
 const aiJsOrder = jsOrder.filter(isAiJs)
@@ -98,6 +115,10 @@ const jsCoverage = checkCoverage(jsOrder, '.js')
 const cssCoverage = checkCoverage(cssOrder, '.css')
 const fullJs = bundle(jsOrder, 'Full JS')
 const fullCss = bundle(cssOrder, 'Full CSS')
+const themeJs = bundle(themeJsOrder, 'Theme JS')
+const themeCss = bundle(themeCssOrder, 'Theme CSS')
+const widgetJs = bundle(widgetJsOrder, 'Widgets JS')
+const widgetCss = bundle(widgetCssOrder, 'Widgets CSS')
 const kernelJs = bundle(kernelJsOrder, 'Kernel JS')
 const kernelCss = bundle(kernelCssOrder, 'Kernel CSS')
 const uiJs = bundle(uiJsOrder, 'UI JS')
@@ -114,9 +135,18 @@ if (cssCoverage.missing.length) errors.push('CSS files missing from CSS_ORDER: '
 if (cssCoverage.stale.length) errors.push('stale CSS_ORDER entries: ' + cssCoverage.stale.join(', '))
 if (/\/\* ---- (ui|ai|extensions)\//.test(kernelJs.text)) errors.push('kernel bundle contains UI, AI, or extension source files')
 if (/\/\* ---- style\/ui-/.test(kernelCss.text)) errors.push('kernel CSS contains UI layer styles')
+if (/\/\* ---- (dock|tree|ai|extensions|ui)\//.test(themeJs.text)) errors.push('theme bundle contains non-theme runtime source files')
+if (/\/\* ---- style\/(dock|component|ui-)/.test(themeCss.text)) errors.push('theme CSS contains component layer styles')
+if (/\/\* ---- (dock|tree|ai|extensions|ui\/panel)\//.test(widgetJs.text)) errors.push('widgets bundle contains editor runtime, panel, AI, or extension source files')
+if (/\/\* ---- core\/(workspace|shortcuts|history|settings|context)\.js/.test(widgetJs.text)) errors.push('widgets bundle contains editor-only core services')
+if (/\/\* ---- style\/(dock|component|ui-ai|ui-settings)\.css/.test(widgetCss.text)) errors.push('widgets CSS contains dock, component host, AI, or settings panel styles')
 if (/\/\* ---- (ai|extensions)\//.test(coreJs.text)) errors.push('core bundle contains optional AI/extension source files')
 if (coreJs.text.indexOf('aiditor.ai') >= 0 || coreJs.text.indexOf('aiditor-ai') >= 0) errors.push('core bundle contains AI namespace or AI CSS class names')
 if (coreCss.text.indexOf('aiditor-ai') >= 0) errors.push('core CSS contains AI CSS class names')
+if (themeJs.text !== readFileSync(join(DIST, 'aiditor-theme.js'), 'utf8')) errors.push('dist/aiditor-theme.js is out of date; run node tools/build.mjs')
+if (themeCss.text !== readFileSync(join(DIST, 'aiditor-theme.css'), 'utf8')) errors.push('dist/aiditor-theme.css is out of date; run node tools/build.mjs')
+if (widgetJs.text !== readFileSync(join(DIST, 'aiditor-widgets.js'), 'utf8')) errors.push('dist/aiditor-widgets.js is out of date; run node tools/build.mjs')
+if (widgetCss.text !== readFileSync(join(DIST, 'aiditor-widgets.css'), 'utf8')) errors.push('dist/aiditor-widgets.css is out of date; run node tools/build.mjs')
 if (fullJs.text !== readFileSync(join(DIST, 'aiditor-full.js'), 'utf8')) errors.push('dist/aiditor-full.js is out of date; run node tools/build.mjs')
 if (fullCss.text !== readFileSync(join(DIST, 'aiditor-full.css'), 'utf8')) errors.push('dist/aiditor-full.css is out of date; run node tools/build.mjs')
 if (kernelJs.text !== readFileSync(join(DIST, 'aiditor-kernel.js'), 'utf8')) errors.push('dist/aiditor-kernel.js is out of date; run node tools/build.mjs')
@@ -135,4 +165,4 @@ if (errors.length) {
   process.exit(1)
 }
 
-console.log('bundle ok: kernel ' + kernelJsOrder.length + ' JS/' + kernelCssOrder.length + ' CSS, ui ' + uiJsOrder.length + ' JS/' + uiCssOrder.length + ' CSS, ai ' + aiJsOrder.length + ' JS/' + aiCssOrder.length + ' CSS, core ' + coreJsOrder.length + ' JS/' + coreCssOrder.length + ' CSS, full ' + jsOrder.length + ' JS/' + cssOrder.length + ' CSS')
+console.log('bundle ok: theme ' + themeJsOrder.length + ' JS/' + themeCssOrder.length + ' CSS, widgets ' + widgetJsOrder.length + ' JS/' + widgetCssOrder.length + ' CSS, kernel ' + kernelJsOrder.length + ' JS/' + kernelCssOrder.length + ' CSS, ui ' + uiJsOrder.length + ' JS/' + uiCssOrder.length + ' CSS, ai ' + aiJsOrder.length + ' JS/' + aiCssOrder.length + ' CSS, core ' + coreJsOrder.length + ' JS/' + coreCssOrder.length + ' CSS, full ' + jsOrder.length + ' JS/' + cssOrder.length + ' CSS')
