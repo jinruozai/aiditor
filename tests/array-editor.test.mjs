@@ -486,7 +486,7 @@ function pointer(el, type, extra) {
 }
 
 {
-  const css = readFileSync('src/style/ui-form.css', 'utf8')
+  const css = readFileSync('src/style/ui-property.css', 'utf8')
   assert.match(
     css,
     /\.aiditor-ui-array-editor-row\s*{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\) auto;/s,

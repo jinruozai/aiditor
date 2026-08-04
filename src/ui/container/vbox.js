@@ -7,7 +7,9 @@
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
 
-  function build(propsSig, direction) {
+  function build(opts, direction) {
+    const o = opts || {}
+    const propsSig = ui.isSignal(o.value) ? o.value : aiditor.signal(o)
     const el = ui.h('div', 'aiditor-ui-' + direction)
     el.style.display = 'flex'
     el.style.flexDirection = direction === 'vbox' ? 'column' : 'row'
@@ -23,37 +25,6 @@
     return el
   }
 
-  function applyChildLayout(child, layout) {
-    if (!layout) return
-    if (layout.flex != null)  child.style.flex      = String(layout.flex)
-    if (layout.basis != null) child.style.flexBasis = layout.basis + (typeof layout.basis === 'number' ? 'px' : '')
-  }
-
-  const FLEX_SCHEMA = {
-    gap:     { type: 'int', desc: 'Pixel gap between children.' },
-    align:   { type: 'enum_string', type_agv: { options: ['stretch','flex-start','center','flex-end'] },
-               desc: 'Cross-axis alignment of children: stretch, flex-start, center, flex-end.' },
-    justify: { type: 'enum_string', type_agv: { options: ['flex-start','center','flex-end','space-between','space-around'] },
-               desc: 'Main-axis distribution of children.' },
-    width:   { type: 'int', desc: 'Fixed width in pixels (empty = auto).' },
-    height:  { type: 'int', desc: 'Fixed height in pixels (empty = auto).' },
-  }
-  const SCHEMA   = Object.assign({}, ui.BOX_STYLE_SCHEMA, FLEX_SCHEMA)
-  const DEFAULTS = Object.assign({}, ui.BOX_STYLE_DEFAULTS, { gap: 4 })
-
-  aiditor.registerComponent('vbox', {
-    label: 'V Box', icon: 'columns', category: 'layout',
-    bindable: [],
-    defaultProps: DEFAULTS, schema: SCHEMA,
-    factory: function (propsSig) { return build(propsSig, 'vbox') },
-    appendChild: function (parent, child, layout) { applyChildLayout(child, layout); parent.appendChild(child) },
-  })
-
-  aiditor.registerComponent('hbox', {
-    label: 'H Box', icon: 'columns', category: 'layout',
-    bindable: [],
-    defaultProps: DEFAULTS, schema: SCHEMA,
-    factory: function (propsSig) { return build(propsSig, 'hbox') },
-    appendChild: function (parent, child, layout) { applyChildLayout(child, layout); parent.appendChild(child) },
-  })
+  ui.vbox = function (opts) { return build(opts, 'vbox') }
+  ui.hbox = function (opts) { return build(opts, 'hbox') }
 })(window.aiditor = window.aiditor || {})

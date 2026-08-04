@@ -79,12 +79,21 @@ function isThemeCss(rel) {
   return rel === 'style/theme.css' || rel.indexOf('style/themes/') === 0
 }
 
-function isWidgetUiJs(rel) {
+function isEditorUiJs(rel) {
   return rel.indexOf('ui/') === 0 && rel.indexOf('ui/panel/') !== 0
 }
 
-function isWidgetCss(rel) {
+function isEditorCss(rel) {
   return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css')
+}
+
+function isMiniCss(rel) {
+  return isThemeCss(rel) || [
+    'style/ui-base.css',
+    'style/ui-form.css',
+    'style/ui-container.css',
+    'style/ui-overlay.css',
+  ].indexOf(rel) >= 0
 }
 
 function checkCoverage(order, ext) {
@@ -99,10 +108,14 @@ function checkCoverage(order, ext) {
 const jsOrder = parseOrder('JS_ORDER')
 const cssOrder = parseOrder('CSS_ORDER')
 const themeJsOrder = parseOrder('THEME_JS_ORDER')
-const widgetRuntimeJsOrder = parseOrder('WIDGET_RUNTIME_JS_ORDER')
-const widgetJsOrder = widgetRuntimeJsOrder.concat(jsOrder.filter(isWidgetUiJs))
+const miniRuntimeJsOrder = parseOrder('MINI_RUNTIME_JS_ORDER')
+const miniUiJsOrder = parseOrder('MINI_UI_JS_ORDER')
+const editorRuntimeJsOrder = parseOrder('EDITOR_RUNTIME_JS_ORDER')
+const miniJsOrder = miniRuntimeJsOrder.concat(miniUiJsOrder)
+const editorJsOrder = editorRuntimeJsOrder.concat(jsOrder.filter(isEditorUiJs))
 const themeCssOrder = cssOrder.filter(isThemeCss)
-const widgetCssOrder = cssOrder.filter(isWidgetCss)
+const miniCssOrder = cssOrder.filter(isMiniCss)
+const editorCssOrder = cssOrder.filter(isEditorCss)
 const kernelJsOrder = jsOrder.filter(isKernelJs)
 const uiJsOrder = jsOrder.filter(isUiJs)
 const aiJsOrder = jsOrder.filter(isAiJs)
@@ -117,8 +130,10 @@ const fullJs = bundle(jsOrder, 'Full JS')
 const fullCss = bundle(cssOrder, 'Full CSS')
 const themeJs = bundle(themeJsOrder, 'Theme JS')
 const themeCss = bundle(themeCssOrder, 'Theme CSS')
-const widgetJs = bundle(widgetJsOrder, 'Widgets JS')
-const widgetCss = bundle(widgetCssOrder, 'Widgets CSS')
+const miniJs = bundle(miniJsOrder, 'Mini JS')
+const miniCss = bundle(miniCssOrder, 'Mini CSS')
+const editorJs = bundle(editorJsOrder, 'Editor JS')
+const editorCss = bundle(editorCssOrder, 'Editor CSS')
 const kernelJs = bundle(kernelJsOrder, 'Kernel JS')
 const kernelCss = bundle(kernelCssOrder, 'Kernel CSS')
 const uiJs = bundle(uiJsOrder, 'UI JS')
@@ -137,16 +152,24 @@ if (/\/\* ---- (ui|ai|extensions)\//.test(kernelJs.text)) errors.push('kernel bu
 if (/\/\* ---- style\/ui-/.test(kernelCss.text)) errors.push('kernel CSS contains UI layer styles')
 if (/\/\* ---- (dock|tree|ai|extensions|ui)\//.test(themeJs.text)) errors.push('theme bundle contains non-theme runtime source files')
 if (/\/\* ---- style\/(dock|component|ui-)/.test(themeCss.text)) errors.push('theme CSS contains component layer styles')
-if (/\/\* ---- (dock|tree|ai|extensions|ui\/panel)\//.test(widgetJs.text)) errors.push('widgets bundle contains editor runtime, panel, AI, or extension source files')
-if (/\/\* ---- core\/(workspace|shortcuts|history|settings|context)\.js/.test(widgetJs.text)) errors.push('widgets bundle contains editor-only core services')
-if (/\/\* ---- style\/(dock|component|ui-ai|ui-settings)\.css/.test(widgetCss.text)) errors.push('widgets CSS contains dock, component host, AI, or settings panel styles')
+if (/\/\* ---- (dock|tree|ai|extensions|ui\/panel)\//.test(editorJs.text)) errors.push('editor bundle contains editor shell, panel, AI, or extension source files')
+if (/\/\* ---- core\/(workspace|shortcuts|history|settings|context)\.js/.test(editorJs.text)) errors.push('editor bundle contains editor-shell core services')
+if (/\/\* ---- style\/(dock|dock-tabs|component|ui-ai|ui-settings)\.css/.test(editorCss.text)) errors.push('editor CSS contains dock, component host, AI, or settings panel styles')
+if (/\/\* ---- (dock|tree|ai|extensions|ui\/panel|ui\/editor|ui\/data)\//.test(miniJs.text)) errors.push('mini bundle contains editor-oriented source files')
+if (/\/\* ---- ui\/(inspector|_internal\/_render-tree|_internal\/_dnd|_internal\/_register-builtins)\.js/.test(miniJs.text)) errors.push('mini bundle contains inspector, data-transfer, or palette runtime')
+if (/\/\* ---- ui\/form\/(schema|structInput|dictInput|arrayEditor|arrayInput|editorFor|propertyForm|propertyList|typeconfig|vectorInput)\.js/.test(miniJs.text)) errors.push('mini bundle contains schema-driven or advanced editor forms')
+if (/\/\* ---- core\/(workspace|shortcuts|history|settings|context|bus|runtime|registry)\.js/.test(miniJs.text)) errors.push('mini bundle contains editor-shell core services or component runtime')
+if (/\/\* ---- ui\/(container\/_layout-rect|_internal\/_text-style)\.js/.test(miniJs.text)) errors.push('mini bundle contains editor palette metadata helpers')
+if (/\/\* ---- style\/(dock|dock-tabs|component|ui-property|ui-editor|ui-data|ui-ai|ui-settings)\.css/.test(miniCss.text)) errors.push('mini CSS contains editor-oriented styles')
 if (/\/\* ---- (ai|extensions)\//.test(coreJs.text)) errors.push('core bundle contains optional AI/extension source files')
 if (coreJs.text.indexOf('aiditor.ai') >= 0 || coreJs.text.indexOf('aiditor-ai') >= 0) errors.push('core bundle contains AI namespace or AI CSS class names')
 if (coreCss.text.indexOf('aiditor-ai') >= 0) errors.push('core CSS contains AI CSS class names')
 if (themeJs.text !== readFileSync(join(DIST, 'aiditor-theme.js'), 'utf8')) errors.push('dist/aiditor-theme.js is out of date; run node tools/build.mjs')
 if (themeCss.text !== readFileSync(join(DIST, 'aiditor-theme.css'), 'utf8')) errors.push('dist/aiditor-theme.css is out of date; run node tools/build.mjs')
-if (widgetJs.text !== readFileSync(join(DIST, 'aiditor-widgets.js'), 'utf8')) errors.push('dist/aiditor-widgets.js is out of date; run node tools/build.mjs')
-if (widgetCss.text !== readFileSync(join(DIST, 'aiditor-widgets.css'), 'utf8')) errors.push('dist/aiditor-widgets.css is out of date; run node tools/build.mjs')
+if (miniJs.text !== readFileSync(join(DIST, 'aiditor-mini.js'), 'utf8')) errors.push('dist/aiditor-mini.js is out of date; run node tools/build.mjs')
+if (miniCss.text !== readFileSync(join(DIST, 'aiditor-mini.css'), 'utf8')) errors.push('dist/aiditor-mini.css is out of date; run node tools/build.mjs')
+if (editorJs.text !== readFileSync(join(DIST, 'aiditor-editor.js'), 'utf8')) errors.push('dist/aiditor-editor.js is out of date; run node tools/build.mjs')
+if (editorCss.text !== readFileSync(join(DIST, 'aiditor-editor.css'), 'utf8')) errors.push('dist/aiditor-editor.css is out of date; run node tools/build.mjs')
 if (fullJs.text !== readFileSync(join(DIST, 'aiditor-full.js'), 'utf8')) errors.push('dist/aiditor-full.js is out of date; run node tools/build.mjs')
 if (fullCss.text !== readFileSync(join(DIST, 'aiditor-full.css'), 'utf8')) errors.push('dist/aiditor-full.css is out of date; run node tools/build.mjs')
 if (kernelJs.text !== readFileSync(join(DIST, 'aiditor-kernel.js'), 'utf8')) errors.push('dist/aiditor-kernel.js is out of date; run node tools/build.mjs')
@@ -165,4 +188,4 @@ if (errors.length) {
   process.exit(1)
 }
 
-console.log('bundle ok: theme ' + themeJsOrder.length + ' JS/' + themeCssOrder.length + ' CSS, widgets ' + widgetJsOrder.length + ' JS/' + widgetCssOrder.length + ' CSS, kernel ' + kernelJsOrder.length + ' JS/' + kernelCssOrder.length + ' CSS, ui ' + uiJsOrder.length + ' JS/' + uiCssOrder.length + ' CSS, ai ' + aiJsOrder.length + ' JS/' + aiCssOrder.length + ' CSS, core ' + coreJsOrder.length + ' JS/' + coreCssOrder.length + ' CSS, full ' + jsOrder.length + ' JS/' + cssOrder.length + ' CSS')
+console.log('bundle ok: theme ' + themeJsOrder.length + ' JS/' + themeCssOrder.length + ' CSS, mini ' + miniJsOrder.length + ' JS/' + miniCssOrder.length + ' CSS, editor ' + editorJsOrder.length + ' JS/' + editorCssOrder.length + ' CSS, kernel ' + kernelJsOrder.length + ' JS/' + kernelCssOrder.length + ' CSS, ui ' + uiJsOrder.length + ' JS/' + uiCssOrder.length + ' CSS, ai ' + aiJsOrder.length + ' JS/' + aiCssOrder.length + ' CSS, core ' + coreJsOrder.length + ' JS/' + coreCssOrder.length + ' CSS, full ' + jsOrder.length + ' JS/' + cssOrder.length + ' CSS')

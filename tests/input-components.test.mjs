@@ -1319,7 +1319,7 @@ function contextmenu(el, target, extra) {
 }
 
 {
-  const css = readFileSync('src/style/ui-form.css', 'utf8')
+  const css = readFileSync('src/style/ui-form.css', 'utf8') + '\n' + readFileSync('src/style/ui-property.css', 'utf8')
   assert.match(
     css,
     /\.aiditor-ui-property-form \.aiditor-ui-property-form-struct\s*{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*padding:\s*0 var\(--aiditor-space-1\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,

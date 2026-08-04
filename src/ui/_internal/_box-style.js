@@ -1,68 +1,9 @@
-// Shared "box visual chrome" schema fragment + applyBoxStyle helper.
-//
-// Components that look like boxes (containers, badges, banners, text frames,
-// image cards, …) share this set of props so palette / property form
-// consumers see a uniform vocabulary. Adding a new visual prop = update
-// these two tables in one place.
-//
-//   schema:   ui.BOX_STYLE_SCHEMA          merge into a component's schema
-//   defaults: ui.BOX_STYLE_DEFAULTS        merge into defaultProps
-//   helper:   ui.applyBoxStyle(el, props)  inline-style sync from a propsSig
-//
-// Defaults are empty / null. The helper writes inline only when the value
-// is "real" (non-empty string, non-null number). Empty → no inline style →
-// the framework's CSS rules (theme cascade) win. That's how "no edit = use
-// theme" falls out for free.
+// Shared runtime helper for applying optional box chrome to UI primitives.
+// Palette schema/default metadata lives in _register-builtins.js so direct
+// aiditor.ui.* consumers do not carry editor-only registration data.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
-
-  // valueKind:'hex' forces colorInput to store '#rrggbb' strings — CSS
-  // accepts them directly. Without this override, the default color
-  // typedef (base_type:int) stores 24-bit ints, which write to
-  // el.style.background as plain digit strings and the browser ignores.
-  ui.BOX_STYLE_SCHEMA = {
-    background:    { type: 'color', type_agv: { valueKind: 'hex' }, group: 'background',
-                     desc: 'Fill color of the box. Empty falls back to the theme.' },
-    borderColor:   { type: 'color', type_agv: { valueKind: 'hex' }, group: 'border',
-                     desc: 'Border line color. Empty disables the border.' },
-    borderWidth:   { type: 'int',   group: 'border',
-                     desc: 'Border thickness in pixels. 0 = no border.' },
-    borderStyle:   { type: 'enum_string', type_agv: { options: ['solid','dashed','dotted'] }, group: 'border',
-                     desc: 'Border line pattern: solid · dashed · dotted.' },
-    borderRadius:  { type: 'int',   group: 'border',
-                     desc: 'Corner radius in pixels. 0 = sharp corners.' },
-    padding:       { type: 'int',   group: 'spacing',
-                     desc: 'Inner space between border and content (px).' },
-    opacity:       { type: 'float', group: 'effects',
-                     desc: 'Transparency: 0 = invisible, 1 = fully opaque.' },
-    shadowX:       { type: 'int',   group: 'shadow',
-                     desc: 'Drop-shadow horizontal offset in pixels (positive = right).' },
-    shadowY:       { type: 'int',   group: 'shadow',
-                     desc: 'Drop-shadow vertical offset in pixels (positive = down).' },
-    shadowBlur:    { type: 'int',   group: 'shadow',
-                     desc: 'Drop-shadow blur radius in pixels.' },
-    shadowColor:   { type: 'color', type_agv: { valueKind: 'hex' }, group: 'shadow',
-                     desc: 'Drop-shadow color. Empty disables the shadow.' },
-  }
-
-  // borderStyle defaults to 'solid' so that as soon as a user sets
-  // borderWidth + borderColor, the border actually paints — CSS treats
-  // border-style:none (the spec default) as "no border", which made the
-  // empty default invisible even when the other two were filled in.
-  ui.BOX_STYLE_DEFAULTS = {
-    background:   '',
-    borderColor:  '',
-    borderWidth:  null,
-    borderStyle:  'solid',
-    borderRadius: null,
-    padding:      null,
-    opacity:      null,
-    shadowX:      null,
-    shadowY:      null,
-    shadowBlur:   null,
-    shadowColor:  '',
-  }
 
   ui.applyBoxStyle = function (el, propsSig) {
     ui.collect(el, aiditor.effect(function () {

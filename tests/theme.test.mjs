@@ -59,7 +59,7 @@ assert.equal(aiditor.theme.read('--aiditor-brand'), '#569eff')
 const css = aiditor.theme.exportCss(null, ['--aiditor-brand'])
 assert.equal(css, ':root {\n  --aiditor-brand: #569eff;\n}')
 
-const uiFormCss = readFileSync('src/style/ui-form.css', 'utf8')
+const dockTabsCss = readFileSync('src/style/dock-tabs.css', 'utf8')
 const themeModes = aiditor.theme.modeIds()
 const themeSourceFiles = ['src/style/theme.css'].concat(themeModes.map((mode) => 'src/style/themes/' + mode + '.css'))
 const themeCss = themeSourceFiles.map((file) => readFileSync(file, 'utf8')).join('\n')
@@ -171,11 +171,11 @@ for (const token of [
   assert.match(neonBlock, new RegExp(token.replace(/-/g, '\\-')))
 }
 
-assert.match(uiFormCss, /--aiditor-dock-tab-active-overlay-top/)
-assert.match(uiFormCss, /--aiditor-dock-tab-active-shadow-right/)
-assert.match(uiFormCss, /--aiditor-dock-tab-indicator-bg-vertical/)
-assert.doesNotMatch(uiFormCss, /radial-gradient\(95px 24px/)
-assert.doesNotMatch(uiFormCss, /mask-image: linear-gradient\(to bottom/)
+assert.match(dockTabsCss, /--aiditor-dock-tab-active-overlay-top/)
+assert.match(dockTabsCss, /--aiditor-dock-tab-active-shadow-right/)
+assert.match(dockTabsCss, /--aiditor-dock-tab-indicator-bg-vertical/)
+assert.doesNotMatch(dockTabsCss, /radial-gradient\(95px 24px/)
+assert.doesNotMatch(dockTabsCss, /mask-image: linear-gradient\(to bottom/)
 assert.match(neonBlock, /--aiditor-border-w-strong:\s*2px/)
 assert.match(neonBlock, /--aiditor-surface-canvas:\s*#00020a/)
 assert.match(neonBlock, /--aiditor-surface-panel:\s*#030916/)
@@ -299,7 +299,9 @@ for (const file of [
   'src/style/ui-data.css',
   'src/style/ui-editor.css',
   'src/style/ui-form.css',
+  'src/style/ui-property.css',
   'src/style/ui-overlay.css',
+  'src/style/dock-tabs.css',
 ]) {
   const cssText = readFileSync(file, 'utf8')
   assert.doesNotMatch(cssText, /--aiditor-shadow-(md|lg|0)/, file + ' should use appearance shadow roles')

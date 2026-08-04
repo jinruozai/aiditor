@@ -247,10 +247,12 @@ const CSS_ORDER = [
   'style/component.css',
   'style/ui-base.css',
   'style/ui-form.css',
+  'style/ui-property.css',
   'style/ui-editor.css',
   'style/ui-container.css',
   'style/ui-data.css',
   'style/ui-overlay.css',
+  'style/dock-tabs.css',
   'style/ui-ai.css',
   'style/ui-settings.css',
 ]
@@ -291,12 +293,21 @@ function isThemeCss(rel) {
   return rel === 'style/theme.css' || rel.indexOf('style/themes/') === 0
 }
 
-function isWidgetUiJs(rel) {
+function isEditorUiJs(rel) {
   return rel.indexOf('ui/') === 0 && rel.indexOf('ui/panel/') !== 0
 }
 
-function isWidgetCss(rel) {
+function isEditorCss(rel) {
   return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css')
+}
+
+function isMiniCss(rel) {
+  return isThemeCss(rel) || [
+    'style/ui-base.css',
+    'style/ui-form.css',
+    'style/ui-container.css',
+    'style/ui-overlay.css',
+  ].indexOf(rel) >= 0
 }
 
 // Standalone distribution foundations. These are source projections, not a
@@ -305,7 +316,7 @@ const THEME_JS_ORDER = [
   'core/theme.js',
 ]
 
-const WIDGET_RUNTIME_JS_ORDER = [
+const EDITOR_RUNTIME_JS_ORDER = [
   'core/signal.js',
   'core/log.js',
   'core/names.js',
@@ -317,13 +328,89 @@ const WIDGET_RUNTIME_JS_ORDER = [
   'core/registry.js',
 ]
 
+const MINI_RUNTIME_JS_ORDER = [
+  'core/signal.js',
+  'core/log.js',
+  'core/names.js',
+  'core/theme.js',
+  'core/i18n.js',
+  'core/commands.js',
+]
+
+const MINI_UI_JS_ORDER = [
+  'ui/_internal/_css.js',
+  'ui/_internal/_portal.js',
+  'ui/_internal/_floating.js',
+  'ui/_internal/_drag.js',
+  'ui/_internal/_signal.js',
+  'ui/_internal/_edit-session.js',
+  'ui/_internal/_scope.js',
+  'ui/_internal/_box-style.js',
+  'ui/_internal/_overlay.js',
+
+  'ui/base/icon-set.js',
+  'ui/base/icon.js',
+  'ui/base/image.js',
+  'ui/base/button.js',
+  'ui/base/iconButton.js',
+  'ui/base/actionMenu.js',
+  'ui/base/actionBar.js',
+  'ui/base/stateButton.js',
+  'ui/base/copyButton.js',
+  'ui/base/tooltip.js',
+  'ui/base/popover.js',
+  'ui/base/kbd.js',
+  'ui/base/badge.js',
+  'ui/base/tag.js',
+  'ui/base/spinner.js',
+  'ui/base/divider.js',
+  'ui/base/text.js',
+
+  'ui/form/input.js',
+  'ui/form/searchInput.js',
+  'ui/form/textarea.js',
+  'ui/form/numberInput.js',
+  'ui/form/slider.js',
+  'ui/form/rangeSlider.js',
+  'ui/form/checkbox.js',
+  'ui/form/switch.js',
+  'ui/form/radio.js',
+  'ui/form/segmented.js',
+  'ui/form/select.js',
+  'ui/form/combobox.js',
+  'ui/form/colorInput.js',
+  'ui/form/dateInput.js',
+  'ui/form/enumInput.js',
+  'ui/form/tagInput.js',
+  'ui/form/tab.js',
+
+  'ui/container/section.js',
+  'ui/container/propRow.js',
+  'ui/container/card.js',
+  'ui/container/view.js',
+  'ui/container/scrollArea.js',
+  'ui/container/tabPanel.js',
+  'ui/container/absolute.js',
+  'ui/container/vbox.js',
+
+  'ui/overlay/menu.js',
+  'ui/overlay/quickPick.js',
+  'ui/overlay/modal.js',
+  'ui/overlay/drawer.js',
+  'ui/overlay/banner.js',
+  'ui/overlay/toast.js',
+  'ui/overlay/dialogs.js',
+]
+
 const KERNEL_JS_ORDER = JS_ORDER.filter(isKernelJs)
 const UI_JS_ORDER = JS_ORDER.filter(isUiJs)
 const AI_JS_ORDER = JS_ORDER.filter(isAiJs)
 const CORE_JS_ORDER = JS_ORDER.filter(isCoreJs)
-const WIDGET_JS_ORDER = WIDGET_RUNTIME_JS_ORDER.concat(JS_ORDER.filter(isWidgetUiJs))
+const MINI_JS_ORDER = MINI_RUNTIME_JS_ORDER.concat(MINI_UI_JS_ORDER)
+const EDITOR_JS_ORDER = EDITOR_RUNTIME_JS_ORDER.concat(JS_ORDER.filter(isEditorUiJs))
 const THEME_CSS_ORDER = CSS_ORDER.filter(isThemeCss)
-const WIDGET_CSS_ORDER = CSS_ORDER.filter(isWidgetCss)
+const MINI_CSS_ORDER = CSS_ORDER.filter(isMiniCss)
+const EDITOR_CSS_ORDER = CSS_ORDER.filter(isEditorCss)
 const KERNEL_CSS_ORDER = CSS_ORDER.filter(isKernelCss)
 const UI_CSS_ORDER = CSS_ORDER.filter(isUiCss)
 const AI_CSS_ORDER = CSS_ORDER.filter(isAiCss)
@@ -356,8 +443,10 @@ function buildOnce() {
   const apiDocs = generateApiDocs()
   const themeJs   = bundle(THEME_JS_ORDER, 'Theme JS')
   const themeCss  = bundle(THEME_CSS_ORDER, 'Theme CSS')
-  const widgetJs  = bundle(WIDGET_JS_ORDER, 'Widgets JS')
-  const widgetCss = bundle(WIDGET_CSS_ORDER, 'Widgets CSS')
+  const miniJs    = bundle(MINI_JS_ORDER, 'Mini JS')
+  const miniCss   = bundle(MINI_CSS_ORDER, 'Mini CSS')
+  const editorJs  = bundle(EDITOR_JS_ORDER, 'Editor JS')
+  const editorCss = bundle(EDITOR_CSS_ORDER, 'Editor CSS')
   const kernelJs  = bundle(KERNEL_JS_ORDER, 'Kernel JS')
   const kernelCss = bundle(KERNEL_CSS_ORDER, 'Kernel CSS')
   const uiJs      = bundle(UI_JS_ORDER, 'UI JS')
@@ -370,8 +459,10 @@ function buildOnce() {
   const fullCss = bundle(CSS_ORDER, 'Full CSS')
   writeFileSync(join(DIST, 'aiditor-theme.js'), themeJs.text)
   writeFileSync(join(DIST, 'aiditor-theme.css'), themeCss.text)
-  writeFileSync(join(DIST, 'aiditor-widgets.js'), widgetJs.text)
-  writeFileSync(join(DIST, 'aiditor-widgets.css'), widgetCss.text)
+  writeFileSync(join(DIST, 'aiditor-mini.js'), miniJs.text)
+  writeFileSync(join(DIST, 'aiditor-mini.css'), miniCss.text)
+  writeFileSync(join(DIST, 'aiditor-editor.js'), editorJs.text)
+  writeFileSync(join(DIST, 'aiditor-editor.css'), editorCss.text)
   writeFileSync(join(DIST, 'aiditor-kernel.js'), kernelJs.text)
   writeFileSync(join(DIST, 'aiditor-kernel.css'), kernelCss.text)
   writeFileSync(join(DIST, 'aiditor-ui.js'), uiJs.text)
@@ -389,10 +480,14 @@ function buildOnce() {
               (THEME_JS_ORDER.length - themeJs.missing.length) + '/' + THEME_JS_ORDER.length + ' files), ' +
               'dist/aiditor-theme.css (' + themeCss.text.length + ' bytes, ' +
               (THEME_CSS_ORDER.length - themeCss.missing.length) + '/' + THEME_CSS_ORDER.length + ' files)')
-  console.log('[' + stamp + '] built dist/aiditor-widgets.js (' + widgetJs.text.length + ' bytes, ' +
-              (WIDGET_JS_ORDER.length - widgetJs.missing.length) + '/' + WIDGET_JS_ORDER.length + ' files), ' +
-              'dist/aiditor-widgets.css (' + widgetCss.text.length + ' bytes, ' +
-              (WIDGET_CSS_ORDER.length - widgetCss.missing.length) + '/' + WIDGET_CSS_ORDER.length + ' files)')
+  console.log('[' + stamp + '] built dist/aiditor-mini.js (' + miniJs.text.length + ' bytes, ' +
+              (MINI_JS_ORDER.length - miniJs.missing.length) + '/' + MINI_JS_ORDER.length + ' files), ' +
+              'dist/aiditor-mini.css (' + miniCss.text.length + ' bytes, ' +
+              (MINI_CSS_ORDER.length - miniCss.missing.length) + '/' + MINI_CSS_ORDER.length + ' files)')
+  console.log('[' + stamp + '] built dist/aiditor-editor.js (' + editorJs.text.length + ' bytes, ' +
+              (EDITOR_JS_ORDER.length - editorJs.missing.length) + '/' + EDITOR_JS_ORDER.length + ' files), ' +
+              'dist/aiditor-editor.css (' + editorCss.text.length + ' bytes, ' +
+              (EDITOR_CSS_ORDER.length - editorCss.missing.length) + '/' + EDITOR_CSS_ORDER.length + ' files)')
   console.log('[' + stamp + '] built dist/aiditor-kernel.js (' + kernelJs.text.length + ' bytes, ' +
               (KERNEL_JS_ORDER.length - kernelJs.missing.length) + '/' + KERNEL_JS_ORDER.length + ' files), ' +
               'dist/aiditor-kernel.css (' + kernelCss.text.length + ' bytes, ' +
@@ -414,11 +509,13 @@ function buildOnce() {
               'dist/aiditor-full.css (' + fullCss.text.length + ' bytes, ' +
               (CSS_ORDER.length - fullCss.missing.length) + '/' + CSS_ORDER.length + ' files)')
   console.log('[' + stamp + '] generated dist/aiditor-api.json (' + apiDocs.entries.length + ' entries)')
-  if (themeJs.missing.length || themeCss.missing.length || widgetJs.missing.length || widgetCss.missing.length ||
+  if (themeJs.missing.length || themeCss.missing.length || miniJs.missing.length || miniCss.missing.length ||
+      editorJs.missing.length || editorCss.missing.length ||
       kernelJs.missing.length || kernelCss.missing.length || uiJs.missing.length || uiCss.missing.length ||
       aiJs.missing.length || aiCss.missing.length || coreJs.missing.length || coreCss.missing.length ||
       fullJs.missing.length || fullCss.missing.length) {
-    const all = themeJs.missing.concat(themeCss.missing, widgetJs.missing, widgetCss.missing,
+    const all = themeJs.missing.concat(themeCss.missing, miniJs.missing, miniCss.missing,
+      editorJs.missing, editorCss.missing,
       kernelJs.missing, kernelCss.missing, uiJs.missing, uiCss.missing, aiJs.missing, aiCss.missing,
       coreJs.missing, coreCss.missing, fullJs.missing, fullCss.missing)
     console.log('  - skipped (not yet created): ' + all.join(', '))

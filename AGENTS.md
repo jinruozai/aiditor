@@ -129,7 +129,8 @@ aiditor/
 
   dist/                            # 已 commit 的 bundle 产物(保证零环境双击运行)
     aiditor-theme.js / .css        # 独立主题 runtime + tokens + 内置主题
-    aiditor-widgets.js / .css      # 独立通用 UI + 所需最小基础,不含 Dock/AI
+    aiditor-mini.js / .css         # 独立网页常用 UI + 主题,不含编辑器重组件
+    aiditor-editor.js / .css       # 独立完整通用编辑器 UI,不含 Dock/AI
     aiditor-kernel.js / .css       # Core services + tree + Dock runtime
     aiditor-ui.js / .css           # Kernel 之上的 UI/panel add-on
     aiditor-ai.js / .css           # AI Host + Extension Runtime add-on
@@ -161,7 +162,7 @@ aiditor/
     style/
       theme.css                    # 主题 v2 token(authoring → primitive/ramp → role → component)+ dark/dracula/light
       dock.css / component.css        # 框架自己的 dock + tab + toolbar 样式
-      ui-base.css / ui-form.css / ui-editor.css / ui-container.css / ui-data.css / ui-overlay.css / ui-ai.css
+      ui-base.css / ui-form.css / ui-property.css / ui-editor.css / ui-container.css / ui-data.css / ui-overlay.css / dock-tabs.css / ui-ai.css
     ai/
       permission.js                # 统一 permission resolver + audit + path rules
       store.js                     # agents/messages/quests/attachments 完整内存状态

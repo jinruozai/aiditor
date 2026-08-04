@@ -30,22 +30,4 @@
 
   function toCssLen(v) { return typeof v === 'number' ? v + 'px' : String(v) }
 
-  aiditor.registerComponent('absolute', {
-    label:           'Absolute',
-    icon:            'maximize',
-    category:        'layout',
-    bindable:        [],
-    defaultProps: Object.assign({}, ui.BOX_STYLE_DEFAULTS, { width: 120, height: 120 }),
-    schema: Object.assign({}, ui.BOX_STYLE_SCHEMA, {
-      width:  { type: 'int', desc: 'Container width in pixels.' },
-      height: { type: 'int', desc: 'Container height in pixels.' },
-    }),
-    factory: function (propsSig) { return buildAbsolute(propsSig) },
-    appendChild: function (parent, child, layout) {
-      const slot = ui.h('div', 'aiditor-ui-abs-slot')
-      ui.layoutRect.applyToSlot(slot, layout)
-      slot.appendChild(child)
-      parent.appendChild(slot)
-    },
-  })
 })(window.aiditor = window.aiditor || {})

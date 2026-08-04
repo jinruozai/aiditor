@@ -297,7 +297,7 @@ const pendingSignal = asyncSignal
 aiditor.inspector.select({ type: 'case.custom', id: 'custom' })
 assert.equal(pendingSignal.aborted, true)
 
-const formCss = readFileSync('src/style/ui-form.css', 'utf8')
+const formCss = readFileSync('src/style/ui-property.css', 'utf8')
 const containerCss = readFileSync('src/style/ui-container.css', 'utf8')
 assert.match(formCss, /\.aiditor-inspector-head\s*\{[\s\S]*?gap:\s*var\(--aiditor-space-1\);[\s\S]*?padding:\s*var\(--aiditor-space-2\);/)
 assert.match(formCss, /\.aiditor-inspector\s*\{[\s\S]*?background:\s*transparent;/)

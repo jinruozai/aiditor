@@ -52,8 +52,10 @@ archived notes. The published runtime package should stay small and public:
 ```text
 dist/aiditor-theme.js
 dist/aiditor-theme.css
-dist/aiditor-widgets.js
-dist/aiditor-widgets.css
+dist/aiditor-mini.js
+dist/aiditor-mini.css
+dist/aiditor-editor.js
+dist/aiditor-editor.css
 dist/aiditor-core.js
 dist/aiditor-core.css
 dist/aiditor-full.js
@@ -80,7 +82,8 @@ runtime distribution should provide:
 
 ```text
 aiditor-theme     standalone theme runtime + tokens + built-in themes
-aiditor-widgets   standalone generic UI widgets + minimal shared foundation
+aiditor-mini      standalone website controls + minimal shared foundation
+aiditor-editor    standalone complete generic editor UI
 aiditor-kernel    Core services + tree + dock runtime
 aiditor-ui        UI widget and built-in panel add-on
 aiditor-ai        AI Host + Extension Runtime add-on
@@ -92,11 +95,14 @@ Host apps that only need dock layout should be able to load the kernel bundle.
 Apps that need the classic UI framework can load `aiditor-core` without AI,
 extension runtime, AI panels, or AI-specific styles.
 
-`aiditor-theme` and `aiditor-widgets` are lightweight source projections, not
-new architecture layers. `aiditor-widgets` includes themes and the shared
-signal/registry helpers required by generic controls, while excluding Dock,
-Workspace, History, Shortcuts, built-in panels, AI Host, and Extension Runtime.
-It is a standalone alternative and must not be combined with Kernel/Core/Full.
+`aiditor-theme`, `aiditor-mini`, and `aiditor-editor` are source projections,
+not new architecture layers. Mini includes themes and the shared foundation
+required by common website controls, while excluding editor-oriented widgets
+and the component palette/registry. Mini consumers call `aiditor.ui.*`
+directly.
+Editor adds all generic UI primitives but still excludes Dock, Workspace,
+History, Shortcuts, built-in panels, AI Host, and Extension Runtime. These are
+standalone alternatives and must not be combined with Kernel/Core/Full.
 
 ## Core Principles
 

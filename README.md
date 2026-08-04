@@ -144,7 +144,8 @@ Published files are intentionally runtime-only:
 | Bundle | Includes | Use When |
 | --- | --- | --- |
 | `aiditor-theme` | theme runtime, tokens, and all built-in themes | You only need AIditor theming. The CSS also works alone with `data-aiditor-theme`. |
-| `aiditor-widgets` | standalone theme + generic `aiditor.ui.*` widgets | You need controls and schema-driven forms without Dock, Workspace, built-in panels, or AI. |
+| `aiditor-mini` | standalone theme + common controls, forms, layouts, and overlays | You are building a website and do not need editor-oriented widgets. |
+| `aiditor-editor` | standalone theme + every generic `aiditor.ui.*` editor widget | You need Inspector, schema forms, data views, or advanced editors without the Dock shell. |
 | `aiditor-kernel` | core services, component registry, tree, dock runtime, dock CSS | You want the smallest dock/component runtime. |
 | `aiditor-ui` | UI widgets and built-in panel add-ons | You already loaded Kernel and want `aiditor.ui.*`. |
 | `aiditor-ai` | AI Host and Extension Runtime | You already loaded Kernel/UI and want AI or extensions. |
@@ -159,15 +160,23 @@ The lightweight standalone slices can be loaded directly:
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-theme.css">
 <script src="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-theme.js"></script>
 
-<!-- Or generic widgets with their required foundation and themes included. -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-widgets.css">
-<script src="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-widgets.js"></script>
+<!-- Website UI: common controls, forms, layouts, overlays, and themes. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-mini.css">
+<script src="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-mini.js"></script>
+
+<!-- Or the complete generic editor UI without the Dock shell. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-editor.css">
+<script src="https://cdn.jsdelivr.net/npm/@gooooo/aiditor@1/dist/aiditor-editor.js"></script>
 ```
 
-`aiditor-widgets` is a standalone alternative to `aiditor-kernel` +
-`aiditor-ui`; do not load those bundles together. Every distribution is
-generated from the same source files and uses the same `window.aiditor`
-contracts.
+`aiditor-mini` excludes Inspector, schema-driven forms, arrays/structs,
+Tree/Table/FileBrowser, advanced editors, built-in panels, and the editor
+component palette/registry. Its controls are used directly through
+`aiditor.ui.*`.
+`aiditor-editor` includes those generic editor widgets. Both are standalone
+alternatives to `aiditor-kernel` + `aiditor-ui`; do not load these bundles
+together. Every distribution is generated from the same source files and uses
+the same `window.aiditor` contracts.
 
 ## Core Concepts
 

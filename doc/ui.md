@@ -1071,12 +1071,18 @@ Theme consumers may load `dist/aiditor-theme.css` alone and select a built-in
 mode with `data-aiditor-theme`. Loading `dist/aiditor-theme.js` additionally
 provides `aiditor.theme` metadata and runtime switching.
 
-Consumers that need generic controls without the editor shell may load the
-standalone `dist/aiditor-widgets.css` and `dist/aiditor-widgets.js`. This slice
-includes themes, signals, command routing, component registration, and every
-generic `aiditor.ui.*` primitive. It excludes Dock, Workspace, History,
-Shortcuts, Settings, built-in panel components, AI Host, and Extension Runtime.
-It is an alternative to Kernel/Core/Full, not an add-on for them.
+Websites can load standalone `dist/aiditor-mini.css` and
+`dist/aiditor-mini.js`. Mini contains themes, common buttons and inputs, basic
+layouts, and overlays. It deliberately excludes Inspector, schema-driven
+forms, arrays/structs, Tree/Table/FileBrowser, advanced editors, panels, and the
+editor component palette/registry. Mini widgets are direct `aiditor.ui.*`
+primitives.
+
+Applications that need the complete generic editor UI without the editor shell
+can load `dist/aiditor-editor.css` and `dist/aiditor-editor.js`. Editor includes
+every generic `aiditor.ui.*` primitive while excluding Dock, Workspace,
+History, Shortcuts, Settings, built-in panels, AI Host, and Extension Runtime.
+Mini and Editor are standalone alternatives to Kernel/Core/Full, not add-ons.
 
 The Neon arcade theme should therefore be expressed by assigning these
 shared appearance roles:
