@@ -1,0 +1,136 @@
+/* aiditor — controlled Timeline surface structure */
+
+.aiditor-ui-timeline {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.aiditor-ui-timeline-toolbar,
+.aiditor-ui-timeline-footer {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.aiditor-ui-timeline-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--aiditor-view-bg);
+}
+
+.aiditor-ui-timeline-header {
+  position: absolute;
+  z-index: 3;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: var(--aiditor-timeline-ruler-size, 26px);
+  min-width: 0;
+  pointer-events: none;
+}
+
+.aiditor-ui-timeline-header-left,
+.aiditor-ui-timeline-header-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.aiditor-ui-timeline-header-right { margin-left: auto; }
+
+.aiditor-ui-timeline-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.aiditor-ui-timeline-spacer {
+  width: 100%;
+  min-width: 100%;
+  pointer-events: none;
+}
+
+.aiditor-ui-timeline-canvas {
+  position: absolute;
+  z-index: 1;
+  inset: 0 auto auto 0;
+  display: block;
+  min-width: 100%;
+  min-height: 100%;
+  outline: none;
+}
+
+.aiditor-ui-timeline-selection-box {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  border: 1px dashed var(--aiditor-accent);
+  background: color-mix(in srgb, var(--aiditor-accent) 18%, transparent);
+  pointer-events: none;
+}
+
+.aiditor-ui-timeline-boundary-overlay {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  height: var(--aiditor-timeline-ruler-size, 26px);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.aiditor-ui-timeline-boundary-handle {
+  position: absolute;
+  top: 4px;
+  width: 12px;
+  height: 18px;
+  border-radius: var(--aiditor-radius-control);
+  background: var(--aiditor-state-warning);
+  transform: translateX(-6px);
+  cursor: ew-resize;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.aiditor-ui-timeline-empty {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aiditor-space-2);
+  padding: var(--aiditor-space-4);
+  color: var(--aiditor-fg-3);
+  text-align: center;
+  background: var(--aiditor-view-bg);
+}
+
+.aiditor-ui-timeline-empty-title {
+  color: var(--aiditor-fg-0);
+  font-weight: 600;
+}
+
+.aiditor-ui-timeline-empty-action {
+  display: flex;
+  justify-content: center;
+}
+
+.aiditor-ui-timeline-selection-box[hidden],
+.aiditor-ui-timeline-boundary-handle[hidden],
+.aiditor-ui-timeline-empty[hidden] {
+  display: none;
+}

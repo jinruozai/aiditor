@@ -298,7 +298,13 @@
   --aiditor-panel-toolbar-py: 2px;
   --aiditor-tab-h:        28px;
   --aiditor-control-px:   8px;       /* default horizontal padding inside controls */
+  --aiditor-app-bar-bg: var(--aiditor-bg-0);
+  --aiditor-app-bar-fg: var(--aiditor-fg-1);
+  --aiditor-app-bar-border: var(--aiditor-chrome-border);
+  --aiditor-app-bar-shadow: none;
   --aiditor-toolbar-bg:   var(--aiditor-bg-raised);
+  --aiditor-toolbar-fg: var(--aiditor-fg-2);
+  --aiditor-toolbar-shadow: none;
   --aiditor-toolbar-border-w: var(--aiditor-border-w);
   --aiditor-toolbar-border: var(--aiditor-border);
   --aiditor-dock-border: var(--aiditor-border);
@@ -419,6 +425,23 @@
   --aiditor-button-primary-hover-border: var(--aiditor-accent-soft);
   --aiditor-button-primary-active-bg: var(--aiditor-accent);
   --aiditor-button-primary-active-fg: var(--aiditor-accent-fg);
+  --aiditor-button-primary-shadow: inset 0 1px 0 var(--aiditor-highlight-strong);
+  --aiditor-button-primary-hover-shadow:
+    0 0 0 2px var(--aiditor-accent-bg),
+    inset 0 1px 0 var(--aiditor-highlight-strong);
+  --aiditor-button-primary-active-shadow:
+    inset 0 2px 4px color-mix(in srgb, var(--aiditor-bg-0) 48%, transparent);
+
+  --aiditor-section-head-bg: var(--aiditor-bg-1);
+  --aiditor-section-head-hover-bg: color-mix(in srgb, var(--aiditor-bg-1) 82%, var(--aiditor-hover));
+  --aiditor-section-head-fg: var(--aiditor-fg-0);
+  --aiditor-section-head-shadow: none;
+  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-bg-2) 76%, var(--aiditor-bg-3));
+  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-bg-2) 62%, var(--aiditor-hover));
+  --aiditor-property-section-head-fg: var(--aiditor-fg-1);
+  --aiditor-property-section-head-hover-fg: var(--aiditor-fg-0);
+  --aiditor-property-section-head-arrow-fg: var(--aiditor-fg-3);
+  --aiditor-property-section-head-shadow: none;
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */
@@ -889,52 +912,52 @@
 }
 
 /* ---- style/themes/toybox-purple.css ---- */
-/* Toybox Purple theme - lavender work surfaces with playful, disciplined color. */
+/* Toybox Purple - paper workspaces, gold chrome, and compact clay controls. */
 :root[data-aiditor-theme="toybox-purple"],
 .aiditor-root[data-aiditor-theme="toybox-purple"] {
   color-scheme: light;
 
-  --aiditor-surface-canvas: #e9e5f0;
-  --aiditor-surface-lower:  #f4f1f7;
-  --aiditor-surface-frame:  #d8d1e3;
+  --aiditor-surface-canvas: #f6f4fb;
+  --aiditor-surface-lower:  #faf7ee;
+  --aiditor-surface-frame:  #ded9e9;
   --aiditor-surface-panel:  #fffdfd;
-  --aiditor-surface-field:  #f1eef6;
+  --aiditor-surface-field:  #f1eff7;
   --aiditor-surface-hover:  #ece7fa;
-  --aiditor-surface-active: #e3dcf7;
+  --aiditor-surface-active: #e2dafa;
   --aiditor-surface-raised: #ffffff;
 
-  --aiditor-text-primary:  #17213a;
-  --aiditor-text-body:     #28334c;
-  --aiditor-text-label:    #43506a;
-  --aiditor-text-muted:    #5f6b82;
-  --aiditor-text-disabled: #8991a4;
+  --aiditor-text-primary:  #1c2944;
+  --aiditor-text-body:     #2d3953;
+  --aiditor-text-label:    #4e5b73;
+  --aiditor-text-muted:    #69758c;
+  --aiditor-text-disabled: #929aac;
 
-  --aiditor-stroke-subtle: #d8d2e3;
-  --aiditor-stroke-strong: #b8aecb;
-  --aiditor-stroke-field:  #c9c2d4;
+  --aiditor-stroke-subtle: #e4dfed;
+  --aiditor-stroke-strong: #cbc5d6;
+  --aiditor-stroke-field:  #d5cfdf;
   --aiditor-stroke-hover:  #8e73ff;
 
   --aiditor-brand:          #6b4de6;
-  --aiditor-brand-hover:    #846bf0;
+  --aiditor-brand-hover:    #8e73ff;
   --aiditor-brand-contrast: #ffffff;
 
   --aiditor-state-success: #17b978;
   --aiditor-state-warning: #ffaa17;
-  --aiditor-state-danger:  #e63349;
-  --aiditor-state-info:    #3387dc;
+  --aiditor-state-danger:  #e63359;
+  --aiditor-state-info:    #318ec5;
 
-  --aiditor-c-00: #e9e5f0;
-  --aiditor-c-01: #f4f1f7;
+  --aiditor-c-00: #f6f4fb;
+  --aiditor-c-01: #faf7ee;
   --aiditor-c-02: #fffdfd;
-  --aiditor-c-03: #f1eef6;
+  --aiditor-c-03: #f1eff7;
   --aiditor-c-04: #ece7fa;
-  --aiditor-c-05: #e3dcf7;
-  --aiditor-c-06: #b8aecb;
-  --aiditor-c-07: #846bf0;
-  --aiditor-c-08: #8991a4;
-  --aiditor-c-09: #5f6b82;
-  --aiditor-c-10: #43506a;
-  --aiditor-c-11: #17213a;
+  --aiditor-c-05: #e2dafa;
+  --aiditor-c-06: #cbc5d6;
+  --aiditor-c-07: #8e73ff;
+  --aiditor-c-08: #929aac;
+  --aiditor-c-09: #69758c;
+  --aiditor-c-10: #4e5b73;
+  --aiditor-c-11: #1c2944;
 
   --aiditor-c-accent:      var(--aiditor-brand);
   --aiditor-c-accent-soft: var(--aiditor-brand-hover);
@@ -967,25 +990,30 @@
   --aiditor-accent-bg-strong: color-mix(in srgb, var(--aiditor-brand) 24%, transparent);
 
   --aiditor-hover:       color-mix(in srgb, var(--aiditor-brand) 8%, transparent);
-  --aiditor-active:      color-mix(in srgb, var(--aiditor-brand) 14%, transparent);
-  --aiditor-selected:    linear-gradient(180deg, #8e73ff, #6b4de6);
-  --aiditor-selected-hover: linear-gradient(180deg, #9983ff, #7658ea);
+  --aiditor-active:      color-mix(in srgb, var(--aiditor-brand) 15%, transparent);
+  --aiditor-selected:    linear-gradient(180deg, #8e73ff 0%, #6b4de6 100%);
+  --aiditor-selected-hover: linear-gradient(180deg, #9c88ff 0%, #7759ea 100%);
   --aiditor-selected-border: #4930b3;
   --aiditor-selected-fg: #ffffff;
-  --aiditor-scrim:       color-mix(in srgb, #1c2944 40%, transparent);
+  --aiditor-focus-ring: #ffaa17;
+  --aiditor-scrim: color-mix(in srgb, #1c2944 38%, transparent);
 
   --aiditor-success:    var(--aiditor-c-success);
-  --aiditor-success-bg: color-mix(in srgb, var(--aiditor-c-success) 14%, transparent);
+  --aiditor-success-bg: color-mix(in srgb, var(--aiditor-c-success) 15%, transparent);
   --aiditor-success-fg: #f7fff9;
   --aiditor-warn:       var(--aiditor-c-warn);
-  --aiditor-warn-bg:    color-mix(in srgb, var(--aiditor-c-warn) 18%, transparent);
-  --aiditor-warn-fg:    #3f2900;
+  --aiditor-warn-bg:    color-mix(in srgb, var(--aiditor-c-warn) 20%, transparent);
+  --aiditor-warn-fg:    #332300;
   --aiditor-error:      var(--aiditor-c-error);
-  --aiditor-error-bg:   color-mix(in srgb, var(--aiditor-c-error) 13%, transparent);
-  --aiditor-error-fg:   #fff8f9;
+  --aiditor-error-bg:   color-mix(in srgb, var(--aiditor-c-error) 14%, transparent);
+  --aiditor-error-fg:   #fff8fa;
   --aiditor-info:       var(--aiditor-c-info);
-  --aiditor-info-bg:    color-mix(in srgb, var(--aiditor-c-info) 13%, transparent);
-  --aiditor-info-fg:    #f7fbff;
+  --aiditor-info-bg:    color-mix(in srgb, var(--aiditor-c-info) 14%, transparent);
+  --aiditor-info-fg:    #f7fcff;
+
+  --aiditor-font-ui:
+    "Arial Rounded MT Bold", "PingFang SC", "Microsoft YaHei", ui-rounded,
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
   --aiditor-radius-control: 7px;
   --aiditor-radius-surface: 10px;
@@ -1003,17 +1031,17 @@
   --aiditor-toolbar-border-w: var(--aiditor-border-w);
 
   --aiditor-shadow-control:
-    0 3px 0 #d3cddd,
-    inset 0 1px 0 rgba(255,255,255,.92);
+    0 2px 0 #d8d2e1,
+    inset 0 1px 0 rgba(255,255,255,.94);
   --aiditor-shadow-surface:
-    0 2px 0 #ddd7e7,
-    inset 0 1px 0 rgba(255,255,255,.78);
+    0 2px 0 #ded9e9,
+    inset 0 1px 0 rgba(255,255,255,.82);
   --aiditor-shadow-overlay:
-    0 5px 0 #d5cfdf,
-    0 16px 34px rgba(49,37,79,.18),
-    inset 0 1px 0 rgba(255,255,255,.9);
+    0 5px 0 #d5cfe1,
+    0 16px 34px rgba(49,37,79,.16),
+    inset 0 1px 0 rgba(255,255,255,.92);
   --aiditor-shadow-active:
-    0 1px 0 #b8aecb,
+    0 1px 0 #bdb4d0,
     inset 0 2px 3px rgba(73,48,179,.16);
 
   --aiditor-root-bg-image: none;
@@ -1025,23 +1053,31 @@
   --aiditor-corner-accent-color: transparent;
   --aiditor-corner-accent-opacity: 0;
 
-  --aiditor-toolbar-bg: linear-gradient(180deg, #ffffff, #f2eef6);
-  --aiditor-toolbar-border: var(--aiditor-border);
-  --aiditor-dock-border: var(--aiditor-border);
-  --aiditor-chrome-border: var(--aiditor-border);
+  --aiditor-app-bar-bg: linear-gradient(180deg, #ffd43b 0%, #ffaa17 100%);
+  --aiditor-app-bar-fg: #202535;
+  --aiditor-app-bar-border: #c87506;
+  --aiditor-app-bar-shadow:
+    0 2px 0 #c87506,
+    inset 0 1px 0 rgba(255,255,255,.42);
+  --aiditor-toolbar-bg: linear-gradient(180deg, #fffdfd 0%, #f1eff7 100%);
+  --aiditor-toolbar-fg: var(--aiditor-fg-2);
+  --aiditor-toolbar-border: var(--aiditor-border-strong);
+  --aiditor-toolbar-shadow: inset 0 1px 0 rgba(255,255,255,.9);
+  --aiditor-dock-border: var(--aiditor-border-strong);
+  --aiditor-chrome-border: var(--aiditor-border-strong);
   --aiditor-view-bg: var(--aiditor-bg-1);
   --aiditor-view-radius: var(--aiditor-radius-surface);
   --aiditor-splitter-bg: var(--aiditor-surface-frame);
   --aiditor-splitter-active-bg: var(--aiditor-accent);
 
   --aiditor-dock-tab-bg: transparent;
-  --aiditor-dock-tab-hover-bg: linear-gradient(180deg, #f4f0ff, #e7e0fb);
-  --aiditor-dock-tab-active-bg: linear-gradient(180deg, #8e73ff, #6b4de6);
+  --aiditor-dock-tab-hover-bg: linear-gradient(180deg, #fffdfd 0%, #e9e3f9 100%);
+  --aiditor-dock-tab-active-bg: linear-gradient(180deg, #8e73ff 0%, #6b4de6 100%);
   --aiditor-dock-tab-border-w: 1px;
   --aiditor-dock-tab-border: transparent;
   --aiditor-dock-tab-hover-border: #b9aef0;
   --aiditor-dock-tab-active-border: #4930b3;
-  --aiditor-dock-tab-fg: var(--aiditor-fg-2);
+  --aiditor-dock-tab-fg: #3f4b63;
   --aiditor-dock-tab-hover-fg: #4930b3;
   --aiditor-dock-tab-active-fg: #ffffff;
   --aiditor-dock-tab-gap: 3px;
@@ -1055,43 +1091,66 @@
   --aiditor-dock-tab-indicator-inset: 7px;
   --aiditor-dock-tab-indicator-radius: 999px;
   --aiditor-dock-tab-indicator-opacity: 0;
-  --aiditor-dock-tab-active-overlay-top: linear-gradient(to bottom, rgba(255,255,255,.30), transparent 45%);
-  --aiditor-dock-tab-active-overlay-bottom: linear-gradient(to top, rgba(255,255,255,.24), transparent 45%);
-  --aiditor-dock-tab-active-overlay-left: linear-gradient(to right, rgba(255,255,255,.24), transparent 45%);
-  --aiditor-dock-tab-active-overlay-right: linear-gradient(to left, rgba(255,255,255,.24), transparent 45%);
-  --aiditor-dock-tab-active-shadow-top: 0 3px 0 #4930b3, inset 0 1px 0 rgba(255,255,255,.25);
-  --aiditor-dock-tab-active-shadow-bottom: 0 -3px 0 #4930b3, inset 0 -1px 0 rgba(255,255,255,.22);
-  --aiditor-dock-tab-active-shadow-left: 3px 0 0 #4930b3, inset 1px 0 0 rgba(255,255,255,.22);
-  --aiditor-dock-tab-active-shadow-right: -3px 0 0 #4930b3, inset -1px 0 0 rgba(255,255,255,.22);
+  --aiditor-dock-tab-active-overlay-top: linear-gradient(to bottom, rgba(255,255,255,.34), transparent 48%);
+  --aiditor-dock-tab-active-overlay-bottom: linear-gradient(to top, rgba(255,255,255,.28), transparent 48%);
+  --aiditor-dock-tab-active-overlay-left: linear-gradient(to right, rgba(255,255,255,.28), transparent 48%);
+  --aiditor-dock-tab-active-overlay-right: linear-gradient(to left, rgba(255,255,255,.28), transparent 48%);
+  --aiditor-dock-tab-active-shadow-top: 0 3px 0 #4930b3, inset 0 1px 0 rgba(255,255,255,.28);
+  --aiditor-dock-tab-active-shadow-bottom: 0 -3px 0 #4930b3, inset 0 -1px 0 rgba(255,255,255,.24);
+  --aiditor-dock-tab-active-shadow-left: 3px 0 0 #4930b3, inset 1px 0 0 rgba(255,255,255,.24);
+  --aiditor-dock-tab-active-shadow-right: -3px 0 0 #4930b3, inset -1px 0 0 rgba(255,255,255,.24);
 
-  --aiditor-button-bg: linear-gradient(180deg, #ffffff, #efedf5);
+  --aiditor-button-bg: linear-gradient(180deg, #fffdfd 0%, #f1eff7 100%);
   --aiditor-button-fg: var(--aiditor-fg-1);
-  --aiditor-button-border: #cfc9d8;
-  --aiditor-button-hover-bg: linear-gradient(180deg, #f5f2ff, #e8e2fa);
+  --aiditor-button-border: #cbc5d6;
+  --aiditor-button-hover-bg: linear-gradient(180deg, #ffffff 0%, #e9e3f9 100%);
   --aiditor-button-hover-fg: #4930b3;
   --aiditor-button-hover-border: #8e73ff;
   --aiditor-button-active-bg: #ddd4f6;
   --aiditor-button-active-fg: #4930b3;
   --aiditor-button-active-border: #6b4de6;
-  --aiditor-button-primary-bg: linear-gradient(180deg, #8e73ff, #6b4de6);
+  --aiditor-button-primary-bg: linear-gradient(180deg, #8e73ff 0%, #6b4de6 100%);
   --aiditor-button-primary-fg: #ffffff;
   --aiditor-button-primary-border: #4930b3;
-  --aiditor-button-primary-hover-bg: linear-gradient(180deg, #9b87ff, #7658ea);
+  --aiditor-button-primary-hover-bg: linear-gradient(180deg, #9c88ff 0%, #7759ea 100%);
   --aiditor-button-primary-hover-fg: #ffffff;
   --aiditor-button-primary-hover-border: #4930b3;
-  --aiditor-button-primary-active-bg: #5f42d4;
+  --aiditor-button-primary-active-bg: #6043d5;
   --aiditor-button-primary-active-fg: #ffffff;
+  --aiditor-button-primary-shadow:
+    0 3px 0 #4930b3,
+    inset 0 1px 0 rgba(255,255,255,.32);
+  --aiditor-button-primary-hover-shadow:
+    0 4px 0 #4930b3,
+    0 7px 13px rgba(73,48,179,.18),
+    inset 0 1px 0 rgba(255,255,255,.34);
+  --aiditor-button-primary-active-shadow:
+    0 1px 0 #4930b3,
+    inset 0 2px 3px rgba(49,27,125,.28);
 
-  --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 60%, transparent);
-  --aiditor-highlight-strong: color-mix(in srgb, #ffffff 84%, transparent);
-  --aiditor-shadow-1: 0 1px 2px rgba(49,37,79,.10);
-  --aiditor-shadow-2: 0 2px 8px rgba(49,37,79,.13);
-  --aiditor-shadow-3: 0 5px 16px rgba(49,37,79,.16);
-  --aiditor-shadow-4: 0 10px 32px rgba(49,37,79,.20);
+  --aiditor-section-head-bg: linear-gradient(180deg, #fffdfd 0%, #f1eff7 100%);
+  --aiditor-section-head-hover-bg: linear-gradient(180deg, #ffffff 0%, #e9e3f9 100%);
+  --aiditor-section-head-fg: var(--aiditor-fg-0);
+  --aiditor-section-head-shadow: inset 0 1px 0 rgba(255,255,255,.9);
+  --aiditor-property-section-head-bg: linear-gradient(180deg, #ffd43b 0%, #ffaa17 100%);
+  --aiditor-property-section-head-hover-bg: linear-gradient(180deg, #ffe16b 0%, #ffb729 100%);
+  --aiditor-property-section-head-fg: #202535;
+  --aiditor-property-section-head-hover-fg: #202535;
+  --aiditor-property-section-head-arrow-fg: #6b4de6;
+  --aiditor-property-section-head-shadow:
+    0 2px 0 #c87506,
+    inset 0 1px 0 rgba(255,255,255,.42);
+
+  --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 62%, transparent);
+  --aiditor-highlight-strong: color-mix(in srgb, #ffffff 86%, transparent);
+  --aiditor-shadow-1: 0 1px 2px rgba(49,37,79,.08);
+  --aiditor-shadow-2: 0 2px 8px rgba(49,37,79,.11);
+  --aiditor-shadow-3: 0 5px 16px rgba(49,37,79,.15);
+  --aiditor-shadow-4: 0 10px 32px rgba(49,37,79,.19);
   --aiditor-shadow-raised:
-    0 4px 0 #cec7da,
-    0 8px 16px rgba(49,37,79,.12),
-    inset 0 1px 0 rgba(255,255,255,.92);
+    0 3px 0 #d2cbde,
+    0 7px 14px rgba(49,37,79,.10),
+    inset 0 1px 0 rgba(255,255,255,.94);
 }
 
 /* Property groups share one compact rhythm without adding section margins. */
@@ -1100,8 +1159,7 @@
   gap: 2px;
 }
 
-/* Property groups connect their open header to the form body. A collapsed
-   header is independent and keeps the complete toybox silhouette. */
+/* Open group headers connect to their body; collapsed groups remain complete. */
 :root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head,
 .aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head {
   border-radius: var(--aiditor-radius-surface) var(--aiditor-radius-surface) 0 0;
@@ -1111,8 +1169,7 @@
   border-radius: var(--aiditor-radius-surface);
 }
 
-/* A composite editor nested in a property row is content, not another raised
-   surface. Keep standalone structInput chrome outside Property Form intact. */
+/* Nested composites are content rather than another raised clay surface. */
 :root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
 .aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input {
   border: 0;

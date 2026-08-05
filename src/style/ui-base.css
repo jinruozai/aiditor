@@ -138,9 +138,9 @@
 }
 .aiditor-ui-btn:focus-visible {
   outline: none;
-  border-color: var(--aiditor-accent);
+  border-color: var(--aiditor-focus-ring);
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--aiditor-accent) 28%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--aiditor-focus-ring) 28%, transparent),
     0 1px 0 rgba(0,0,0,.18);
 }
 .aiditor-ui-btn[disabled] {
@@ -154,20 +154,18 @@
   background: var(--aiditor-button-primary-bg);
   color: var(--aiditor-button-primary-fg);
   border-color: var(--aiditor-button-primary-border);
-  box-shadow: inset 0 1px 0 var(--aiditor-highlight-strong);
+  box-shadow: var(--aiditor-button-primary-shadow);
 }
 .aiditor-ui-btn-primary:hover {
   background: var(--aiditor-button-primary-hover-bg);
   color: var(--aiditor-button-primary-hover-fg);
   border-color: var(--aiditor-button-primary-hover-border);
-  box-shadow: 0 0 0 2px var(--aiditor-accent-bg), inset 0 1px 0 var(--aiditor-highlight-strong);
+  box-shadow: var(--aiditor-button-primary-hover-shadow);
 }
 .aiditor-ui-btn-primary:active {
   background: var(--aiditor-button-primary-active-bg);
   color: var(--aiditor-button-primary-active-fg);
-  box-shadow:
-    inset 0 2px 4px color-mix(in srgb, var(--aiditor-bg-0) 48%, transparent),
-    0 0 0 0 transparent;
+  box-shadow: var(--aiditor-button-primary-active-shadow);
 }
 
 .aiditor-ui-btn-ghost {
@@ -232,7 +230,7 @@
 }
 .aiditor-ui-icon-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aiditor-accent) 36%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aiditor-focus-ring) 36%, transparent);
 }
 .aiditor-ui-icon-btn[disabled] { opacity: .38; pointer-events: none; }
 .aiditor-ui-state-btn[aria-pressed="true"],

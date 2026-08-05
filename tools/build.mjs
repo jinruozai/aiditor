@@ -187,6 +187,10 @@ const JS_ORDER = [
   'ui/container/vbox.js',
   'ui/editor/anchorPicker.js',
 
+  // Layer 9.5 - controlled Timeline geometry and surface lifecycle
+  'ui/timeline/layout.js',
+  'ui/timeline/surface.js',
+
   // Layer 10 - UI library: data
   'ui/data/list.js',
   'ui/data/gridSelection.js',
@@ -250,6 +254,7 @@ const CSS_ORDER = [
   'style/ui-property.css',
   'style/ui-editor.css',
   'style/ui-container.css',
+  'style/ui-timeline.css',
   'style/ui-data.css',
   'style/ui-overlay.css',
   'style/dock-tabs.css',

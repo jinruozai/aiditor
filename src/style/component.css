@@ -12,6 +12,8 @@
   display: flex;
   flex-shrink: 0;
   background: var(--aiditor-toolbar-bg);
+  color: var(--aiditor-toolbar-fg);
+  box-shadow: var(--aiditor-toolbar-shadow);
   align-items: stretch;
   user-select: none;
   min-height: var(--aiditor-toolbar-h);

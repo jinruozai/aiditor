@@ -534,16 +534,17 @@
   min-height: 24px;
   padding: 0 var(--aiditor-space-2);
   border-radius: var(--aiditor-radius-surface);
-  background: color-mix(in srgb, var(--aiditor-bg-2) 76%, var(--aiditor-bg-3));
-  color: var(--aiditor-fg-1);
+  background: var(--aiditor-property-section-head-bg);
+  color: var(--aiditor-property-section-head-fg);
   font: 700 var(--aiditor-fs-xs) var(--aiditor-font-ui);
+  box-shadow: var(--aiditor-property-section-head-shadow);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
-  background: color-mix(in srgb, var(--aiditor-bg-2) 62%, var(--aiditor-hover));
-  color: var(--aiditor-fg-0);
+  background: var(--aiditor-property-section-head-hover-bg);
+  color: var(--aiditor-property-section-head-hover-fg);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head .aiditor-ui-section-arrow {
-  color: var(--aiditor-fg-3);
+  color: var(--aiditor-property-section-head-arrow-fg);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head .aiditor-ui-section-actions {
   min-width: 22px;

@@ -377,6 +377,7 @@ src/ui/base/        buttons, icons, text, badges, tags, tooltip, popover
 src/ui/form/        input controls and schema-driven property editors
 src/ui/editor/      editor-specific inputs such as code, curve, path, file
 src/ui/container/   layout and containers such as vbox, hbox, absolute, view, scrollArea
+src/ui/timeline/    numeric-axis geometry and controlled Canvas surface lifecycle
 src/ui/data/        list, tree, table, file/asset browser, change review
 src/ui/overlay/     menu, quickPick, modal, drawer, toast, dialogs
 src/ui/panel/       generic dock panel components such as panel-list/log/settings/tabs
@@ -388,6 +389,12 @@ the AI module, even though they are registered through `aiditor.registerComponen
 and usually use `category: 'panel'`.
 
 Domain-specific components live outside `src/ui/`.
+
+`aiditor.ui.timeline` is the generic primitive for dense, Canvas-backed editors
+that arrange rows and stable items on one horizontal numeric axis. It provides
+pure geometry through `createLayout()` and a controlled DOM/input/paint shell
+through `createSurface()`. The caller owns data, painting, selection, commands,
+history, playback, and domain meaning. See [timeline.md](./timeline.md).
 
 ## Interaction State Priority
 
@@ -920,6 +927,7 @@ The existing color contract remains:
 --aiditor-fg-*
 --aiditor-border*
 --aiditor-accent*
+--aiditor-focus-ring
 --aiditor-success / --aiditor-warn / --aiditor-error / --aiditor-info
 ```
 
@@ -971,6 +979,21 @@ For small accent geometry:
 --aiditor-corner-accent-size
 --aiditor-corner-accent-color
 --aiditor-corner-accent-opacity
+```
+
+Application chrome and local editor toolbars are separate roles. A theme may
+use a strong brand band for the outer application bar without flooding every
+panel toolbar with the same color:
+
+```css
+--aiditor-app-bar-bg
+--aiditor-app-bar-fg
+--aiditor-app-bar-border
+--aiditor-app-bar-shadow
+--aiditor-toolbar-bg
+--aiditor-toolbar-fg
+--aiditor-toolbar-border
+--aiditor-toolbar-shadow
 ```
 
 Dock tabs have one additional component-level appearance contract because their
@@ -1031,6 +1054,25 @@ button fills need matching foreground colors to stay readable:
 --aiditor-button-primary-hover-border
 --aiditor-button-primary-active-bg
 --aiditor-button-primary-active-fg
+--aiditor-button-primary-shadow
+--aiditor-button-primary-hover-shadow
+--aiditor-button-primary-active-shadow
+```
+
+Section surfaces expose only their header paint and elevation. Layout,
+collapse behavior, and action rails remain component-owned:
+
+```css
+--aiditor-section-head-bg
+--aiditor-section-head-hover-bg
+--aiditor-section-head-fg
+--aiditor-section-head-shadow
+--aiditor-property-section-head-bg
+--aiditor-property-section-head-hover-bg
+--aiditor-property-section-head-fg
+--aiditor-property-section-head-hover-fg
+--aiditor-property-section-head-arrow-fg
+--aiditor-property-section-head-shadow
 ```
 
 Accent geometry is intentionally narrow. It is a small optional marker for
@@ -1156,13 +1198,15 @@ edge glow, magenta focus/selection energy, yellow arcade accents, sparse
 geometric background energy, and direction-aware yellow dock tabs while keeping
 ordinary fields readable and editor-dense.
 
-The built-in `toybox-purple` theme applies the same appearance contract in a
-compact light editor language. Purple owns focus, selection, primary actions,
-and active Dock tabs. Gold is a restrained secondary register for warning and
-attention emphasis instead of a global hover color. Pink stays an
-optional supporting accent, while mint/blue/coral retain success, information,
-and danger semantics. Lavender-gray work surfaces, short colored-base shadows,
-and narrow top highlights preserve the dimensional toybox character without
-turning dense editor views into large website cards. In this theme, Inspector
-Property Form groups use a parent-owned `2px` gap so expanded and collapsed
-sections keep the same compact rhythm.
+The built-in `toybox-purple` theme translates a clay-like website language into
+a compact editor rather than scaling website controls down mechanically. A
+paper-white workspace sits on a faint lavender chassis. Gold owns the outer
+application bar, focus, and warning attention; purple owns selection, primary
+actions, and active Dock tabs. Mint, coral, and sky retain success, danger, and
+information semantics. Rounded UI type, restrained top highlights, and short
+colored-base shadows add toy-like depth without changing editor control sizes.
+Local panel toolbars remain neutral so the gold application band stays legible
+as the top-level navigation role. Inspector Property Form group headers reuse
+that bright gold role, while their nested composite editors remain paper-white.
+Groups use a parent-owned `2px` gap so expanded and collapsed sections keep the
+same compact rhythm.

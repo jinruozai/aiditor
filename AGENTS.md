@@ -188,6 +188,7 @@ aiditor/
                                    # segmented / select / combobox / colorInput / enumInput / tagInput / tab
       editor/                      # gradientInput / curveInput / codeInput / pathInput / fileInput
       container/                   # section / propRow / card / view / scrollArea / tabPanel
+      timeline/                    # neutral numeric-axis layout + controlled Canvas/input surface
       data/                        # list / tree / table / breadcrumbs / progressBar(全部虚拟化)
       overlay/                     # menu / modal / drawer / alert / toast
       panel/                       # 能被 registerComponent 注册的 "panel 级" 内置 component
@@ -240,6 +241,7 @@ aiditor/
 - 全部走统一 cleanup 协议:`el.__aiditorCleanups: fn[]` + `aiditor.ui.dispose(el)`
 - Overlay 走 `_portal.js` 的 `#aiditor-portal-root` 单例
 - 数据组件(list/tree/table)直接虚拟化,tree 先 flatten 再复用 list 行;`fileBrowser` 是中性文件/列表/网格 primitive,`assetBrowser` 是兼容别名
+- `aiditor.ui.timeline` 提供中性单数值轴布局与受控 Canvas/输入生命周期;数据、绘制、选择、命令、history、播放和领域语义由宿主拥有
 - 全部 50+ 个组件 + 内部辅助 + 11 个 CSS 文件 = 已经 100% 编出 dist 并在 demo 里可以点
 - `aiditor.inspector` 是 UI 层通用检查器协议:ordered targets + provider.inspect + 内置 `inspector` dock panel。多选显示第一个 target,只有所有 target 都有且可写的字段才可编辑;业务对象语义、校验、持久化由 provider 所属编辑器负责。
 
