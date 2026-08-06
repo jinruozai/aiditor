@@ -253,19 +253,23 @@ assert.equal(inspectorFieldCtx.value, 'Fill Light')
 const input = search.querySelector('input')
 input.value = 'position'
 input.dispatch('input', { target: input })
-assert.deepEqual(Object.keys(formOptions.schema.peek()), ['position'])
+assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
+assert.equal(formOptions.searchQuery.peek(), 'position')
 
 input.value = 'Transform'
 input.dispatch('input', { target: input })
-assert.deepEqual(Object.keys(formOptions.schema.peek()), ['position', 'rotation'])
+assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
+assert.equal(formOptions.searchQuery.peek(), 'Transform')
 
 input.value = 'tint'
 input.dispatch('input', { target: input })
-assert.deepEqual(Object.keys(formOptions.schema.peek()), ['color'])
+assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
+assert.equal(formOptions.searchQuery.peek(), 'tint')
 
 input.value = ''
 input.dispatch('input', { target: input })
 assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
+assert.equal(formOptions.searchQuery.peek(), '')
 
 aiditor.inspector.select({ type: 'case.custom', id: 'custom' })
 assert.equal(search.hidden, true)

@@ -221,6 +221,11 @@ assert.match(
   /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form\s*\{[^}]*gap:\s*2px;/s,
   'Toybox Purple Inspector Property Form should own a uniform 2px section gap'
 )
+assert.match(
+  toyboxPurpleSource,
+  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form > \.aiditor-ui-property-form-root\s*\{[^}]*gap:\s*2px;/s,
+  'Toybox Purple stable field-tree root should preserve the 2px section gap'
+)
 assert.doesNotMatch(
   toyboxPurpleSource,
   /\.aiditor-ui-property-section[^}]*\{[^}]*margin(?:-\w+)?:/s,

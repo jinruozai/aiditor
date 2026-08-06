@@ -5691,6 +5691,34 @@
     return JSON.parse(JSON.stringify(value))
   }
 
+  function fieldSearchText(key, fieldDef) {
+    const fd = fieldDef && typeof fieldDef === 'object' ? fieldDef : {}
+    const parts = [key]
+    if (fd.label && fd.label !== false) parts.push(fd.label)
+    if (fd.desc) parts.push(fd.desc)
+    if (fd.group) parts.push(fd.group)
+    return parts.join(' ')
+  }
+
+  function descendantSearchText(fieldDef) {
+    const fd = resolveFieldDef(fieldDef)
+    const def = normalizeStructDef(fd && fd.struct_def)
+    if (!def) return ''
+    const groups = fd.groups || {}
+    const parts = []
+    Object.keys(def).forEach(function (key) {
+      const raw = typeof def[key] === 'string' ? { type: def[key] } : (def[key] || {})
+      parts.push(fieldSearchText(key, raw))
+      if (raw.group) {
+        const group = groups[raw.group] || {}
+        parts.push(group.label || raw.group)
+      }
+      const nested = descendantSearchText(raw)
+      if (nested) parts.push(nested)
+    })
+    return parts.join(' ')
+  }
+
   ui.schema = {
     resolveFieldDef: resolveFieldDef,
     resolveValueFieldDef: resolveValueFieldDef,
@@ -5703,6 +5731,8 @@
     isDictField: isDictField,
     cloneDefault: cloneDefault,
     cloneValue: cloneValue,
+    fieldSearchText: fieldSearchText,
+    descendantSearchText: descendantSearchText,
   }
 })(window.aiditor = window.aiditor || {})
 
@@ -5717,6 +5747,7 @@
 // opts:
 //   value:    signal<object>                               required; keyed UI projection
 //   fields:   [{ key, label?, labelMode?, labelActions?, labelActionCtx?,
+//                group?, visibleWhen?, searchText?, searchDescendants?,
 //                fieldLayout?, defaultCollapsed?,
 //                collapsed?, onToggle?, tooltip?, editor,
 //                actions?, actionCtx?, contextActions?, contextCtx? }] required
@@ -5729,6 +5760,10 @@
 //                 opened from label / row chrome contextmenu, never editor controls
 //   onChange?: (nextObj, changedKey, newValue, meta?) => void
 //               if absent, writes go straight into `value`
+//   groups?:  object|signal<object>                       group section metadata
+//   groupActions? / groupActionCtx?                       group action adapters
+//   searchQuery?: string|signal<string>                   display-only filter
+//   searchAncestorMatch?: boolean|signal<boolean>         inherited recursive match
 //   ctx?:     any                                           forwarded to editor()
 //
 // Per-slot reactivity: each slot gets `fieldSig = derived(() => value()[key])`.
@@ -5765,10 +5800,16 @@
     const fields   = o.fields || []
     const ctx      = o.ctx
     const onChange = typeof o.onChange === 'function' ? o.onChange : null
+    const groups = ui.isSignal(o.groups) ? o.groups : aiditor.signal(o.groups || {})
+    const groupActions = typeof o.groupActions === 'function' ? o.groupActions : null
+    const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
+    const searchQuery = ui.asSig(o.searchQuery != null ? o.searchQuery : '')
+    const searchAncestorMatch = ui.asSig(o.searchAncestorMatch != null ? o.searchAncestorMatch : false)
 
     const root = ui.h('div', 'aiditor-ui-struct-input')
     let fieldMenu = null
     ui.collect(root, closeFieldMenu)
+    const records = []
 
     fields.forEach(function (f) {
       const labelMode = fieldLabelMode(f)
@@ -5777,8 +5818,12 @@
       row.dataset.efFieldKey = String(f.key)
       row.classList.add('aiditor-ui-struct-input-row-label-' + labelMode)
       row.classList.add('aiditor-ui-struct-input-row-layout-' + layout)
+      const forceExpanded = aiditor.derived(function () {
+        return !!normalizedSearch(searchQuery())
+      })
+      ui.collect(root, forceExpanded.dispose)
       const label = layout === 'section'
-        ? sectionLabel(root, row, f)
+        ? sectionLabel(root, row, f, forceExpanded)
         : fieldLabelEl(f)
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
@@ -5805,7 +5850,30 @@
         else value.set(next)
       }
 
-      const editor = f.editor(fieldSig, writeSlot, ctx)
+      const directMatch = aiditor.derived(function () {
+        const query = normalizedSearch(searchQuery())
+        if (!query) return false
+        if (searchAncestorMatch()) return true
+        if (searchIncludes(fieldSearchText(f), query)) return true
+        return f.group ? searchIncludes(groupSearchText(f.group, groups()), query) : false
+      })
+      const searchMatch = aiditor.derived(function () {
+        const query = normalizedSearch(searchQuery())
+        return !query || directMatch() || searchIncludes(f.searchDescendants, query)
+      })
+      const conditionVisible = aiditor.derived(function () {
+        return visibleWhenMatches(value(), f.visibleWhen)
+      })
+      const visible = aiditor.derived(function () {
+        return conditionVisible() && searchMatch()
+      })
+      ui.collect(root, directMatch.dispose)
+      ui.collect(root, searchMatch.dispose)
+      ui.collect(root, conditionVisible.dispose)
+      ui.collect(root, visible.dispose)
+
+      const editorCtx = searchContext(ctx, searchQuery, directMatch)
+      const editor = f.editor(fieldSig, writeSlot, editorCtx)
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
       if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
@@ -5845,8 +5913,20 @@
           openFieldContextMenu(ev, row, label, f, closeFieldMenu, setFieldMenu, clearFieldMenu)
         })
       }
-      root.appendChild(row)
+      const stopVisible = aiditor.effect(function () { row.hidden = !visible() })
+      ui.collect(root, stopVisible)
+      records.push({
+        field: f,
+        row: row,
+        cell: cell,
+        visible: visible,
+        conditionVisible: conditionVisible,
+        searchMatch: searchMatch,
+        forceExpanded: forceExpanded,
+      })
     })
+
+    mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx)
 
     return root
 
@@ -5863,6 +5943,178 @@
     function clearFieldMenu(menu) {
       if (fieldMenu === menu) fieldMenu = null
     }
+  }
+
+  function mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx) {
+    const initialGroups = groups.peek ? groups.peek() : groups()
+    const enabledRecords = Object.create(null)
+    Object.keys(initialGroups || {}).forEach(function (groupId) {
+      const enabledBy = initialGroups[groupId] && initialGroups[groupId].enabledBy
+      if (!enabledBy) return
+      const record = recordByKey(records, enabledBy)
+      if (record) enabledRecords[groupId] = record
+    })
+
+    const reserved = Object.keys(enabledRecords).map(function (groupId) { return enabledRecords[groupId] })
+    const buckets = groupRecords(records, reserved)
+    Object.keys(enabledRecords).forEach(function (groupId) {
+      if (!bucketById(buckets, groupId)) buckets.push({ id: groupId, records: [] })
+    })
+    for (let i = 0; i < buckets.length; i++) {
+      const bucket = buckets[i]
+      if (!bucket.id) {
+        for (let j = 0; j < bucket.records.length; j++) root.appendChild(bucket.records[j].row)
+        continue
+      }
+      mountGroup(root, bucket, enabledRecords[bucket.id], value, groups, groupActions, groupActionCtx, searchQuery, ctx)
+    }
+  }
+
+  function mountGroup(root, bucket, enabledRecord, value, groups, groupActions, groupActionCtx, searchQuery, ctx) {
+    const groupId = bucket.id
+    const initial = groupConfig(groups, groupId, false)
+    const collapsed = aiditor.signal(!!initial.defaultCollapsed)
+    const title = aiditor.derived(function () {
+      const config = groupConfig(groups, groupId, true)
+      return config.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || groupId
+    })
+    const actionCtx = aiditor.derived(function () {
+      const base = {
+        groupId: groupId,
+        label: title(),
+        fields: bucket.records.map(function (record) { return record.field.key }),
+        value: value(),
+        ctx: ctx,
+      }
+      return groupActionCtx
+        ? aiditor.safeCall({ scope: 'ui.structInput', action: 'groupActionCtx', group: groupId }, function () { return groupActionCtx(base) }) || base
+        : base
+    })
+    const actions = aiditor.derived(function () {
+      const config = groupConfig(groups, groupId, true)
+      const currentCtx = actionCtx()
+      const fromFn = groupActions
+        ? aiditor.safeCall({ scope: 'ui.structInput', action: 'groupActions', group: groupId }, function () { return groupActions(currentCtx) })
+        : null
+      return fromFn != null ? fromFn : (config.actions || [])
+    })
+    const visible = aiditor.derived(function () {
+      const query = normalizedSearch(searchQuery())
+      if (query && searchIncludes(groupSearchText(groupId, groups()), query)) {
+        if (enabledRecord && enabledRecord.conditionVisible()) return true
+        for (let i = 0; i < bucket.records.length; i++) if (bucket.records[i].conditionVisible()) return true
+        return false
+      }
+      if (enabledRecord && enabledRecord.visible()) return true
+      for (let i = 0; i < bucket.records.length; i++) if (bucket.records[i].visible()) return true
+      return false
+    })
+    const effectiveCollapsed = aiditor.derived(function () {
+      return normalizedSearch(searchQuery()) && visible() ? false : collapsed()
+    })
+    const children = bucket.records.map(function (record) { return record.row })
+    const trailing = enabledRecord ? enabledRecord.cell : null
+    if (trailing) trailing.classList.add('aiditor-ui-struct-group-enabled')
+    const section = ui.section({
+      title: title,
+      collapsed: effectiveCollapsed,
+      onToggle: function (next) { collapsed.set(next) },
+      trailing: trailing,
+      actions: actions,
+      actionCtx: actionCtx,
+      children: children,
+    })
+    section.classList.add('aiditor-ui-struct-group')
+    section.dataset.efGroup = groupId
+    section.body.classList.add('aiditor-ui-struct-group-body')
+    ui.bind(section, visible, function (shown) { section.hidden = !shown })
+    if (trailing) {
+      const stopTrailing = aiditor.effect(function () { trailing.hidden = !enabledRecord.conditionVisible() })
+      ui.collect(root, stopTrailing)
+    }
+    root.appendChild(section)
+    ui.collect(root, title.dispose)
+    ui.collect(root, actionCtx.dispose)
+    ui.collect(root, actions.dispose)
+    ui.collect(root, visible.dispose)
+    ui.collect(root, effectiveCollapsed.dispose)
+    ui.collect(root, function () { ui.dispose(section) })
+  }
+
+  function groupRecords(records, reserved) {
+    const buckets = Object.create(null)
+    const seen = []
+    for (let i = 0; i < records.length; i++) {
+      if (reserved.indexOf(records[i]) >= 0) continue
+      const id = records[i].field.group || ''
+      if (!buckets[id]) { buckets[id] = []; seen.push(id) }
+      buckets[id].push(records[i])
+    }
+    const order = []
+    if (buckets['']) order.push('')
+    ;(ui.PROP_GROUPS || []).forEach(function (id) { if (buckets[id]) order.push(id) })
+    seen.forEach(function (id) { if (id && order.indexOf(id) < 0) order.push(id) })
+    return order.map(function (id) { return { id: id, records: buckets[id] } })
+  }
+
+  function recordByKey(records, key) {
+    for (let i = 0; i < records.length; i++) if (records[i].field.key === key) return records[i]
+    return null
+  }
+
+  function bucketById(buckets, id) {
+    for (let i = 0; i < buckets.length; i++) if (buckets[i].id === id) return buckets[i]
+    return null
+  }
+
+  function groupConfig(groups, groupId, reactive) {
+    const all = reactive ? groups() : (groups.peek ? groups.peek() : groups())
+    return all && all[groupId] || {}
+  }
+
+  function groupSearchText(groupId, groups) {
+    const config = groups && groups[groupId] || {}
+    return groupId + ' ' + (config.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || '')
+  }
+
+  function fieldSearchText(field) {
+    if (field.searchText != null) return field.searchText
+    return [field.key, fieldLabel(field), field.tooltip || '', field.group || ''].join(' ')
+  }
+
+  function normalizedSearch(value) {
+    return String(value == null ? '' : value).trim().toLowerCase()
+  }
+
+  function searchIncludes(value, query) {
+    if (!query || value == null) return false
+    const list = Array.isArray(value) ? value : [value]
+    for (let i = 0; i < list.length; i++) {
+      if (String(list[i] == null ? '' : list[i]).toLowerCase().indexOf(query) >= 0) return true
+    }
+    return false
+  }
+
+  function visibleWhenMatches(record, rule) {
+    if (!rule) return true
+    const current = record == null ? undefined : record[rule.field]
+    if (Object.prototype.hasOwnProperty.call(rule, 'equals')) return Object.is(current, rule.equals)
+    return !Object.is(current, rule.notEquals)
+  }
+
+  function searchContext(ctx, searchQuery, searchAncestorMatch) {
+    if (typeof ctx === 'function') {
+      return function (field) {
+        return Object.assign({}, ctx(field) || {}, {
+          searchQuery: searchQuery,
+          searchAncestorMatch: searchAncestorMatch,
+        })
+      }
+    }
+    return Object.assign({}, ctx || {}, {
+      searchQuery: searchQuery,
+      searchAncestorMatch: searchAncestorMatch,
+    })
   }
 
   function fieldLabelMode(f) {
@@ -5970,7 +6222,7 @@
     return layout === 'block' || layout === 'section' ? layout : 'row'
   }
 
-  function sectionLabel(root, row, f) {
+  function sectionLabel(root, row, f, forceExpanded) {
     const collapsed = ui.asSig(f.collapsed != null ? f.collapsed : !!f.defaultCollapsed)
     const writeCollapsed = function (next) {
       if (typeof f.onToggle === 'function') {
@@ -5987,7 +6239,7 @@
     wrap.appendChild(btn)
     btn.addEventListener('click', function () { writeCollapsed(!collapsed.peek()) })
     const stop = aiditor.effect(function () {
-      const v = collapsed()
+      const v = forceExpanded() ? false : collapsed()
       row.classList.toggle('aiditor-ui-struct-input-row-collapsed', !!v)
       btn.setAttribute('aria-expanded', v ? 'false' : 'true')
       arrow.style.transform = v ? 'rotate(-90deg)' : ''
@@ -6452,6 +6704,8 @@
 // Framework boundary: this component owns array-row interaction only. Items are
 // opaque values; project semantics, history grouping, reference repair, and
 // domain validation belong to the host.
+// `createItem(ctx)` may return an item or Promise<Item|undefined>; the array is
+// changed only after one complete item resolves, and undefined means cancel.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -6481,6 +6735,8 @@
     let drag = null
     let order = []
     let suppressChromeClickKey = null
+    let addPending = false
+    let disposed = false
     const rows = new Map()
 
     const root = ui.h('div', 'aiditor-ui-array-editor aiditor-ui-array-editor-' + density + ' aiditor-ui-array-editor-index-' + indexMode)
@@ -6505,6 +6761,7 @@
 
     root.addEventListener('keydown', onKeydown)
     ui.collect(root, function () {
+      disposed = true
       cancelDrag(null)
       rows.forEach(disposeRow)
       rows.clear()
@@ -6532,7 +6789,14 @@
     }
 
     function collectionCtx(event) {
-      return { items: currentItems(), selected: selectedKeys(), active: active.peek(), event: event || null }
+      return {
+        items: currentItems(),
+        selected: selectedKeys(),
+        active: active.peek(),
+        event: event || null,
+        anchor: (event && event.currentTarget) || addBtn,
+        ctx: o.ctx || null,
+      }
     }
 
     function syncRows(arr) {
@@ -6558,8 +6822,7 @@
         }
       })
       empty.hidden = arr.length > 0
-      addBtn.hidden = !operationAvailable('add')
-      addBtn.disabled = !canAdd(null)
+      updateAddState()
       if (dropLine.parentNode) list.appendChild(dropLine)
       updateRowStates()
     }
@@ -6816,21 +7079,51 @@
     }
 
     function canAdd(event) {
-      if (!operationAvailable('add')) return false
-      return !o.canAdd || o.canAdd(collectionCtx(event)) !== false
+      if (addPending || !operationAvailable('add') || o.canAdd === false) return false
+      return typeof o.canAdd !== 'function' || o.canAdd(collectionCtx(event)) !== false
     }
 
     function requestAdd(event) {
       if (!canAdd(event)) return
-      const arr = currentItems()
       const ctx = collectionCtx(event)
-      const item = typeof o.createItem === 'function' ? o.createItem(ctx) : ''
+      const item = typeof o.createItem === 'function'
+        ? aiditor.safeCall({ scope: 'ui.arrayEditor', action: 'createItem' }, function () { return o.createItem(ctx) })
+        : ''
+      if (item && typeof item.then === 'function') {
+        setAddPending(true)
+        Promise.resolve(item).then(function (resolved) {
+          if (!disposed && resolved !== undefined) appendItem(resolved, ctx)
+        }).catch(function (error) {
+          aiditor.reportError(error, { scope: 'ui.arrayEditor', action: 'createItem' })
+        }).finally(function () {
+          if (!disposed) setAddPending(false)
+        })
+        return
+      }
+      if (item !== undefined) appendItem(item, ctx)
+    }
+
+    function appendItem(item, ctx) {
+      const arr = currentItems()
       const nextItems = arr.concat([item])
       const key = getKey(item, arr.length)
-      const meta = Object.assign(ctx, { kind: 'add', index: arr.length, key: key, item: item, nextItems: nextItems })
+      const meta = Object.assign({}, ctx, { kind: 'add', index: arr.length, key: key, item: item, items: arr, nextItems: nextItems })
       if (typeof o.onAdd === 'function') o.onAdd(meta)
       else writeItems(nextItems, meta)
       commit(meta)
+    }
+
+    function setAddPending(next) {
+      addPending = next
+      updateAddState()
+    }
+
+    function updateAddState() {
+      addBtn.hidden = !operationAvailable('add')
+      addBtn.disabled = !canAdd(null)
+      if (addPending) addBtn.setAttribute('aria-busy', 'true')
+      else addBtn.removeAttribute('aria-busy')
+      root.classList.toggle('is-add-pending', addPending)
     }
 
     function keysForRow(key) {
@@ -7163,7 +7456,8 @@
 //
 // The original arrayInput contract is intentionally small: a writable array
 // signal plus an optional element editor. Rich row interactions live in
-// arrayEditor; this facade keeps existing propertyForm usage stable.
+// arrayEditor; this facade keeps existing propertyForm usage stable and forwards
+// the same createItem/canAdd construction protocol.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -7180,6 +7474,7 @@
     const defaultValue = typeof o.defaultValue === 'function'
       ? o.defaultValue
       : function () { return '' }
+    const createItem = typeof o.createItem === 'function' ? o.createItem : defaultValue
 
     const el = ui.arrayEditor({
       items: o.value,
@@ -7195,11 +7490,13 @@
         reorder: false,
         keyboard: false,
       },
-      createItem: defaultValue,
+      createItem: createItem,
+      canAdd: o.canAdd,
       renderItem: function (_, index, ctx) {
         return editor(ctx.value, ctx.writeItem, o.ctx, index, ctx)
       },
       onChange: o.onChange,
+      ctx: o.ctx,
       emptyText: o.emptyText || 'No items',
       ariaLabel: o.ariaLabel || 'Array input',
     })
@@ -7418,12 +7715,16 @@
       return {
         key:    fname,
         fieldDef: subFd,
+        group: rawObj && rawObj.group,
         label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
         labelMode: rawObj && rawObj.labelMode,
         fieldLayout: rawObj && rawObj.fieldLayout,
         defaultCollapsed: rawObj && rawObj.defaultCollapsed,
         collapsed: rawObj && rawObj.collapsed,
         onToggle: rawObj && rawObj.onToggle,
+        visibleWhen: rawObj && rawObj.visibleWhen,
+        searchText: [schema.fieldSearchText(fname, rawObj), subFd && subFd.name, subFd && subFd.desc],
+        searchDescendants: schema.descendantSearchText(rawObj),
         actions: rawObj && rawObj.actions,
         messages: messagesForContext(withFieldPath(a.ctx, fname)),
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, withFieldPath(ctx, fname)) },
@@ -7435,6 +7736,9 @@
     const el = ui.structInput({
       value: projection,
       fields: fields,
+      groups: a.fieldDef.groups || {},
+      searchQuery: a.ctx && a.ctx.searchQuery,
+      searchAncestorMatch: a.ctx && a.ctx.searchAncestorMatch,
       onChange: function (_nextRecord, key, nv, meta) {
         const next = writeTupleMember(asPlain(a.sig), fields, key, nv)
         if (next) a.write(next, meta)
@@ -7453,11 +7757,8 @@
       editor:       function (sig, write, ctx, index, rowCtx) {
         return editorFor(elemFd, sig, write, withFieldPath(ctx, function () { return rowCtx ? rowCtx.index : index }))
       },
-      defaultValue: function () {
-        return elemFd && elemFd.default !== undefined
-          ? schema.cloneValue(elemFd.default)
-          : null
-      },
+      createItem: arrayItemFactory(agv, elemFd),
+      canAdd: agv.canAdd,
       onChange: a.write,
       ctx:      a.ctx,
     })
@@ -7476,12 +7777,14 @@
       density:       agv.density || 'compact',
       actions:       agv.actions || 'end',
       capabilities:  agv.capabilities || null,
-      createItem: function () { return cloneDefault(elemFd) },
+      createItem: arrayItemFactory(agv, elemFd),
+      canAdd: agv.canAdd,
       duplicateItem: function (item) { return cloneItem(item) },
       renderItem: function (_, __, rowCtx) {
         return editorFor(elemFd, rowCtx.value, rowCtx.writeItem, withFieldPath(a.ctx, function () { return rowCtx.index }))
       },
       emptyText: agv.emptyText || 'No items',
+      ctx: a.ctx,
     })
   })
 
@@ -7524,6 +7827,12 @@
     return fieldDef && fieldDef.default !== undefined
       ? schema.cloneValue(fieldDef.default)
       : null
+  }
+
+  function arrayItemFactory(agv, fieldDef) {
+    return typeof agv.createItem === 'function'
+      ? agv.createItem
+      : function () { return cloneDefault(fieldDef) }
   }
 
   function cloneItem(item) {
@@ -7699,6 +8008,7 @@
 //   fieldMessages?:signal<object>|object              fieldPath -> FieldMessage[]
 //   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
 //                                                     filepath/img/snd editors
+//   searchQuery?:signal<string>|string                 display-only recursive filter
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -7732,12 +8042,13 @@
    * @param {Signal<object[]>|object[]} opts.targets - Targets to edit.
    * @param {Signal<object>|object} opts.schema - Field schema passed to editorFor.
    * @param {Function} opts.onChange - Optional persistence hook: (fieldPath, newValue, targets, meta) => void.
-   * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels and UiAction arrays.
+   * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels, actions, defaultCollapsed, and enabledBy.
    * @param {Function} opts.groupActions - Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions.
    * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
    * @param {Function} opts.fieldActions - Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions.
    * @param {Function} opts.fieldContextActions - Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>.
    * @param {Function} opts.filePathActions - Optional UiAction factory appended to file path input menus.
+   * @param {string|Signal<string>} opts.searchQuery - Optional display-only recursive field filter.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -7764,6 +8075,7 @@
     const fieldMessages = ui.isSignal(o.fieldMessages) ? o.fieldMessages : aiditor.signal(o.fieldMessages || {})
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
+    const searchQuery = ui.asSig(o.searchQuery != null ? o.searchQuery : '')
     const ctx       = o.ctx
 
     const root = ui.h('div', 'aiditor-ui-property-form')
@@ -7792,42 +8104,44 @@
     // while a field editor is scrubbing, typing, or holding pointer capture;
     // equivalent schema/group refreshes must update existing slot signals,
     // not dispose the editor DOM.
-    let mounted = []
+    let mounted = null
     let mountedStructureKey = null
-    let groupChrome = Object.create(null)
     const stopSchema = aiditor.effect(function () {
       const schema = schemaSig() || {}
       const groupConfig = groupsSig() || {}
-      const currentTargets = targets() || []
       const grouped = groupBySchema(schema)
-      const structureKey = formStructureKey(schema, grouped)
+      const structureKey = formStructureKey(schema, grouped, groupConfig)
       aiditor.untracked(function () {
-        if (structureKey !== mountedStructureKey) rebuild(schema, groupConfig, grouped, currentTargets, structureKey)
-        else refreshGroupChrome(grouped, groupConfig, currentTargets)
+        if (structureKey !== mountedStructureKey) rebuild(schema, grouped, structureKey)
       })
     })
     ui.collect(root, stopSchema)
-    ui.collect(root, function () { mounted.forEach(function (n) { ui.dispose(n) }) })
+    ui.collect(root, function () { if (mounted) ui.dispose(mounted) })
 
     return root
 
-    function rebuild(schema, groupConfig, grouped, currentTargets, structureKey) {
-      mounted.forEach(function (n) { ui.dispose(n); if (n.parentNode) n.parentNode.removeChild(n) })
-      mounted = []
-      groupChrome = Object.create(null)
+    function rebuild(schema, grouped, structureKey) {
+      if (mounted) {
+        ui.dispose(mounted)
+        if (mounted.parentNode) mounted.parentNode.removeChild(mounted)
+      }
+      mounted = null
       mountedStructureKey = structureKey
 
+      const fields = []
       for (let i = 0; i < grouped.length; i++) {
         const g = grouped[i]
-        const fields = g.keys.map(function (fname) {
+        for (let j = 0; j < g.keys.length; j++) {
+          const fname = g.keys[j]
           const raw   = schema[fname]
           const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
           const label = fieldLabel(raw, fname)
           const action = fieldActionSignals(fname, label, raw, subFd)
           const reset = resetActionSignal(fname, defaults)
           const messages = messagesForPath(fieldMessages, fname)
-          return {
+          fields.push({
             key:     fname,
+            group:   raw && raw.group,
             label:   label.value,
             labelMode: label.mode,
             labelActions: reset,
@@ -7835,6 +8149,9 @@
             defaultCollapsed: raw && raw.defaultCollapsed,
             collapsed: raw && raw.collapsed,
             onToggle: raw && raw.onToggle,
+            visibleWhen: raw && raw.visibleWhen,
+            searchText: [ui.schema.fieldSearchText(fname, raw), subFd && subFd.name, subFd && subFd.desc],
+            searchDescendants: ui.schema.descendantSearchText(raw),
             tooltip: subFd.desc || '',
             actions: action.actions,
             actionCtx: action.ctx,
@@ -7845,51 +8162,35 @@
               return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions, fieldMessages), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
-          }
-        })
-        const body = ui.structInput({
-          value:    composite,
-          fields:   fields,
-          onChange: function (_next, key, nv, meta) { fanOut(key, nv, meta) },
-          ctx:      ctx,
-        })
-        body.classList.add('aiditor-ui-property-form-struct')
-        // Named groups wrap in a collapsible section; the unnamed
-        // "essentials" bucket renders flat at the top so the most
-        // important fields are always visible without a click.
-        let mountedEl
-        if (g.name) {
-          const info = groupInfo(g.name, g.keys, groupConfig, currentTargets, ctx, groupActions, groupActionCtx)
-          const chrome = {
-            title: aiditor.signal(info.label),
-            actions: aiditor.signal(info.actions || []),
-            actionCtx: aiditor.signal(info.actionCtx),
-          }
-          groupChrome[g.name] = chrome
-          mountedEl = ui.section({
-            title:    chrome.title,
-            actions:  chrome.actions,
-            actionCtx: chrome.actionCtx,
-            children: [body],
           })
-          mountedEl.classList.add('aiditor-ui-property-section')
-        } else {
-          mountedEl = body
         }
-        root.appendChild(mountedEl)
-        mounted.push(mountedEl)
       }
-    }
 
-    function refreshGroupChrome(grouped, groupConfig, currentTargets) {
-      for (let i = 0; i < grouped.length; i++) {
-        const g = grouped[i]
-        if (!g.name || !groupChrome[g.name]) continue
-        const info = groupInfo(g.name, g.keys, groupConfig, currentTargets, ctx, groupActions, groupActionCtx)
-        groupChrome[g.name].title.set(info.label)
-        groupChrome[g.name].actions.set(info.actions || [])
-        groupChrome[g.name].actionCtx.set(info.actionCtx)
+      const body = ui.structInput({
+        value: composite,
+        fields: fields,
+        groups: groupsSig,
+        groupActions: groupActions,
+        groupActionCtx: function (baseCtx) {
+          const enriched = Object.assign({}, baseCtx, {
+            targets: targets(),
+            ctx: ctx,
+          })
+          return groupActionCtx ? groupActionCtx(enriched) || enriched : enriched
+        },
+        searchQuery: searchQuery,
+        onChange: function (_next, key, nv, meta) { fanOut(key, nv, meta) },
+        ctx: ctx,
+      })
+      body.classList.add('aiditor-ui-property-form-struct')
+      body.classList.add('aiditor-ui-property-form-root')
+      const sections = body.querySelectorAll('.aiditor-ui-struct-group')
+      for (let i = 0; i < sections.length; i++) {
+        sections[i].classList.add('aiditor-ui-property-section')
+        sections[i].body.classList.add('aiditor-ui-property-form-struct')
       }
+      root.appendChild(body)
+      mounted = body
     }
 
     function fieldActionSignals(field, label, raw, resolved) {
@@ -7963,17 +8264,22 @@
     return order.map(function (g) { return { name: g, keys: buckets[g] } })
   }
 
-  function formStructureKey(schema, grouped) {
-    return stableStringify(grouped.map(function (group) {
-      return {
+  function formStructureKey(schema, grouped, groups) {
+    return stableStringify({
+      fields: grouped.map(function (group) {
+        return {
         group: group.name,
         fields: group.keys.map(function (key) {
           const raw = schema[key]
           const fd = typeof raw === 'string' ? { type: raw } : (raw || {})
           return { key: key, field: structuralFieldDef(fd) }
         }),
-      }
-    }))
+        }
+      }),
+      enabledBy: grouped.filter(function (group) { return group.name }).map(function (group) {
+        return [group.name, groups[group.name] && groups[group.name].enabledBy || '']
+      }),
+    })
   }
 
   function structuralFieldDef(fd) {
@@ -8004,29 +8310,6 @@
       out += JSON.stringify(key) + ':' + stableStringify(value[key])
     }
     return out + '}'
-  }
-
-  function groupInfo(groupId, fields, groupConfig, targets, ctx, groupActions, groupActionCtx) {
-    const raw = groupConfig && groupConfig[groupId] || {}
-    const label = raw.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || groupId
-    const baseCtx = {
-      groupId: groupId,
-      label: label,
-      fields: fields.slice(),
-      targets: targets || [],
-      ctx: ctx,
-    }
-    const actionCtx = groupActionCtx
-      ? aiditor.safeCall({ scope: 'propertyForm', action: 'groupActionCtx', group: groupId }, function () { return groupActionCtx(baseCtx) }) || baseCtx
-      : baseCtx
-    const fromFn = groupActions
-      ? aiditor.safeCall({ scope: 'propertyForm', action: 'groupActions', group: groupId }, function () { return groupActions(actionCtx) })
-      : null
-    return {
-      label: label,
-      actions: fromFn != null ? fromFn : (raw.actions || null),
-      actionCtx: actionCtx,
-    }
   }
 
   function fieldCtx(ctx, field) {

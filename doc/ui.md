@@ -470,6 +470,33 @@ any selected/active state it wants to preserve. Without an operation callback,
 `arrayEditor` writes through `onChange` or a writable `items` signal and applies
 the generic selected/active maintenance it can safely infer.
 
+Array creation uses one protocol in `arrayEditor`:
+
+```js
+aiditor.ui.arrayEditor({
+  items,
+  canAdd: (ctx) => ctx.items.length < 20,
+  createItem: async (ctx) => {
+    const picked = await openPicker({ anchor: ctx.anchor })
+    return picked === undefined ? undefined : { id: picked.id, name: picked.name }
+  },
+})
+```
+
+`createItem(ctx)` may return an item or `Promise<Item | undefined>`.
+`undefined` means cancel. While a Promise is pending, Add is disabled and no
+array mutation occurs. A resolved item is appended once to the latest array;
+rejection is reported through `aiditor.reportError`. The component never
+inserts placeholders, defaults, or Promise objects while construction is in
+flight. `ctx.event` is the original trigger event, `ctx.anchor` is the Add
+button, and `ctx.ctx` is the caller's opaque component context, so a picker can
+open at the initiating control without coupling the array primitive to an
+overlay implementation.
+
+The built-in `editorFor` renderers `array` and `array_editor` forward
+`type_agv.createItem` and `type_agv.canAdd` to this protocol. Without a custom
+factory they continue to construct the element schema's default value.
+
 `aiditor.ui.arrayInput` remains the simple array value input facade used by
 existing property forms. It delegates to `arrayEditor` with selection disabled
 and reorder/duplicate off, preserving the old add/delete/edit behavior while
@@ -709,6 +736,43 @@ form `ctx`. It deliberately does not expose DOM nodes or domain semantics.
 actions. `groupActionCtx` is only a context mapper for action predicates,
 menus, args, and commands.
 
+Grouping is one `structInput` capability shared by `propertyForm` and nested
+`editorFor({ type:"struct" })` renderers. A nested struct declares group
+metadata on the struct field and assigns child fields with `group`:
+
+```js
+{
+  type: 'struct',
+  groups: {
+    detail: {
+      label: 'Detail',
+      defaultCollapsed: true,
+      enabledBy: 'detail_enabled',
+    },
+  },
+  struct_def: {
+    detail_enabled: { type: 'bool', type_render: 'toggle' },
+    mode: { type: 'string' },
+    amount: {
+      type: 'float',
+      group: 'detail',
+      visibleWhen: { field: 'mode', notEquals: 'disabled' },
+    },
+  },
+}
+```
+
+`defaultCollapsed` initializes local UI state and does not enter the edited
+value. `enabledBy` references one boolean field at the same struct level. That
+field's single editor instance moves to the group header; it is not rendered a
+second time and writes through the original field path. One field may enable at
+most one group.
+
+`visibleWhen` is deliberately limited to a same-level field plus exactly one
+strict `equals` or `notEquals` comparison. It controls display only: the field
+editor remains mounted, its value is retained, and the rule never becomes a
+validation, mutation, or expression system.
+
 Individual property rows can also expose visible actions. `propertyForm` accepts
 `fieldActions(fieldCtx)` and schema fields may carry `actions: UiAction[]`.
 Those actions render through `ui.actionBar` on the row's right edge and support
@@ -792,20 +856,25 @@ actions should refresh row chrome in place, not recreate the editor. With no
 actions, rows keep the existing label/editor layout. With actions, rows become
 `label | editor | actions`; hidden-label rows become `editor | actions`.
 
-`propertyForm` keeps field editor DOM stable across value-only refreshes. It
-builds rows from a structural schema key: field order, field keys, group ids,
-labels, renderer/type configuration, and composite definitions. New `schema` or
-`groups` object identities do not rebuild rows when that structure is
-equivalent. Updating `targets` only updates the existing slot signals, and
-updating group labels/actions only refreshes section header chrome. Real
-structure changes, such as adding/removing a field or changing its renderer,
-still rebuild the affected form structure.
+`structInput` is the single stable field-tree layout owner. `propertyForm`
+adapts schema, multi-target writes, actions, defaults, and messages into that
+tree instead of maintaining a second grouping implementation. Rows are built
+from a structural schema key: field order, field keys, group ids, labels,
+renderer/type configuration, composite definitions, and `enabledBy` placement.
+New `schema` or `groups` object identities do not rebuild rows when that
+structure is equivalent. Updating values, `visibleWhen` dependencies, group
+labels/actions, or a display-only search query only updates existing signals,
+`hidden` state, and section chrome. Real structure changes, such as adding a
+field, changing its renderer, or moving the header editor, still rebuild the
+form structure.
 
 The dock-level Inspector lives above this helper. It owns ordered selection and
 provider dispatch, shows a compact inline `title` / `subtitle` header, and adds
 a local property search for normal `schema + values + write` inspections. The
-search filters display only by field key, label, `desc`, group id, and group
-label; it does not affect provider state, values, writes, or selection. See
+search recursively matches field key, label, `desc`, group id, and group label.
+Descendant matches retain and expand their ancestor composite/group; clearing
+search restores the previous collapsed state. It does not affect provider
+state, values, writes, selection, or editor DOM. See
 [inspector.md](./inspector.md).
 
 Use `propertyForm` directly when a component already owns the objects it edits.

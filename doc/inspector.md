@@ -139,6 +139,33 @@ not turn the value into a dictionary object. See
 text edit preserves the existing alpha; alpha changes only when the input or
 picker supplies alpha.
 
+Array fields may provide a schema-local constructor without replacing the
+Inspector or array renderer:
+
+```js
+items: {
+  type: 'array',
+  type_render: 'array_editor',
+  type_agv: {
+    elem_type: 'item_ref',
+    canAdd: function (ctx) { return ctx.items.length < 32 },
+    createItem: async function (ctx) {
+      const picked = await chooseItem({ anchor: ctx.anchor })
+      return picked === undefined ? undefined : { id: picked.id, weight: 1 }
+    },
+  },
+}
+```
+
+Both built-in `array` and `array_editor` renderers use the same protocol.
+`createItem(ctx)` returns `Item | Promise<Item | undefined>`; `undefined`
+cancels. The array is unchanged while construction is pending, and a completed
+item is appended in one write. The context retains the initiating event, Add
+button anchor, current array snapshot, selection/active state, and the opaque
+Inspector editor context. This is a UI construction hook only: project
+commands, history, validation, and persistence remain in the provider's normal
+write path.
+
 `inspect(targets, ctx)` returns an Inspection object:
 
 Provider-level `accept(targets)` is optional. Without it, Inspector only routes
@@ -151,7 +178,7 @@ compatibility decision, including mixed-type cases.
 | `schema` | `ui.propertyForm` schema. |
 | `values` | One plain value per target, in the same order. The first value is displayed. |
 | `actions` | Optional `UiAction[]` rendered on the Inspector header's right side. |
-| `groups` | Optional property group metadata passed to `ui.propertyForm`. |
+| `groups` | Optional property group metadata passed to `ui.propertyForm`; supports `label`, `actions`, `defaultCollapsed`, and same-level `enabledBy`. |
 | `groupActions(groupCtx)` | Optional per-group `UiAction[]` factory passed to `ui.propertyForm`. Returning `null` / `undefined` uses `groups[groupId].actions`; returning `[]` explicitly renders no actions. |
 | `fieldContextActions(fieldCtx)` | Optional field-row context-menu strategy passed to `ui.propertyForm`. Returns `UiAction[]` or `Promise<UiAction[]>`. |
 | `fieldMessages` | Optional field-path message map, signal, promise, or async resolver. |
@@ -243,6 +270,23 @@ and its actions disappear with it.
 The framework never interprets group ids as rules, components, materials,
 tracks, or any other domain concept. Data changes should route through
 `aiditor.commands.run`; `onSelect` is available for local UI-only behavior.
+
+Groups may also declare `defaultCollapsed` and `enabledBy`. `enabledBy` names a
+boolean field at the same object/struct level. The framework mounts that
+field's one editor in the group header and keeps its normal write path; it does
+not synthesize another value or duplicate the control. Nested struct fields use
+the same `groups` shape on their own field definition, so each nesting level
+remains independently scoped.
+
+Schema fields may declare a narrow display condition:
+
+```js
+visibleWhen: { field: 'billboard_mode', notEquals: 'disabled' }
+```
+
+Only same-level `equals` and `notEquals` comparisons are supported. Conditions
+change row visibility without disposing the field editor and never encode
+domain validation or arbitrary expressions.
 
 Field row context menus live in `inspection.fieldContextActions(fieldCtx)`.
 The built-in Inspector only forwards the callback to its internal
@@ -512,19 +556,21 @@ shared `UiAction` / `aiditor.ui.actionBar` primitive.
 Normal `schema + values + write` inspections include a local property search
 field below the header. The query is panel UI state only: it is not passed to
 providers, does not enter history, and does not change selection. Filtering is
-display-only and matches field key, field label, field `desc`, group id, and
-group label. Empty groups disappear because the filtered schema no longer
-contains rows for them. Clearing the query restores the original schema. Custom
-`render(ctx)` inspections own their entire body UI and are not filtered by this
-property search.
+display-only and recursively matches field key, field label, field `desc`, group
+id, and group label. Only related rows remain visible; ancestor composites and
+groups stay visible and temporarily expand for descendant matches. Empty groups
+disappear. Clearing the query restores the previous collapsed state. The full
+schema and every field editor remain mounted throughout. Custom `render(ctx)`
+inspections own their entire body UI and are not filtered by this property
+search.
 
 Inspector refreshes may return fresh `schema`, `groups`, and `values` objects.
 The built-in panel keeps value updates separate from form structure updates:
 equivalent schema/group structure reuses the existing `propertyForm` field DOM,
 so dragging a number field, editing text, or holding focus is not interrupted by
-a provider refresh. Only real field structure changes, or search filtering that
-changes the visible field set, rebuild the form rows. Group labels and actions
-update section header chrome without recreating the group body.
+a provider refresh. Value changes, conditions, search filtering, and group
+label/action refreshes update the existing field tree in place. Only real field
+structure changes rebuild the form rows.
 
 Composite fields should not be forced into the default two-column property row
 when that wastes the editor area. Providers can use `fieldLayout:"block"` on a

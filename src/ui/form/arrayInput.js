@@ -2,7 +2,8 @@
 //
 // The original arrayInput contract is intentionally small: a writable array
 // signal plus an optional element editor. Rich row interactions live in
-// arrayEditor; this facade keeps existing propertyForm usage stable.
+// arrayEditor; this facade keeps existing propertyForm usage stable and forwards
+// the same createItem/canAdd construction protocol.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -19,6 +20,7 @@
     const defaultValue = typeof o.defaultValue === 'function'
       ? o.defaultValue
       : function () { return '' }
+    const createItem = typeof o.createItem === 'function' ? o.createItem : defaultValue
 
     const el = ui.arrayEditor({
       items: o.value,
@@ -34,11 +36,13 @@
         reorder: false,
         keyboard: false,
       },
-      createItem: defaultValue,
+      createItem: createItem,
+      canAdd: o.canAdd,
       renderItem: function (_, index, ctx) {
         return editor(ctx.value, ctx.writeItem, o.ctx, index, ctx)
       },
       onChange: o.onChange,
+      ctx: o.ctx,
       emptyText: o.emptyText || 'No items',
       ariaLabel: o.ariaLabel || 'Array input',
     })

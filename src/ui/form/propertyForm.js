@@ -21,6 +21,7 @@
 //   fieldMessages?:signal<object>|object              fieldPath -> FieldMessage[]
 //   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
 //                                                     filepath/img/snd editors
+//   searchQuery?:signal<string>|string                 display-only recursive filter
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -54,12 +55,13 @@
    * @param {Signal<object[]>|object[]} opts.targets - Targets to edit.
    * @param {Signal<object>|object} opts.schema - Field schema passed to editorFor.
    * @param {Function} opts.onChange - Optional persistence hook: (fieldPath, newValue, targets, meta) => void.
-   * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels and UiAction arrays.
+   * @param {object|Signal<object>} opts.groups - Optional grouped section metadata, including labels, actions, defaultCollapsed, and enabledBy.
    * @param {Function} opts.groupActions - Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions.
    * @param {Function} opts.groupActionCtx - Optional mapper for the context passed to group actions.
    * @param {Function} opts.fieldActions - Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions.
    * @param {Function} opts.fieldContextActions - Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>.
    * @param {Function} opts.filePathActions - Optional UiAction factory appended to file path input menus.
+   * @param {string|Signal<string>} opts.searchQuery - Optional display-only recursive field filter.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -86,6 +88,7 @@
     const fieldMessages = ui.isSignal(o.fieldMessages) ? o.fieldMessages : aiditor.signal(o.fieldMessages || {})
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
+    const searchQuery = ui.asSig(o.searchQuery != null ? o.searchQuery : '')
     const ctx       = o.ctx
 
     const root = ui.h('div', 'aiditor-ui-property-form')
@@ -114,42 +117,44 @@
     // while a field editor is scrubbing, typing, or holding pointer capture;
     // equivalent schema/group refreshes must update existing slot signals,
     // not dispose the editor DOM.
-    let mounted = []
+    let mounted = null
     let mountedStructureKey = null
-    let groupChrome = Object.create(null)
     const stopSchema = aiditor.effect(function () {
       const schema = schemaSig() || {}
       const groupConfig = groupsSig() || {}
-      const currentTargets = targets() || []
       const grouped = groupBySchema(schema)
-      const structureKey = formStructureKey(schema, grouped)
+      const structureKey = formStructureKey(schema, grouped, groupConfig)
       aiditor.untracked(function () {
-        if (structureKey !== mountedStructureKey) rebuild(schema, groupConfig, grouped, currentTargets, structureKey)
-        else refreshGroupChrome(grouped, groupConfig, currentTargets)
+        if (structureKey !== mountedStructureKey) rebuild(schema, grouped, structureKey)
       })
     })
     ui.collect(root, stopSchema)
-    ui.collect(root, function () { mounted.forEach(function (n) { ui.dispose(n) }) })
+    ui.collect(root, function () { if (mounted) ui.dispose(mounted) })
 
     return root
 
-    function rebuild(schema, groupConfig, grouped, currentTargets, structureKey) {
-      mounted.forEach(function (n) { ui.dispose(n); if (n.parentNode) n.parentNode.removeChild(n) })
-      mounted = []
-      groupChrome = Object.create(null)
+    function rebuild(schema, grouped, structureKey) {
+      if (mounted) {
+        ui.dispose(mounted)
+        if (mounted.parentNode) mounted.parentNode.removeChild(mounted)
+      }
+      mounted = null
       mountedStructureKey = structureKey
 
+      const fields = []
       for (let i = 0; i < grouped.length; i++) {
         const g = grouped[i]
-        const fields = g.keys.map(function (fname) {
+        for (let j = 0; j < g.keys.length; j++) {
+          const fname = g.keys[j]
           const raw   = schema[fname]
           const subFd = ui.resolveFieldDef(typeof raw === 'string' ? { type: raw } : raw)
           const label = fieldLabel(raw, fname)
           const action = fieldActionSignals(fname, label, raw, subFd)
           const reset = resetActionSignal(fname, defaults)
           const messages = messagesForPath(fieldMessages, fname)
-          return {
+          fields.push({
             key:     fname,
+            group:   raw && raw.group,
             label:   label.value,
             labelMode: label.mode,
             labelActions: reset,
@@ -157,6 +162,9 @@
             defaultCollapsed: raw && raw.defaultCollapsed,
             collapsed: raw && raw.collapsed,
             onToggle: raw && raw.onToggle,
+            visibleWhen: raw && raw.visibleWhen,
+            searchText: [ui.schema.fieldSearchText(fname, raw), subFd && subFd.name, subFd && subFd.desc],
+            searchDescendants: ui.schema.descendantSearchText(raw),
             tooltip: subFd.desc || '',
             actions: action.actions,
             actionCtx: action.ctx,
@@ -167,51 +175,35 @@
               return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions, fieldMessages), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
-          }
-        })
-        const body = ui.structInput({
-          value:    composite,
-          fields:   fields,
-          onChange: function (_next, key, nv, meta) { fanOut(key, nv, meta) },
-          ctx:      ctx,
-        })
-        body.classList.add('aiditor-ui-property-form-struct')
-        // Named groups wrap in a collapsible section; the unnamed
-        // "essentials" bucket renders flat at the top so the most
-        // important fields are always visible without a click.
-        let mountedEl
-        if (g.name) {
-          const info = groupInfo(g.name, g.keys, groupConfig, currentTargets, ctx, groupActions, groupActionCtx)
-          const chrome = {
-            title: aiditor.signal(info.label),
-            actions: aiditor.signal(info.actions || []),
-            actionCtx: aiditor.signal(info.actionCtx),
-          }
-          groupChrome[g.name] = chrome
-          mountedEl = ui.section({
-            title:    chrome.title,
-            actions:  chrome.actions,
-            actionCtx: chrome.actionCtx,
-            children: [body],
           })
-          mountedEl.classList.add('aiditor-ui-property-section')
-        } else {
-          mountedEl = body
         }
-        root.appendChild(mountedEl)
-        mounted.push(mountedEl)
       }
-    }
 
-    function refreshGroupChrome(grouped, groupConfig, currentTargets) {
-      for (let i = 0; i < grouped.length; i++) {
-        const g = grouped[i]
-        if (!g.name || !groupChrome[g.name]) continue
-        const info = groupInfo(g.name, g.keys, groupConfig, currentTargets, ctx, groupActions, groupActionCtx)
-        groupChrome[g.name].title.set(info.label)
-        groupChrome[g.name].actions.set(info.actions || [])
-        groupChrome[g.name].actionCtx.set(info.actionCtx)
+      const body = ui.structInput({
+        value: composite,
+        fields: fields,
+        groups: groupsSig,
+        groupActions: groupActions,
+        groupActionCtx: function (baseCtx) {
+          const enriched = Object.assign({}, baseCtx, {
+            targets: targets(),
+            ctx: ctx,
+          })
+          return groupActionCtx ? groupActionCtx(enriched) || enriched : enriched
+        },
+        searchQuery: searchQuery,
+        onChange: function (_next, key, nv, meta) { fanOut(key, nv, meta) },
+        ctx: ctx,
+      })
+      body.classList.add('aiditor-ui-property-form-struct')
+      body.classList.add('aiditor-ui-property-form-root')
+      const sections = body.querySelectorAll('.aiditor-ui-struct-group')
+      for (let i = 0; i < sections.length; i++) {
+        sections[i].classList.add('aiditor-ui-property-section')
+        sections[i].body.classList.add('aiditor-ui-property-form-struct')
       }
+      root.appendChild(body)
+      mounted = body
     }
 
     function fieldActionSignals(field, label, raw, resolved) {
@@ -285,17 +277,22 @@
     return order.map(function (g) { return { name: g, keys: buckets[g] } })
   }
 
-  function formStructureKey(schema, grouped) {
-    return stableStringify(grouped.map(function (group) {
-      return {
+  function formStructureKey(schema, grouped, groups) {
+    return stableStringify({
+      fields: grouped.map(function (group) {
+        return {
         group: group.name,
         fields: group.keys.map(function (key) {
           const raw = schema[key]
           const fd = typeof raw === 'string' ? { type: raw } : (raw || {})
           return { key: key, field: structuralFieldDef(fd) }
         }),
-      }
-    }))
+        }
+      }),
+      enabledBy: grouped.filter(function (group) { return group.name }).map(function (group) {
+        return [group.name, groups[group.name] && groups[group.name].enabledBy || '']
+      }),
+    })
   }
 
   function structuralFieldDef(fd) {
@@ -326,29 +323,6 @@
       out += JSON.stringify(key) + ':' + stableStringify(value[key])
     }
     return out + '}'
-  }
-
-  function groupInfo(groupId, fields, groupConfig, targets, ctx, groupActions, groupActionCtx) {
-    const raw = groupConfig && groupConfig[groupId] || {}
-    const label = raw.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || groupId
-    const baseCtx = {
-      groupId: groupId,
-      label: label,
-      fields: fields.slice(),
-      targets: targets || [],
-      ctx: ctx,
-    }
-    const actionCtx = groupActionCtx
-      ? aiditor.safeCall({ scope: 'propertyForm', action: 'groupActionCtx', group: groupId }, function () { return groupActionCtx(baseCtx) }) || baseCtx
-      : baseCtx
-    const fromFn = groupActions
-      ? aiditor.safeCall({ scope: 'propertyForm', action: 'groupActions', group: groupId }, function () { return groupActions(actionCtx) })
-      : null
-    return {
-      label: label,
-      actions: fromFn != null ? fromFn : (raw.actions || null),
-      actionCtx: actionCtx,
-    }
   }
 
   function fieldCtx(ctx, field) {

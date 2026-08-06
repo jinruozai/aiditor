@@ -207,12 +207,16 @@
       return {
         key:    fname,
         fieldDef: subFd,
+        group: rawObj && rawObj.group,
         label:  rawObj && Object.prototype.hasOwnProperty.call(rawObj, 'label') ? rawObj.label : labeled,
         labelMode: rawObj && rawObj.labelMode,
         fieldLayout: rawObj && rawObj.fieldLayout,
         defaultCollapsed: rawObj && rawObj.defaultCollapsed,
         collapsed: rawObj && rawObj.collapsed,
         onToggle: rawObj && rawObj.onToggle,
+        visibleWhen: rawObj && rawObj.visibleWhen,
+        searchText: [schema.fieldSearchText(fname, rawObj), subFd && subFd.name, subFd && subFd.desc],
+        searchDescendants: schema.descendantSearchText(rawObj),
         actions: rawObj && rawObj.actions,
         messages: messagesForContext(withFieldPath(a.ctx, fname)),
         editor: function (sig, write, ctx) { return editorFor(subFd, sig, write, withFieldPath(ctx, fname)) },
@@ -224,6 +228,9 @@
     const el = ui.structInput({
       value: projection,
       fields: fields,
+      groups: a.fieldDef.groups || {},
+      searchQuery: a.ctx && a.ctx.searchQuery,
+      searchAncestorMatch: a.ctx && a.ctx.searchAncestorMatch,
       onChange: function (_nextRecord, key, nv, meta) {
         const next = writeTupleMember(asPlain(a.sig), fields, key, nv)
         if (next) a.write(next, meta)
@@ -242,11 +249,8 @@
       editor:       function (sig, write, ctx, index, rowCtx) {
         return editorFor(elemFd, sig, write, withFieldPath(ctx, function () { return rowCtx ? rowCtx.index : index }))
       },
-      defaultValue: function () {
-        return elemFd && elemFd.default !== undefined
-          ? schema.cloneValue(elemFd.default)
-          : null
-      },
+      createItem: arrayItemFactory(agv, elemFd),
+      canAdd: agv.canAdd,
       onChange: a.write,
       ctx:      a.ctx,
     })
@@ -265,12 +269,14 @@
       density:       agv.density || 'compact',
       actions:       agv.actions || 'end',
       capabilities:  agv.capabilities || null,
-      createItem: function () { return cloneDefault(elemFd) },
+      createItem: arrayItemFactory(agv, elemFd),
+      canAdd: agv.canAdd,
       duplicateItem: function (item) { return cloneItem(item) },
       renderItem: function (_, __, rowCtx) {
         return editorFor(elemFd, rowCtx.value, rowCtx.writeItem, withFieldPath(a.ctx, function () { return rowCtx.index }))
       },
       emptyText: agv.emptyText || 'No items',
+      ctx: a.ctx,
     })
   })
 
@@ -313,6 +319,12 @@
     return fieldDef && fieldDef.default !== undefined
       ? schema.cloneValue(fieldDef.default)
       : null
+  }
+
+  function arrayItemFactory(agv, fieldDef) {
+    return typeof agv.createItem === 'function'
+      ? agv.createItem
+      : function () { return cloneDefault(fieldDef) }
   }
 
   function cloneItem(item) {

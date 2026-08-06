@@ -74,6 +74,7 @@ class FakeEl {
     if (name === 'class') this.classList.set(value)
     else this[name] = String(value)
   }
+  getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null }
   removeAttribute(name) {
     delete this.attributes[name]
     if (name === 'class') this.classList.set('')
@@ -166,6 +167,13 @@ for (const file of [
 
 const aiditor = window.aiditor
 const ui = aiditor.ui
+const frameworkErrors = []
+
+aiditor.reportError = function (error, meta) { frameworkErrors.push({ error: error, meta: meta }) }
+aiditor.safeCall = function (meta, fn) {
+  try { return fn() }
+  catch (error) { aiditor.reportError(error, meta) }
+}
 
 aiditor.shortcuts = {
   markHandled(ev) { ev.__aiditorHandled = true },
@@ -235,6 +243,103 @@ function pointer(el, type, extra) {
 
   el.querySelector('.aiditor-ui-icon-btn').click()
   assert.deepEqual(value.peek(), [''])
+}
+
+{
+  const items = aiditor.signal([{ id: 'a' }])
+  let resolveItem = null
+  let createCalls = 0
+  let writes = 0
+  let createCtx = null
+  const el = ui.arrayEditor({
+    items: items,
+    getKey: function (item) { return item.id },
+    selectionMode: 'none',
+    capabilities: { add: true, delete: false, duplicate: false, reorder: false },
+    createItem: function (ctx) {
+      createCalls++
+      createCtx = ctx
+      return new Promise(function (resolve) { resolveItem = resolve })
+    },
+    onChange: function (next) { writes++; items.set(next) },
+    renderItem: function (item) { return ui.h('span', null, { text: item.id }) },
+    ctx: { source: 'test' },
+  })
+  const firstRow = el.querySelector('.aiditor-ui-array-editor-row')
+  const add = el.querySelector('.aiditor-ui-array-editor-add')
+  const event = add.click({ marker: 'original' })
+  assert.equal(createCalls, 1)
+  assert.equal(createCtx.event, event)
+  assert.equal(createCtx.anchor, add)
+  assert.deepEqual(createCtx.ctx, { source: 'test' })
+  assert.equal(add.disabled, true)
+  assert.equal(add.getAttribute('aria-busy'), 'true')
+  assert.deepEqual(items.peek(), [{ id: 'a' }])
+  add.click()
+  assert.equal(createCalls, 1)
+
+  items.set([{ id: 'a' }, { id: 'external' }])
+  resolveItem({ id: 'b' })
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.deepEqual(ids(items.peek()), ['a', 'external', 'b'])
+  assert.equal(writes, 1)
+  assert.equal(el.querySelector('.aiditor-ui-array-editor-row'), firstRow)
+  assert.equal(add.disabled, false)
+  assert.equal(add.getAttribute('aria-busy'), null)
+}
+
+{
+  const items = aiditor.signal([])
+  let mode = 'cancel'
+  let writes = 0
+  const beforeErrors = frameworkErrors.length
+  const el = ui.arrayEditor({
+    items: items,
+    capabilities: { add: true, delete: false, duplicate: false, reorder: false },
+    createItem: function () {
+      return mode === 'cancel' ? Promise.resolve(undefined) : Promise.reject(new Error('create failed'))
+    },
+    onChange: function (next) { writes++; items.set(next) },
+  })
+  const add = el.querySelector('.aiditor-ui-array-editor-add')
+  add.click()
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.deepEqual(items.peek(), [])
+  assert.equal(writes, 0)
+  assert.equal(add.disabled, false)
+
+  mode = 'error'
+  add.click()
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.deepEqual(items.peek(), [])
+  assert.equal(writes, 0)
+  assert.equal(frameworkErrors.length, beforeErrors + 1)
+  assert.equal(frameworkErrors.at(-1).meta.action, 'createItem')
+  assert.equal(add.disabled, false)
+}
+
+for (const renderer of ['array', 'array_editor']) {
+  const value = aiditor.signal([])
+  let allow = false
+  let createCtx = null
+  const el = ui.editorFor({
+    type: 'array',
+    type_render: renderer,
+    type_agv: {
+      elem_type: 'string',
+      canAdd: function () { return allow },
+      createItem: function (ctx) { createCtx = ctx; return Promise.resolve(renderer) },
+    },
+  }, value, function (next) { value.set(next) }, { source: renderer })
+  const add = el.querySelector('.aiditor-ui-array-editor-add')
+  assert.equal(add.disabled, true)
+  allow = true
+  value.set(['seed'])
+  add.click()
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.deepEqual(value.peek(), ['seed', renderer])
+  assert.equal(createCtx.ctx.source, renderer)
+  assert.equal(createCtx.anchor, add)
 }
 
 {

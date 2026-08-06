@@ -61,12 +61,13 @@ aiditor.ui.propertyForm(opts)
 | `opts.targets` | `Signal<object[]>\|object[]` | Targets to edit. |
 | `opts.schema` | `Signal<object>\|object` | Field schema passed to editorFor. |
 | `opts.onChange` | `Function` | Optional persistence hook: (fieldPath, newValue, targets, meta) => void. |
-| `opts.groups` | `object\|Signal<object>` | Optional grouped section metadata, including labels and UiAction arrays. |
+| `opts.groups` | `object\|Signal<object>` | Optional grouped section metadata, including labels, actions, defaultCollapsed, and enabledBy. |
 | `opts.groupActions` | `Function` | Optional per-group UiAction factory. Returning null/undefined falls back to groups[groupId].actions; returning [] explicitly clears actions. |
 | `opts.groupActionCtx` | `Function` | Optional mapper for the context passed to group actions. |
 | `opts.fieldActions` | `Function` | Optional per-field UiAction factory. Returning null/undefined falls back to schemaField.actions; returning [] explicitly clears actions. |
 | `opts.fieldContextActions` | `Function` | Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>. |
 | `opts.filePathActions` | `Function` | Optional UiAction factory appended to file path input menus. |
+| `opts.searchQuery` | `string\|Signal<string>` | Optional display-only recursive field filter. |
 | `opts.requireAllTargets` | `boolean` | When true, disable fields missing from any target. |
 | `opts.canEdit` | `Function` | Optional field gate: (field, targets, rawField) => boolean. |
 

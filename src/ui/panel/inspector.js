@@ -29,33 +29,6 @@
     return target && (target.type || target.kind) || ''
   }
 
-  function filterSchema(schema, query) {
-    const q = normalizeQuery(query)
-    if (!q) return schema || {}
-    const out = {}
-    Object.keys(schema || {}).forEach(function (key) {
-      const raw = schema[key]
-      if (fieldMatches(key, raw, q)) out[key] = raw
-    })
-    return out
-  }
-
-  function normalizeQuery(value) {
-    return String(value == null ? '' : value).trim().toLowerCase()
-  }
-
-  function fieldMatches(key, raw, query) {
-    const field = raw && typeof raw === 'object' ? raw : {}
-    const parts = [key]
-    if (field.label && field.label !== false) parts.push(field.label)
-    if (field.group) {
-      parts.push(field.group)
-      if (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[field.group]) parts.push(ui.PROP_GROUP_LABELS[field.group])
-    }
-    if (field.desc) parts.push(field.desc)
-    return parts.join(' ').toLowerCase().indexOf(query) >= 0
-  }
-
   function factory(propsSig, ctx) {
     const root = ui.h('div', 'aiditor-inspector')
     const head = ui.h('div', 'aiditor-inspector-head')
@@ -83,7 +56,6 @@
     root.appendChild(body)
 
     const schemaSig = aiditor.signal({})
-    const filteredSchemaSig = aiditor.derived(function () { return filterSchema(schemaSig(), querySig()) })
     const groupsSig = aiditor.signal({})
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
@@ -98,7 +70,6 @@
     let fieldMessageDispose = null
     let fieldMessageController = null
     let fieldMessageGeneration = 0
-    ui.collect(root, filteredSchemaSig.dispose)
 
     function clearBody() {
       if (customEl) {
@@ -209,12 +180,13 @@
       if (mode !== 'form') {
         clearBody()
         const form = ui.propertyForm({
-          schema: filteredSchemaSig,
+          schema: schemaSig,
           targets: valuesSig,
           disabled: disabledSig,
           defaults: function () { return currentInspection && currentInspection.defaults },
           fieldMessages: fieldMessagesSig,
           groups: groupsSig,
+          searchQuery: querySig,
           groupActions: function (groupCtx) {
             const fn = currentInspection && currentInspection.groupActions
             return typeof fn === 'function' ? fn(groupCtx) : null

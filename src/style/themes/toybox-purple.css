@@ -244,6 +244,10 @@
 .aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form {
   gap: 2px;
 }
+:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form > .aiditor-ui-property-form-root,
+.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form > .aiditor-ui-property-form-root {
+  gap: 2px;
+}
 
 /* Open group headers connect to their body; collapsed groups remain complete. */
 :root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head,

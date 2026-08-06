@@ -82,6 +82,34 @@
     return JSON.parse(JSON.stringify(value))
   }
 
+  function fieldSearchText(key, fieldDef) {
+    const fd = fieldDef && typeof fieldDef === 'object' ? fieldDef : {}
+    const parts = [key]
+    if (fd.label && fd.label !== false) parts.push(fd.label)
+    if (fd.desc) parts.push(fd.desc)
+    if (fd.group) parts.push(fd.group)
+    return parts.join(' ')
+  }
+
+  function descendantSearchText(fieldDef) {
+    const fd = resolveFieldDef(fieldDef)
+    const def = normalizeStructDef(fd && fd.struct_def)
+    if (!def) return ''
+    const groups = fd.groups || {}
+    const parts = []
+    Object.keys(def).forEach(function (key) {
+      const raw = typeof def[key] === 'string' ? { type: def[key] } : (def[key] || {})
+      parts.push(fieldSearchText(key, raw))
+      if (raw.group) {
+        const group = groups[raw.group] || {}
+        parts.push(group.label || raw.group)
+      }
+      const nested = descendantSearchText(raw)
+      if (nested) parts.push(nested)
+    })
+    return parts.join(' ')
+  }
+
   ui.schema = {
     resolveFieldDef: resolveFieldDef,
     resolveValueFieldDef: resolveValueFieldDef,
@@ -94,5 +122,7 @@
     isDictField: isDictField,
     cloneDefault: cloneDefault,
     cloneValue: cloneValue,
+    fieldSearchText: fieldSearchText,
+    descendantSearchText: descendantSearchText,
   }
 })(window.aiditor = window.aiditor || {})

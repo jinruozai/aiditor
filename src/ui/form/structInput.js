@@ -8,6 +8,7 @@
 // opts:
 //   value:    signal<object>                               required; keyed UI projection
 //   fields:   [{ key, label?, labelMode?, labelActions?, labelActionCtx?,
+//                group?, visibleWhen?, searchText?, searchDescendants?,
 //                fieldLayout?, defaultCollapsed?,
 //                collapsed?, onToggle?, tooltip?, editor,
 //                actions?, actionCtx?, contextActions?, contextCtx? }] required
@@ -20,6 +21,10 @@
 //                 opened from label / row chrome contextmenu, never editor controls
 //   onChange?: (nextObj, changedKey, newValue, meta?) => void
 //               if absent, writes go straight into `value`
+//   groups?:  object|signal<object>                       group section metadata
+//   groupActions? / groupActionCtx?                       group action adapters
+//   searchQuery?: string|signal<string>                   display-only filter
+//   searchAncestorMatch?: boolean|signal<boolean>         inherited recursive match
 //   ctx?:     any                                           forwarded to editor()
 //
 // Per-slot reactivity: each slot gets `fieldSig = derived(() => value()[key])`.
@@ -56,10 +61,16 @@
     const fields   = o.fields || []
     const ctx      = o.ctx
     const onChange = typeof o.onChange === 'function' ? o.onChange : null
+    const groups = ui.isSignal(o.groups) ? o.groups : aiditor.signal(o.groups || {})
+    const groupActions = typeof o.groupActions === 'function' ? o.groupActions : null
+    const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
+    const searchQuery = ui.asSig(o.searchQuery != null ? o.searchQuery : '')
+    const searchAncestorMatch = ui.asSig(o.searchAncestorMatch != null ? o.searchAncestorMatch : false)
 
     const root = ui.h('div', 'aiditor-ui-struct-input')
     let fieldMenu = null
     ui.collect(root, closeFieldMenu)
+    const records = []
 
     fields.forEach(function (f) {
       const labelMode = fieldLabelMode(f)
@@ -68,8 +79,12 @@
       row.dataset.efFieldKey = String(f.key)
       row.classList.add('aiditor-ui-struct-input-row-label-' + labelMode)
       row.classList.add('aiditor-ui-struct-input-row-layout-' + layout)
+      const forceExpanded = aiditor.derived(function () {
+        return !!normalizedSearch(searchQuery())
+      })
+      ui.collect(root, forceExpanded.dispose)
       const label = layout === 'section'
-        ? sectionLabel(root, row, f)
+        ? sectionLabel(root, row, f, forceExpanded)
         : fieldLabelEl(f)
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
@@ -96,7 +111,30 @@
         else value.set(next)
       }
 
-      const editor = f.editor(fieldSig, writeSlot, ctx)
+      const directMatch = aiditor.derived(function () {
+        const query = normalizedSearch(searchQuery())
+        if (!query) return false
+        if (searchAncestorMatch()) return true
+        if (searchIncludes(fieldSearchText(f), query)) return true
+        return f.group ? searchIncludes(groupSearchText(f.group, groups()), query) : false
+      })
+      const searchMatch = aiditor.derived(function () {
+        const query = normalizedSearch(searchQuery())
+        return !query || directMatch() || searchIncludes(f.searchDescendants, query)
+      })
+      const conditionVisible = aiditor.derived(function () {
+        return visibleWhenMatches(value(), f.visibleWhen)
+      })
+      const visible = aiditor.derived(function () {
+        return conditionVisible() && searchMatch()
+      })
+      ui.collect(root, directMatch.dispose)
+      ui.collect(root, searchMatch.dispose)
+      ui.collect(root, conditionVisible.dispose)
+      ui.collect(root, visible.dispose)
+
+      const editorCtx = searchContext(ctx, searchQuery, directMatch)
+      const editor = f.editor(fieldSig, writeSlot, editorCtx)
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
       if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
@@ -136,8 +174,20 @@
           openFieldContextMenu(ev, row, label, f, closeFieldMenu, setFieldMenu, clearFieldMenu)
         })
       }
-      root.appendChild(row)
+      const stopVisible = aiditor.effect(function () { row.hidden = !visible() })
+      ui.collect(root, stopVisible)
+      records.push({
+        field: f,
+        row: row,
+        cell: cell,
+        visible: visible,
+        conditionVisible: conditionVisible,
+        searchMatch: searchMatch,
+        forceExpanded: forceExpanded,
+      })
     })
+
+    mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx)
 
     return root
 
@@ -154,6 +204,178 @@
     function clearFieldMenu(menu) {
       if (fieldMenu === menu) fieldMenu = null
     }
+  }
+
+  function mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx) {
+    const initialGroups = groups.peek ? groups.peek() : groups()
+    const enabledRecords = Object.create(null)
+    Object.keys(initialGroups || {}).forEach(function (groupId) {
+      const enabledBy = initialGroups[groupId] && initialGroups[groupId].enabledBy
+      if (!enabledBy) return
+      const record = recordByKey(records, enabledBy)
+      if (record) enabledRecords[groupId] = record
+    })
+
+    const reserved = Object.keys(enabledRecords).map(function (groupId) { return enabledRecords[groupId] })
+    const buckets = groupRecords(records, reserved)
+    Object.keys(enabledRecords).forEach(function (groupId) {
+      if (!bucketById(buckets, groupId)) buckets.push({ id: groupId, records: [] })
+    })
+    for (let i = 0; i < buckets.length; i++) {
+      const bucket = buckets[i]
+      if (!bucket.id) {
+        for (let j = 0; j < bucket.records.length; j++) root.appendChild(bucket.records[j].row)
+        continue
+      }
+      mountGroup(root, bucket, enabledRecords[bucket.id], value, groups, groupActions, groupActionCtx, searchQuery, ctx)
+    }
+  }
+
+  function mountGroup(root, bucket, enabledRecord, value, groups, groupActions, groupActionCtx, searchQuery, ctx) {
+    const groupId = bucket.id
+    const initial = groupConfig(groups, groupId, false)
+    const collapsed = aiditor.signal(!!initial.defaultCollapsed)
+    const title = aiditor.derived(function () {
+      const config = groupConfig(groups, groupId, true)
+      return config.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || groupId
+    })
+    const actionCtx = aiditor.derived(function () {
+      const base = {
+        groupId: groupId,
+        label: title(),
+        fields: bucket.records.map(function (record) { return record.field.key }),
+        value: value(),
+        ctx: ctx,
+      }
+      return groupActionCtx
+        ? aiditor.safeCall({ scope: 'ui.structInput', action: 'groupActionCtx', group: groupId }, function () { return groupActionCtx(base) }) || base
+        : base
+    })
+    const actions = aiditor.derived(function () {
+      const config = groupConfig(groups, groupId, true)
+      const currentCtx = actionCtx()
+      const fromFn = groupActions
+        ? aiditor.safeCall({ scope: 'ui.structInput', action: 'groupActions', group: groupId }, function () { return groupActions(currentCtx) })
+        : null
+      return fromFn != null ? fromFn : (config.actions || [])
+    })
+    const visible = aiditor.derived(function () {
+      const query = normalizedSearch(searchQuery())
+      if (query && searchIncludes(groupSearchText(groupId, groups()), query)) {
+        if (enabledRecord && enabledRecord.conditionVisible()) return true
+        for (let i = 0; i < bucket.records.length; i++) if (bucket.records[i].conditionVisible()) return true
+        return false
+      }
+      if (enabledRecord && enabledRecord.visible()) return true
+      for (let i = 0; i < bucket.records.length; i++) if (bucket.records[i].visible()) return true
+      return false
+    })
+    const effectiveCollapsed = aiditor.derived(function () {
+      return normalizedSearch(searchQuery()) && visible() ? false : collapsed()
+    })
+    const children = bucket.records.map(function (record) { return record.row })
+    const trailing = enabledRecord ? enabledRecord.cell : null
+    if (trailing) trailing.classList.add('aiditor-ui-struct-group-enabled')
+    const section = ui.section({
+      title: title,
+      collapsed: effectiveCollapsed,
+      onToggle: function (next) { collapsed.set(next) },
+      trailing: trailing,
+      actions: actions,
+      actionCtx: actionCtx,
+      children: children,
+    })
+    section.classList.add('aiditor-ui-struct-group')
+    section.dataset.efGroup = groupId
+    section.body.classList.add('aiditor-ui-struct-group-body')
+    ui.bind(section, visible, function (shown) { section.hidden = !shown })
+    if (trailing) {
+      const stopTrailing = aiditor.effect(function () { trailing.hidden = !enabledRecord.conditionVisible() })
+      ui.collect(root, stopTrailing)
+    }
+    root.appendChild(section)
+    ui.collect(root, title.dispose)
+    ui.collect(root, actionCtx.dispose)
+    ui.collect(root, actions.dispose)
+    ui.collect(root, visible.dispose)
+    ui.collect(root, effectiveCollapsed.dispose)
+    ui.collect(root, function () { ui.dispose(section) })
+  }
+
+  function groupRecords(records, reserved) {
+    const buckets = Object.create(null)
+    const seen = []
+    for (let i = 0; i < records.length; i++) {
+      if (reserved.indexOf(records[i]) >= 0) continue
+      const id = records[i].field.group || ''
+      if (!buckets[id]) { buckets[id] = []; seen.push(id) }
+      buckets[id].push(records[i])
+    }
+    const order = []
+    if (buckets['']) order.push('')
+    ;(ui.PROP_GROUPS || []).forEach(function (id) { if (buckets[id]) order.push(id) })
+    seen.forEach(function (id) { if (id && order.indexOf(id) < 0) order.push(id) })
+    return order.map(function (id) { return { id: id, records: buckets[id] } })
+  }
+
+  function recordByKey(records, key) {
+    for (let i = 0; i < records.length; i++) if (records[i].field.key === key) return records[i]
+    return null
+  }
+
+  function bucketById(buckets, id) {
+    for (let i = 0; i < buckets.length; i++) if (buckets[i].id === id) return buckets[i]
+    return null
+  }
+
+  function groupConfig(groups, groupId, reactive) {
+    const all = reactive ? groups() : (groups.peek ? groups.peek() : groups())
+    return all && all[groupId] || {}
+  }
+
+  function groupSearchText(groupId, groups) {
+    const config = groups && groups[groupId] || {}
+    return groupId + ' ' + (config.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || '')
+  }
+
+  function fieldSearchText(field) {
+    if (field.searchText != null) return field.searchText
+    return [field.key, fieldLabel(field), field.tooltip || '', field.group || ''].join(' ')
+  }
+
+  function normalizedSearch(value) {
+    return String(value == null ? '' : value).trim().toLowerCase()
+  }
+
+  function searchIncludes(value, query) {
+    if (!query || value == null) return false
+    const list = Array.isArray(value) ? value : [value]
+    for (let i = 0; i < list.length; i++) {
+      if (String(list[i] == null ? '' : list[i]).toLowerCase().indexOf(query) >= 0) return true
+    }
+    return false
+  }
+
+  function visibleWhenMatches(record, rule) {
+    if (!rule) return true
+    const current = record == null ? undefined : record[rule.field]
+    if (Object.prototype.hasOwnProperty.call(rule, 'equals')) return Object.is(current, rule.equals)
+    return !Object.is(current, rule.notEquals)
+  }
+
+  function searchContext(ctx, searchQuery, searchAncestorMatch) {
+    if (typeof ctx === 'function') {
+      return function (field) {
+        return Object.assign({}, ctx(field) || {}, {
+          searchQuery: searchQuery,
+          searchAncestorMatch: searchAncestorMatch,
+        })
+      }
+    }
+    return Object.assign({}, ctx || {}, {
+      searchQuery: searchQuery,
+      searchAncestorMatch: searchAncestorMatch,
+    })
   }
 
   function fieldLabelMode(f) {
@@ -261,7 +483,7 @@
     return layout === 'block' || layout === 'section' ? layout : 'row'
   }
 
-  function sectionLabel(root, row, f) {
+  function sectionLabel(root, row, f, forceExpanded) {
     const collapsed = ui.asSig(f.collapsed != null ? f.collapsed : !!f.defaultCollapsed)
     const writeCollapsed = function (next) {
       if (typeof f.onToggle === 'function') {
@@ -278,7 +500,7 @@
     wrap.appendChild(btn)
     btn.addEventListener('click', function () { writeCollapsed(!collapsed.peek()) })
     const stop = aiditor.effect(function () {
-      const v = collapsed()
+      const v = forceExpanded() ? false : collapsed()
       row.classList.toggle('aiditor-ui-struct-input-row-collapsed', !!v)
       btn.setAttribute('aria-expanded', v ? 'false' : 'true')
       arrow.style.transform = v ? 'rotate(-90deg)' : ''

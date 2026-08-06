@@ -250,6 +250,7 @@ ui.menu = function (opts) {
 for (const file of [
   'src/ui/form/input.js',
   'src/ui/form/searchInput.js',
+  'src/ui/form/switch.js',
   'src/ui/form/numberInput.js',
   'src/ui/form/tagInput.js',
   'src/ui/form/colorInput.js',
@@ -688,6 +689,132 @@ function contextmenu(el, target, extra) {
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-visible').length, 1)
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-hidden').length, 1)
   assert.equal(el.querySelectorAll('.aiditor-ui-struct-input-row-label-sr-only').length, 1)
+}
+
+{
+  const value = aiditor.signal({ mode: 'disabled', detail_enabled: false, amount: 2, exact: 3 })
+  const query = aiditor.signal('')
+  const groups = aiditor.signal({
+    detail: { label: 'Detail', defaultCollapsed: true, enabledBy: 'detail_enabled' },
+  })
+  const el = ui.structInput({
+    value,
+    groups,
+    searchQuery: query,
+    fields: [
+      { key: 'mode', label: 'Mode', editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) } },
+      {
+        key: 'detail_enabled',
+        label: 'Enabled',
+        visibleWhen: { field: 'mode', notEquals: 'blocked' },
+        editor: function (sig, write) { return ui.switch({ value: sig, onChange: write }) },
+      },
+      {
+        key: 'amount',
+        label: 'Amount',
+        group: 'detail',
+        visibleWhen: { field: 'mode', notEquals: 'disabled' },
+        editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) },
+      },
+      {
+        key: 'exact',
+        label: 'Exact',
+        group: 'detail',
+        visibleWhen: { field: 'mode', equals: 'active' },
+        editor: function (sig, write) { return ui.input({ value: sig, onChange: write }) },
+      },
+    ],
+  })
+  const section = el.querySelector('.aiditor-ui-struct-group')
+  const rows = el.querySelectorAll('.aiditor-ui-struct-input-row')
+  const amountRow = rows.find(function (row) { return row.dataset.efFieldKey === 'amount' })
+  const exactRow = rows.find(function (row) { return row.dataset.efFieldKey === 'exact' })
+  assert.equal(rows.some(function (row) { return row.dataset.efFieldKey === 'detail_enabled' }), false)
+  assert.equal(el.querySelectorAll('.aiditor-ui-switch').length, 1)
+  const enabledCell = el.querySelector('.aiditor-ui-struct-group-enabled')
+  assert.equal(enabledCell.hidden, false)
+  assert.equal(section.classList.contains('aiditor-ui-section-collapsed'), true)
+  assert.equal(amountRow.hidden, true)
+  assert.equal(exactRow.hidden, true)
+
+  const amountInput = amountRow.querySelector('input')
+  value.set({ mode: 'active', detail_enabled: false, amount: 2, exact: 3 })
+  assert.equal(amountRow.hidden, false)
+  assert.equal(exactRow.hidden, false)
+  assert.equal(amountRow.querySelector('input'), amountInput)
+  value.set({ mode: 'blocked', detail_enabled: false, amount: 2, exact: 3 })
+  assert.equal(enabledCell.hidden, true)
+  value.set({ mode: 'active', detail_enabled: false, amount: 2, exact: 3 })
+  assert.equal(enabledCell.hidden, false)
+
+  query.set('amount')
+  assert.equal(section.classList.contains('aiditor-ui-section-collapsed'), false)
+  assert.equal(section.hidden, false)
+  query.set('missing')
+  assert.equal(section.hidden, true)
+  query.set('')
+  assert.equal(section.hidden, false)
+  assert.equal(section.classList.contains('aiditor-ui-section-collapsed'), true)
+
+  const switchBox = el.querySelector('.aiditor-ui-switch-box')
+  switchBox.checked = true
+  switchBox.dispatch('change', { target: switchBox })
+  assert.equal(value.peek().detail_enabled, true)
+  groups.set({ detail: { label: 'Advanced', defaultCollapsed: false, enabledBy: 'detail_enabled' } })
+  assert.equal(section.querySelector('.aiditor-ui-section-title').textContent, 'Advanced')
+  assert.equal(section.classList.contains('aiditor-ui-section-collapsed'), true)
+}
+
+{
+  const targets = aiditor.signal([{ transform: [false, 'hello', 'other'] }])
+  const query = aiditor.signal('')
+  const form = ui.propertyForm({
+    targets,
+    searchQuery: query,
+    schema: {
+      transform: {
+        type: 'struct',
+        label: 'Transform',
+        fieldLayout: 'section',
+        defaultCollapsed: true,
+        groups: {
+          detail: { label: 'Advanced', defaultCollapsed: true, enabledBy: 'detail_enabled' },
+        },
+        struct_def: {
+          detail_enabled: { type: 'bool', type_render: 'toggle', label: 'Enabled' },
+          note: { type: 'string', label: 'Inner Note', desc: 'Needle field', group: 'detail' },
+          other: { type: 'string', label: 'Other', group: 'detail' },
+        },
+      },
+    },
+  })
+  const parentRow = form.querySelector('.aiditor-ui-struct-input-row-layout-section')
+  const group = form.querySelector('.aiditor-ui-struct-group')
+  const nestedRows = group.querySelectorAll('.aiditor-ui-struct-input-row')
+  const noteRow = nestedRows.find(function (row) { return row.dataset.efFieldKey === 'note' })
+  const otherRow = nestedRows.find(function (row) { return row.dataset.efFieldKey === 'other' })
+  const noteInput = noteRow.querySelector('input')
+  assert.equal(parentRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), true)
+
+  query.set('needle')
+  assert.equal(parentRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), false)
+  assert.equal(noteRow.hidden, false)
+  assert.equal(otherRow.hidden, true)
+  assert.equal(noteRow.querySelector('input'), noteInput)
+
+  query.set('advanced')
+  assert.equal(noteRow.hidden, false)
+  assert.equal(otherRow.hidden, false)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), false)
+
+  targets.set([{ transform: [false, 'updated', 'other'] }])
+  assert.equal(noteRow.querySelector('input'), noteInput)
+  query.set('')
+  assert.equal(parentRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), true)
+  assert.equal(otherRow.hidden, false)
 }
 
 {
@@ -1344,6 +1471,16 @@ function contextmenu(el, target, extra) {
     css,
     /\.aiditor-ui-struct-input-row-collapsed > \.aiditor-ui-struct-input-cell\s*{[^}]*display:\s*none;/s,
     'section field rows must hide their editor cell when collapsed'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-struct-group > \.aiditor-ui-section-body\s*{[^}]*background:\s*transparent;/s,
+    'nested struct groups must use compact transparent section bodies'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-struct-group-enabled\s*{[^}]*display:\s*inline-flex;[^}]*width:\s*auto;/s,
+    'enabledBy editors must fit the group header action rail'
   )
   assert.doesNotMatch(
     css,

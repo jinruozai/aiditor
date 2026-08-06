@@ -3,6 +3,8 @@
 // Framework boundary: this component owns array-row interaction only. Items are
 // opaque values; project semantics, history grouping, reference repair, and
 // domain validation belong to the host.
+// `createItem(ctx)` may return an item or Promise<Item|undefined>; the array is
+// changed only after one complete item resolves, and undefined means cancel.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
@@ -32,6 +34,8 @@
     let drag = null
     let order = []
     let suppressChromeClickKey = null
+    let addPending = false
+    let disposed = false
     const rows = new Map()
 
     const root = ui.h('div', 'aiditor-ui-array-editor aiditor-ui-array-editor-' + density + ' aiditor-ui-array-editor-index-' + indexMode)
@@ -56,6 +60,7 @@
 
     root.addEventListener('keydown', onKeydown)
     ui.collect(root, function () {
+      disposed = true
       cancelDrag(null)
       rows.forEach(disposeRow)
       rows.clear()
@@ -83,7 +88,14 @@
     }
 
     function collectionCtx(event) {
-      return { items: currentItems(), selected: selectedKeys(), active: active.peek(), event: event || null }
+      return {
+        items: currentItems(),
+        selected: selectedKeys(),
+        active: active.peek(),
+        event: event || null,
+        anchor: (event && event.currentTarget) || addBtn,
+        ctx: o.ctx || null,
+      }
     }
 
     function syncRows(arr) {
@@ -109,8 +121,7 @@
         }
       })
       empty.hidden = arr.length > 0
-      addBtn.hidden = !operationAvailable('add')
-      addBtn.disabled = !canAdd(null)
+      updateAddState()
       if (dropLine.parentNode) list.appendChild(dropLine)
       updateRowStates()
     }
@@ -367,21 +378,51 @@
     }
 
     function canAdd(event) {
-      if (!operationAvailable('add')) return false
-      return !o.canAdd || o.canAdd(collectionCtx(event)) !== false
+      if (addPending || !operationAvailable('add') || o.canAdd === false) return false
+      return typeof o.canAdd !== 'function' || o.canAdd(collectionCtx(event)) !== false
     }
 
     function requestAdd(event) {
       if (!canAdd(event)) return
-      const arr = currentItems()
       const ctx = collectionCtx(event)
-      const item = typeof o.createItem === 'function' ? o.createItem(ctx) : ''
+      const item = typeof o.createItem === 'function'
+        ? aiditor.safeCall({ scope: 'ui.arrayEditor', action: 'createItem' }, function () { return o.createItem(ctx) })
+        : ''
+      if (item && typeof item.then === 'function') {
+        setAddPending(true)
+        Promise.resolve(item).then(function (resolved) {
+          if (!disposed && resolved !== undefined) appendItem(resolved, ctx)
+        }).catch(function (error) {
+          aiditor.reportError(error, { scope: 'ui.arrayEditor', action: 'createItem' })
+        }).finally(function () {
+          if (!disposed) setAddPending(false)
+        })
+        return
+      }
+      if (item !== undefined) appendItem(item, ctx)
+    }
+
+    function appendItem(item, ctx) {
+      const arr = currentItems()
       const nextItems = arr.concat([item])
       const key = getKey(item, arr.length)
-      const meta = Object.assign(ctx, { kind: 'add', index: arr.length, key: key, item: item, nextItems: nextItems })
+      const meta = Object.assign({}, ctx, { kind: 'add', index: arr.length, key: key, item: item, items: arr, nextItems: nextItems })
       if (typeof o.onAdd === 'function') o.onAdd(meta)
       else writeItems(nextItems, meta)
       commit(meta)
+    }
+
+    function setAddPending(next) {
+      addPending = next
+      updateAddState()
+    }
+
+    function updateAddState() {
+      addBtn.hidden = !operationAvailable('add')
+      addBtn.disabled = !canAdd(null)
+      if (addPending) addBtn.setAttribute('aria-busy', 'true')
+      else addBtn.removeAttribute('aria-busy')
+      root.classList.toggle('is-add-pending', addPending)
     }
 
     function keysForRow(key) {

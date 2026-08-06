@@ -8575,7 +8575,7 @@
           {
             "type": "object|Signal<object>",
             "name": "opts.groups",
-            "description": "Optional grouped section metadata, including labels and UiAction arrays."
+            "description": "Optional grouped section metadata, including labels, actions, defaultCollapsed, and enabledBy."
           },
           {
             "type": "Function",
@@ -8601,6 +8601,11 @@
             "type": "Function",
             "name": "opts.filePathActions",
             "description": "Optional UiAction factory appended to file path input menus."
+          },
+          {
+            "type": "string|Signal<string>",
+            "name": "opts.searchQuery",
+            "description": "Optional display-only recursive field filter."
           },
           {
             "type": "boolean",
