@@ -246,6 +246,8 @@
     const elemFd   = schema.resolveArrayElemFieldDef(a.fieldDef, agv)
     return ui.arrayInput({
       value:        a.sig,
+      itemLayout:   arrayItemLayout(agv, elemFd),
+      defaultCollapsed: agv.defaultCollapsed,
       editor:       function (sig, write, ctx, index, rowCtx) {
         return editorFor(elemFd, sig, write, withFieldPath(ctx, function () { return rowCtx ? rowCtx.index : index }))
       },
@@ -268,6 +270,8 @@
       indexMode:     agv.indexMode || 'number-handle',
       density:       agv.density || 'compact',
       actions:       agv.actions || 'end',
+      itemLayout:    arrayItemLayout(agv, elemFd),
+      defaultCollapsed: agv.defaultCollapsed,
       capabilities:  agv.capabilities || null,
       createItem: arrayItemFactory(agv, elemFd),
       canAdd: agv.canAdd,
@@ -325,6 +329,13 @@
     return typeof agv.createItem === 'function'
       ? agv.createItem
       : function () { return cloneDefault(fieldDef) }
+  }
+
+  function arrayItemLayout(agv, fieldDef) {
+    if (agv.itemLayout != null) return agv.itemLayout
+    return schema.isStructField(fieldDef) || schema.isDictField(fieldDef) || schema.isArrayField(fieldDef)
+      ? 'section'
+      : 'inline'
   }
 
   function cloneItem(item) {

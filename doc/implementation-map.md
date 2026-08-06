@@ -48,7 +48,7 @@ preserved or deliberately replaced.
 | `src/ui/form/propertyForm.js` | [ui.md](./ui.md), [inspector.md](./inspector.md) | Schema-driven single/multi-target adapter over the stable `structInput` field tree, including groups, conditions, actions, messages, and recursive display filtering. |
 | `src/ui/form/propertyList.js` | [property-list.md](./property-list.md), [ui.md](./ui.md) | Keyed expandable object property-list primitive built from section/actionBar/propertyForm. |
 | `src/ui/form/dictInput.js` | [dict-input.md](./dict-input.md), [schema-value-encoding.md](./schema-value-encoding.md), [ui.md](./ui.md) | Dynamic key-value dictionary editor primitive used by the built-in `dict` schema renderer. |
-| `src/ui/form/arrayEditor.js` | [ui.md](./ui.md) | Generic array-row interaction primitive: key-based selection, active item, atomic sync/async item construction, add/delete/duplicate, reorder feedback, and controlled mutation callbacks. |
+| `src/ui/form/arrayEditor.js` | [ui.md](./ui.md) | Generic array-row interaction primitive: keyed inline/section item shells, local collapse state, selection, atomic sync/async item construction, add/delete/duplicate, reorder feedback, and controlled mutation callbacks. |
 | `src/ui/form/arrayInput.js` | [ui.md](./ui.md) | Simple property array facade over `arrayEditor`, including the shared `createItem` / `canAdd` protocol. |
 | `src/ui/overlay/quickPick.js` | [quick-pick.md](./quick-pick.md), [ui.md](./ui.md) | Canonical anchored quick filter picker for opaque item collections. |
 | `src/ui/**` | [ui.md](./ui.md) | Generic UI component library and built-in generic panel components. |

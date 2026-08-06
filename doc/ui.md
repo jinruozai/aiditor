@@ -443,13 +443,21 @@ pointer reorder with insertion feedback, keyboard row actions, and controlled
 `onChange`/writable signal. It does not own history, transactions, validation,
 asset semantics, tracks, vertices, or any project workflow.
 
-Array rows keep their chrome compact: the index/handle column sizes to its
-content instead of reserving an inspector-style label column. This keeps
-`arrayEditor` usable inside `propertyForm`, including arrays whose item editor
-is a nested `structInput`, while preserving the same delete/action rail and
-reorder handle semantics. When a `structInput` or `dictInput` is rendered as an
-array row item, its label/key column also switches to a compact width so the
-field name and editor stay visually connected.
+`itemLayout: "inline" | "section"` controls the generic item shell. `inline`
+keeps the index/handle beside a compact scalar editor. `section` puts the
+collapse control and index/drag handle in a short header, keeps duplicate and
+delete actions at the header end, and renders the item editor at full width
+below it. Collapsing only hides the existing body; it does not dispose or
+rerender the item editor. Because rows are reconciled by key, collapse state
+and editor DOM survive value refresh and reorder.
+
+`arrayEditor` itself never guesses item complexity from DOM dimensions or item
+data. The schema-aware built-in `array` and `array_editor` renderers choose
+`section` for struct, dict, and nested-array element schemas, and `inline` for
+scalar schemas. `type_agv.itemLayout` can explicitly override that choice, and
+`type_agv.defaultCollapsed` controls the initial section state. Inline chrome
+sizes to its content instead of reserving an inspector-style label column.
+Nested `structInput` and `dictInput` editors retain compact label/key columns.
 
 Selection and active state use item keys. Callers that need selection, active
 row behavior, keyboard row actions, or stable reorder should provide `getKey`.
@@ -475,6 +483,8 @@ Array creation uses one protocol in `arrayEditor`:
 ```js
 aiditor.ui.arrayEditor({
   items,
+  itemLayout: 'section',
+  defaultCollapsed: false,
   canAdd: (ctx) => ctx.items.length < 20,
   createItem: async (ctx) => {
     const picked = await openPicker({ anchor: ctx.anchor })

@@ -5686,6 +5686,7 @@
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
+  let itemBodyId = 0
 
   const EDITABLE_SELECTOR = 'input,textarea,select,[contenteditable],[role="textbox"],[role="searchbox"]'
   const DEFAULT_CAPS = { add: true, delete: true, duplicate: false, reorder: true, keyboard: true }
@@ -5702,6 +5703,7 @@
     const indexMode = normalizeEnum(o.indexMode, ['none', 'number', 'handle', 'number-handle'], 'number')
     const density = normalizeEnum(o.density, ['compact', 'comfortable'], 'compact')
     const actions = normalizeEnum(o.actions, ['auto', 'none', 'end'], 'auto')
+    const itemLayout = normalizeEnum(o.itemLayout, ['inline', 'section'], 'inline')
     const caps = Object.assign({}, DEFAULT_CAPS, o.capabilities || {})
     if (!hasStableKey && (!o.capabilities || o.capabilities.keyboard == null)) caps.keyboard = false
     const writeItems = typeof o.onChange === 'function'
@@ -5716,7 +5718,7 @@
     let disposed = false
     const rows = new Map()
 
-    const root = ui.h('div', 'aiditor-ui-array-editor aiditor-ui-array-editor-' + density + ' aiditor-ui-array-editor-index-' + indexMode)
+    const root = ui.h('div', 'aiditor-ui-array-editor aiditor-ui-array-editor-' + density + ' aiditor-ui-array-editor-index-' + indexMode + ' aiditor-ui-array-editor-layout-' + itemLayout)
     root.setAttribute('role', 'listbox')
     root.setAttribute('tabindex', '0')
     root.setAttribute('aria-label', o.ariaLabel || 'Array editor')
@@ -5728,7 +5730,6 @@
 
     const addBtn = ui.button({
       text: 'Add',
-      icon: 'plus',
       kind: 'default',
       size: 'sm',
       onClick: function (event) { requestAdd(event) },
@@ -5810,6 +5811,8 @@
       const chrome = ui.h('button', 'aiditor-ui-array-editor-index', { type: 'button' })
       const cell = ui.h('div', 'aiditor-ui-array-editor-cell')
       const actionBox = ui.h('div', 'aiditor-ui-array-editor-actions')
+      const head = itemLayout === 'section' ? ui.h('div', 'aiditor-ui-array-editor-row-head') : null
+      const body = itemLayout === 'section' ? ui.h('div', 'aiditor-ui-array-editor-row-body') : null
       const valueSig = aiditor.signal(item)
       const selectedSig = aiditor.signal(false)
       const activeSig = aiditor.signal(false)
@@ -5821,6 +5824,10 @@
         chrome: chrome,
         cell: cell,
         actionBox: actionBox,
+        head: head,
+        body: body,
+        toggle: null,
+        collapsed: !!o.defaultCollapsed,
         valueSig: valueSig,
         selectedSig: selectedSig,
         activeSig: activeSig,
@@ -5858,6 +5865,16 @@
       }
       state.ctx = ctx
 
+      if (itemLayout === 'section') {
+        state.toggle = ui.iconButton({
+          icon: 'chevron-down',
+          title: 'Collapse item',
+          size: 'sm',
+          kind: 'ghost',
+          onClick: function () { setRowCollapsed(state, !state.collapsed) },
+        })
+      }
+
       chrome.addEventListener('click', function (event) {
         event.preventDefault()
         root.focus()
@@ -5877,9 +5894,23 @@
         startDrag(state, event)
       })
 
-      row.appendChild(chrome)
-      row.appendChild(cell)
-      if (actions !== 'none') row.appendChild(actionBox)
+      if (itemLayout === 'section') {
+        const toggle = state.toggle
+        toggle.classList.add('aiditor-ui-array-editor-row-toggle')
+        body.id = 'aiditor-array-item-' + (++itemBodyId)
+        head.appendChild(toggle)
+        head.appendChild(chrome)
+        if (actions !== 'none') head.appendChild(actionBox)
+        body.appendChild(cell)
+        row.appendChild(head)
+        row.appendChild(body)
+        toggle.setAttribute('aria-controls', body.id)
+        setRowCollapsed(state, state.collapsed)
+      } else {
+        row.appendChild(chrome)
+        row.appendChild(cell)
+        if (actions !== 'none') row.appendChild(actionBox)
+      }
       state.content = renderItem(item, index, ctx) || ui.h('span', null, { text: '' })
       cell.appendChild(state.content)
       rebuildActions(state)
@@ -5945,11 +5976,21 @@
     }
 
     function disposeRow(row) {
+      disposeOwned(row.toggle)
       disposeOwned(row.duplicateBtn)
       disposeOwned(row.deleteBtn)
       ui.dispose(row.content)
       if (row.value && row.value.dispose) row.value.dispose()
       if (row.el.parentNode) row.el.parentNode.removeChild(row.el)
+    }
+
+    function setRowCollapsed(row, collapsed) {
+      row.collapsed = !!collapsed
+      row.el.classList.toggle('is-collapsed', row.collapsed)
+      row.body.hidden = row.collapsed
+      row.toggle.setAttribute('aria-expanded', row.collapsed ? 'false' : 'true')
+      row.toggle.setAttribute('aria-label', row.collapsed ? 'Expand item' : 'Collapse item')
+      row.toggle.setAttribute('title', row.collapsed ? 'Expand item' : 'Collapse item')
     }
 
     function disposeOwned(el) {
@@ -6458,6 +6499,8 @@
       getKey: function (_, index) { return index },
       selectionMode: 'none',
       indexMode: 'number',
+      itemLayout: o.itemLayout,
+      defaultCollapsed: o.defaultCollapsed,
       density: 'compact',
       actions: 'end',
       capabilities: {
@@ -6731,6 +6774,8 @@
     const elemFd   = schema.resolveArrayElemFieldDef(a.fieldDef, agv)
     return ui.arrayInput({
       value:        a.sig,
+      itemLayout:   arrayItemLayout(agv, elemFd),
+      defaultCollapsed: agv.defaultCollapsed,
       editor:       function (sig, write, ctx, index, rowCtx) {
         return editorFor(elemFd, sig, write, withFieldPath(ctx, function () { return rowCtx ? rowCtx.index : index }))
       },
@@ -6753,6 +6798,8 @@
       indexMode:     agv.indexMode || 'number-handle',
       density:       agv.density || 'compact',
       actions:       agv.actions || 'end',
+      itemLayout:    arrayItemLayout(agv, elemFd),
+      defaultCollapsed: agv.defaultCollapsed,
       capabilities:  agv.capabilities || null,
       createItem: arrayItemFactory(agv, elemFd),
       canAdd: agv.canAdd,
@@ -6810,6 +6857,13 @@
     return typeof agv.createItem === 'function'
       ? agv.createItem
       : function () { return cloneDefault(fieldDef) }
+  }
+
+  function arrayItemLayout(agv, fieldDef) {
+    if (agv.itemLayout != null) return agv.itemLayout
+    return schema.isStructField(fieldDef) || schema.isDictField(fieldDef) || schema.isArrayField(fieldDef)
+      ? 'section'
+      : 'inline'
   }
 
   function cloneItem(item) {

@@ -357,6 +357,65 @@
 .aiditor-ui-array-editor-index-none .aiditor-ui-array-editor-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: var(--aiditor-size-h-sm);
+  padding: 0 1px;
+  border-radius: var(--aiditor-radius-control);
+  background: var(--aiditor-bg-2);
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row:not(.is-collapsed) > .aiditor-ui-array-editor-row-head {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-toggle {
+  flex: 0 0 auto;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-toggle .aiditor-ui-icon {
+  transition: transform var(--aiditor-dur-fast) var(--aiditor-ease);
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row.is-collapsed .aiditor-ui-array-editor-row-toggle .aiditor-ui-icon {
+  transform: rotate(-90deg);
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-index {
+  flex: 0 1 auto;
+  justify-self: auto;
+  max-width: none;
+  text-align: left;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-actions {
+  margin-left: auto;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body {
+  min-width: 0;
+  padding: var(--aiditor-space-1) 1px 1px;
+}
+.aiditor-ui-array-editor-comfortable.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-head {
+  min-height: 34px;
+  padding-inline: 3px;
+}
+.aiditor-ui-array-editor-comfortable.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body {
+  padding: 3px;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body[hidden] {
+  display: none;
+}
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body > .aiditor-ui-array-editor-cell > .aiditor-ui-struct-input,
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body > .aiditor-ui-array-editor-cell > .aiditor-ui-dict-input,
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body > .aiditor-ui-array-editor-cell > .aiditor-ui-array-input,
+.aiditor-ui-array-editor-layout-section .aiditor-ui-array-editor-row-body > .aiditor-ui-array-editor-cell > .aiditor-ui-array-editor {
+  padding-inline: 0;
+}
 .aiditor-ui-array-editor-row:hover {
   background: var(--aiditor-hover);
 }

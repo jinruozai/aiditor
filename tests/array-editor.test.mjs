@@ -181,6 +181,7 @@ aiditor.shortcuts = {
 ui.button = function (opts) {
   const el = ui.h('button', 'aiditor-ui-btn', { type: 'button' })
   if (opts && opts.text) el.textContent = opts.text
+  if (opts && opts.icon) el.appendChild(ui.h('span', 'test-button-icon'))
   if (opts && opts.onClick) el.addEventListener('click', opts.onClick)
   return el
 }
@@ -233,7 +234,10 @@ function pointer(el, type, extra) {
 {
   const value = aiditor.signal(['red'])
   const el = ui.arrayInput({ value: value })
-  el.querySelector('.aiditor-ui-array-editor-add').click()
+  const add = el.querySelector('.aiditor-ui-array-editor-add')
+  assert.equal(add.textContent, 'Add')
+  assert.equal(add.querySelector('.test-button-icon'), null)
+  add.click()
   assert.deepEqual(value.peek(), ['red', ''])
 
   const input = el.querySelector('input')
@@ -243,6 +247,46 @@ function pointer(el, type, extra) {
 
   el.querySelector('.aiditor-ui-icon-btn').click()
   assert.deepEqual(value.peek(), [''])
+}
+
+{
+  const items = aiditor.signal([{ id: 'a', label: 'A' }])
+  const el = ui.arrayEditor({
+    items: items,
+    getKey: function (item) { return item.id },
+    itemLayout: 'section',
+    defaultCollapsed: true,
+    indexMode: 'number-handle',
+    capabilities: { add: false, delete: true, duplicate: true, reorder: true },
+    renderItem: function (_, __, ctx) {
+      const content = ui.h('span', 'section-item-content')
+      ui.bind(content, ctx.value, function (item) { content.textContent = item.label })
+      return content
+    },
+  })
+  const row = el.querySelector('.aiditor-ui-array-editor-row')
+  const head = row.querySelector('.aiditor-ui-array-editor-row-head')
+  const body = row.querySelector('.aiditor-ui-array-editor-row-body')
+  const toggle = row.querySelector('.aiditor-ui-array-editor-row-toggle')
+  const index = row.querySelector('.aiditor-ui-array-editor-index')
+  const actions = row.querySelector('.aiditor-ui-array-editor-actions')
+  const content = row.querySelector('.section-item-content')
+  assert.ok(el.classList.contains('aiditor-ui-array-editor-layout-section'))
+  assert.equal(index.parentNode, head)
+  assert.equal(actions.parentNode, head)
+  assert.equal(actions.querySelectorAll('.aiditor-ui-icon-btn').length, 2)
+  assert.equal(content.parentNode.parentNode, body)
+  assert.equal(body.hidden, true)
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+  toggle.click()
+  assert.equal(body.hidden, false)
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+
+  items.set([{ id: 'a', label: 'Updated' }])
+  assert.equal(el.querySelector('.aiditor-ui-array-editor-row'), row)
+  assert.equal(el.querySelector('.section-item-content'), content)
+  assert.equal(content.textContent, 'Updated')
+  assert.equal(body.hidden, false)
 }
 
 {
@@ -521,6 +565,7 @@ for (const renderer of ['array', 'array_editor']) {
     type_render: 'array_editor',
     type_agv: { elem_type: 'string' },
   }, value, function (next) { value.set(next) })
+  assert.ok(el.classList.contains('aiditor-ui-array-editor-layout-inline'))
   el.querySelector('.aiditor-ui-array-editor-index').click()
   assert.equal(el.querySelectorAll('.is-selected').length, 0)
   const ev = key(el, 'ArrowDown', { altKey: true })
@@ -545,6 +590,7 @@ for (const renderer of ['array', 'array_editor']) {
       },
     },
   }, value, function (next) { value.set(next) })
+  assert.ok(el.classList.contains('aiditor-ui-array-editor-layout-section'))
   const inputs = el.querySelectorAll('input')
   assert.equal(inputs[0].value, 'a')
   assert.equal(inputs[1].value, '1')
@@ -556,6 +602,22 @@ for (const renderer of ['array', 'array_editor']) {
     ['a', '1'],
     ['b', '3'],
   ])
+}
+
+{
+  const value = aiditor.signal([['a']])
+  const el = ui.editorFor({
+    type: 'array',
+    type_agv: {
+      itemLayout: 'inline',
+      elem_type: {
+        type: 'struct',
+        struct_def: { id: 'string' },
+      },
+    },
+  }, value, function (next) { value.set(next) })
+  assert.ok(el.classList.contains('aiditor-ui-array-editor-layout-inline'))
+  assert.equal(el.querySelector('.aiditor-ui-array-editor-row-head'), null)
 }
 
 {
@@ -580,6 +642,7 @@ for (const renderer of ['array', 'array_editor']) {
     writes.push({ next: next, change: meta && meta.change })
     value.set(next)
   }, { fieldPath: 'items' })
+  assert.ok(el.classList.contains('aiditor-ui-array-editor-layout-section'))
   const inputs = el.querySelectorAll('input')
   inputs[3].value = '4'
   inputs[3].dispatch('input', { target: inputs[3] })
@@ -616,6 +679,16 @@ for (const renderer of ['array', 'array_editor']) {
     css,
     /\.aiditor-ui-array-editor-index-none \.aiditor-ui-array-editor-row\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/s,
     'arrayEditor indexMode none must remove the index column entirely'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-layout-section \.aiditor-ui-array-editor-row\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+    'section items must place their header above the item body'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-array-editor-layout-section \.aiditor-ui-array-editor-actions\s*{[^}]*margin-left:\s*auto;/s,
+    'section item actions must stay at the end of the compact header'
   )
   assert.match(
     css,

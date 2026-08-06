@@ -27,6 +27,8 @@
       getKey: function (_, index) { return index },
       selectionMode: 'none',
       indexMode: 'number',
+      itemLayout: o.itemLayout,
+      defaultCollapsed: o.defaultCollapsed,
       density: 'compact',
       actions: 'end',
       capabilities: {
