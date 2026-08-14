@@ -4,6 +4,7 @@
 
   const ai = aiditor.ai = aiditor.ai || {}
   let nextToolCallId = 1
+  let nextToolExecutionId = 1
 
   function makeToolCall(spec, actor) {
     spec = spec || {}
@@ -19,6 +20,7 @@
       executorToolId: spec.executorToolId || null,
       executorArgs: Object.prototype.hasOwnProperty.call(spec, 'executorArgs') ? spec.executorArgs : null,
       status: spec.status || 'proposed',
+      executionId: spec.executionId || null,
       actor: actor || spec.actor || 'user',
       messageId: spec.messageId || null,
       preview: spec.preview || null,
@@ -113,7 +115,6 @@
   }
 
   function createToolCall(agentId, spec, actor) {
-    if (!ai.canUseTool(actor || 'user', agentId, spec.toolId || spec.name || spec.tool, 'call')) return null
     const message = spec.messageId
       ? null
       : ai.appendMessage(agentId, {
@@ -126,7 +127,7 @@
     return attachToolCalls(agentId, spec.messageId || message.id, [spec], actor || 'user')[0]
   }
 
-  function createToolContext(found, actor) {
+  function createToolContext(found, actor, signal) {
     return {
       ai: ai,
       actor: actor || found.toolCall.actor || 'user',
@@ -134,8 +135,9 @@
       message: found.message,
       toolCall: found.toolCall,
       runId: found.message && found.message.meta && found.message.meta.runId || null,
+      signal: signal || null,
       canRead: function (scope) { return ai.canRead(actor || found.toolCall.actor || 'user', found.agent.id, scope || 'agent.full') },
-      canApply: function () { return ai.canUseTool(actor || found.toolCall.actor || 'user', found.agent.id, found.toolCall.toolId, 'apply') },
+      canApply: function () { return toolPermissionDecision(found, actor || found.toolCall.actor || 'user', 'apply').allowed === true },
     }
   }
 
@@ -147,16 +149,39 @@
     return call.executorArgs == null ? call.args : call.executorArgs
   }
 
-  function callToolPhase(agentId, callId, actor, phase) {
+  function callToolPhase(agentId, callId, actor, phase, signal) {
     const found = findToolCall(agentId, callId)
     const tool = found && ai.tools.get(toolExecutorId(found.toolCall))
     const fn = tool && tool[phase]
     if (!fn) return null
-    const ctx = createToolContext(found, actor)
+    const ctx = createToolContext(found, actor, signal)
     const input = phase === 'apply'
       ? (found.toolCall.result || found.toolCall.preview || toolExecutorArgs(found.toolCall))
       : toolExecutorArgs(found.toolCall)
     return fn(input, ctx)
+  }
+
+  function invokeToolPhase(agentId, callId, actor, phase, options) {
+    const found = findToolCall(agentId, callId)
+    const tool = ai.tools.get(toolExecutorId(found.toolCall))
+    const parentSignal = options && options.signal || null
+    const task = function (signal) { return callToolPhase(agentId, callId, actor, phase, signal) }
+    if (parentSignal || tool.timeoutMs) return ai.toolScheduler.runWithDeadline(tool, parentSignal, task)
+    return task(null)
+  }
+
+  function beginToolExecution(agentId, callId, status) {
+    const executionId = 'texec_' + Date.now().toString(36) + '_' + nextToolExecutionId++
+    const call = updateToolCall(agentId, callId, { status: status, executionId: executionId })
+    return { call: call, executionId: executionId }
+  }
+
+  function settleToolExecution(agentId, callId, executionId, expectedStatus, patch) {
+    const current = findToolCall(agentId, callId)
+    if (!current || current.toolCall.executionId !== executionId || current.toolCall.status !== expectedStatus) {
+      return current && current.toolCall || null
+    }
+    return updateToolCall(agentId, callId, Object.assign({ executionId: null }, patch || {}))
   }
 
   function errorMessage(value, fallback) {
@@ -200,7 +225,7 @@
       error: message,
       toolId: toolId || '',
       phase: phase || 'run',
-      recoverable: code !== 'PERMISSION_DENIED',
+      recoverable: code !== 'PERMISSION_DENIED' && code !== 'TOOL_CANCELLED',
     }
     const hint = value && value.hint ? String(value.hint) : recoverHint(code)
     if (hint) out.hint = hint
@@ -212,14 +237,14 @@
     return !!(result && typeof result === 'object' && (result.ok === false || result.status === 'failed'))
   }
 
-  function failToolCall(agentId, callId, found, err, phase) {
-    if (aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: found.toolCall.toolId }, err)
+  function failToolExecution(agentId, callId, found, err, phase, executionId, expectedStatus) {
+    if (err && err.code !== 'TOOL_CANCELLED' && aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: found.toolCall.toolId }, err)
     const envelope = failureEnvelope(found.toolCall.toolId, phase || 'run', err)
     const patch = { status: 'failed', error: envelope.message, errorDetails: envelope }
     if (phase === 'preview') patch.preview = envelope
     else if (phase === 'apply') patch.applyResult = envelope
     else patch.result = envelope
-    return updateToolCall(agentId, callId, patch)
+    return settleToolExecution(agentId, callId, executionId, expectedStatus, patch)
   }
 
   function isPromiseLike(value) {
@@ -266,11 +291,34 @@
     return 'Tool preview returned ok=false'
   }
 
-  function finishApplyToolCall(agentId, callId, found, result) {
-    if (applySucceeded(result)) {
-      return updateToolCall(agentId, callId, { status: 'applied', applyResult: result, error: null })
+  function permissionContext(found, actor) {
+    return {
+      ai: ai,
+      actor: actor,
+      agent: found.agent,
+      message: found.message,
+      toolCall: found.toolCall,
+      runId: found.message && found.message.meta && found.message.meta.runId || null,
     }
-    return updateToolCall(agentId, callId, { status: 'failed', applyResult: result, error: applyFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', result) })
+  }
+
+  function toolPermissionDecision(found, actor, phase) {
+    const call = found.toolCall
+    const executorId = toolExecutorId(call)
+    const ctx = permissionContext(found, actor)
+    const targets = ai.tools.permissionTargets(executorId, toolExecutorArgs(call), ctx, phase)
+    const runId = ctx.runId
+    const details = targets.map(function (target) {
+      return Object.assign({
+        runId: runId,
+        traceId: runId,
+        messageId: found.message && found.message.id || null,
+        executorToolId: executorId,
+      }, target, {
+        entry: target.entry === executorId ? call.toolId : target.entry,
+      })
+    })
+    return ai.permissions.decideMany(actor, found.agent.id, phase === 'apply' ? 'tool.apply' : 'tool.call', details)
   }
 
   function getToolCallActionState(agentId, callId, actor) {
@@ -280,18 +328,10 @@
     const executorId = toolExecutorId(call)
     const tool = ai.tools.get(executorId)
     const who = actor || call.actor || 'user'
-    const capabilities = ai.tools.capabilities ? ai.tools.capabilities(executorId) : null
-    const runId = found.message && found.message.meta && found.message.meta.runId || null
-    const permissionDetails = {
-      runId: runId,
-      traceId: runId,
-      messageId: found.message && found.message.id || null,
-      risk: capabilities && capabilities.risk || null,
-      capabilities: capabilities,
-      executorToolId: executorId,
-    }
-    const canCall = ai.canUseTool(who, agentId, call.toolId, 'call', permissionDetails)
-    const canApply = ai.canUseTool(who, agentId, call.toolId, 'apply', permissionDetails)
+    const capabilities = ai.tools.capabilities(executorId)
+    const previewDecision = toolPermissionDecision(found, who, 'preview')
+    const runDecision = toolPermissionDecision(found, who, 'run')
+    const applyDecision = toolPermissionDecision(found, who, 'apply')
     const status = normalizeToolStatus(call.status)
     return {
       toolCall: call,
@@ -300,64 +340,115 @@
       hasPreview: !!(tool && tool.preview),
       hasRun: !!(tool && tool.run),
       hasApply: !!(tool && tool.apply),
-      canPreview: !!(tool && tool.preview && canCall && canTransition(status, 'previewed')),
-      canApprove: canCall && canTransition(status, 'approved'),
-      canReject: canCall && canTransition(status, 'rejected'),
-      canRun: !!(tool && tool.run && canCall && canTransition(status, 'running')),
-      canApply: !!(tool && tool.apply && canApply && canTransition(status, 'applying')),
-      callAllowed: canCall,
-      applyAllowed: canApply,
+      previewDecision: previewDecision,
+      runDecision: runDecision,
+      applyDecision: applyDecision,
+      canPreview: !!(tool && tool.preview && previewDecision.allowed && canTransition(status, 'previewed')),
+      canApprove: runDecision.allowed && canTransition(status, 'approved'),
+      canReject: canTransition(status, 'rejected'),
+      canRun: !!(tool && tool.run && runDecision.allowed && canTransition(status, 'running')),
+      canApply: !!(tool && tool.apply && applyDecision.allowed && canTransition(status, 'applying')),
+      callAllowed: runDecision.allowed,
+      applyAllowed: applyDecision.allowed,
     }
   }
 
-  function isToolAlwaysAllowed(agentId, toolId) {
-    const agent = ai.findAgent(agentId)
-    const map = agent && agent.meta && agent.meta.alwaysAllowTools
-    return !!(map && map[toolId])
+  function grantPhases(found) {
+    const tool = ai.tools.get(toolExecutorId(found.toolCall))
+    return tool && tool.apply ? ['run', 'apply'] : ['run']
   }
 
-  function setToolAlwaysAllowed(agentId, toolId, allowed) {
-    const agent = ai.findAgent(agentId)
-    if (!agent || !toolId) return null
-    const meta = Object.assign({}, agent.meta || {})
-    const map = Object.assign({}, meta.alwaysAllowTools || {})
-    if (allowed) map[toolId] = true
-    else delete map[toolId]
-    meta.alwaysAllowTools = map
-    return ai.updateAgent(agentId, { meta: meta })
+  function toolCallGrantDescriptors(found) {
+    const phases = grantPhases(found)
+    const out = []
+    for (let i = 0; i < phases.length; i++) {
+      const decision = toolPermissionDecision(found, found.toolCall.actor, phases[i])
+      for (let j = 0; j < decision.checks.length; j++) out.push(decision.checks[j].ctx)
+    }
+    const seen = {}
+    return out.filter(function (descriptor) {
+      const key = ai.permissions.grantKey(descriptor)
+      if (seen[key]) return false
+      seen[key] = true
+      return true
+    })
   }
 
-  function previewToolCall(agentId, callId, actor) {
+  function toolCallGrantIds(agentId, callId) {
+    const found = findToolCall(agentId, callId)
+    if (!found) return []
+    const descriptors = toolCallGrantDescriptors(found)
+    const keys = {}
+    for (let i = 0; i < descriptors.length; i++) keys[ai.permissions.grantKey(descriptors[i])] = true
+    return ai.permissions.grants(agentId).filter(function (grant) {
+      return keys[ai.permissions.grantKey(grant)]
+    }).map(function (grant) { return grant.id })
+  }
+
+  function isToolCallGranted(agentId, callId) {
+    const found = findToolCall(agentId, callId)
+    if (!found) return false
+    return toolCallGrantIds(agentId, callId).length === toolCallGrantDescriptors(found).length
+  }
+
+  function setToolCallGranted(agentId, callId, allowed) {
+    const found = findToolCall(agentId, callId)
+    if (!found) return false
+    if (allowed) {
+      ai.permissions.grant(agentId, toolCallGrantDescriptors(found))
+      return true
+    }
+    const ids = toolCallGrantIds(agentId, callId)
+    for (let i = 0; i < ids.length; i++) ai.permissions.revoke(agentId, ids[i])
+    return true
+  }
+
+  function failToolCall(agentId, callId, value, phase) {
+    const found = findToolCall(agentId, callId)
+    if (!found) return null
+    const envelope = failureEnvelope(found.toolCall.toolId, phase || 'run', value)
+    traceTool(found, 'tool_completed', 'failed', envelope.message)
+    return updateToolCall(agentId, callId, {
+      status: 'failed',
+      executionId: null,
+      error: envelope.message,
+      errorDetails: envelope,
+      result: phase === 'apply' ? found.toolCall.result : envelope,
+      applyResult: phase === 'apply' ? envelope : found.toolCall.applyResult,
+    })
+  }
+
+  function previewToolCall(agentId, callId, actor, options) {
     const state = getToolCallActionState(agentId, callId, actor || 'user')
     if (!state || !state.canPreview) return null
     const found = findToolCall(agentId, callId)
+    const execution = beginToolExecution(agentId, callId, 'previewing')
     try {
-      updateToolCall(agentId, callId, { status: 'previewing' })
       traceTool(found, 'tool_preview_started', 'previewing', found.toolCall.toolId)
-      const result = callToolPhase(agentId, callId, actor || state.toolCall.actor || 'user', 'preview')
+      const result = invokeToolPhase(agentId, callId, actor || state.toolCall.actor || 'user', 'preview', options)
       if (isPromiseLike(result)) {
         const promise = Promise.resolve(result).then(function (done) {
           if (resultFailed(done)) {
             traceTool(found, 'tool_preview_completed', 'failed', previewFailureMessage(done))
-            return updateToolCall(agentId, callId, { status: 'failed', preview: done, error: previewFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', done) })
+            return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: done, error: previewFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', done) })
           }
           traceTool(found, 'tool_preview_completed', 'previewed', found.toolCall.toolId)
-          return updateToolCall(agentId, callId, { status: 'previewed', preview: done, error: null })
+          return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'previewed', preview: done, error: null })
         }, function (err) {
           traceTool(found, 'tool_preview_completed', 'failed', errorMessage(err))
-          return failToolCall(agentId, callId, found, err, 'preview')
+          return failToolExecution(agentId, callId, found, err, 'preview', execution.executionId, 'previewing')
         })
         return { toolCall: findToolCall(agentId, callId).toolCall, promise: promise }
       }
       if (resultFailed(result)) {
         traceTool(found, 'tool_preview_completed', 'failed', previewFailureMessage(result))
-        return updateToolCall(agentId, callId, { status: 'failed', preview: result, error: previewFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', result) })
+        return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: result, error: previewFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', result) })
       }
       traceTool(found, 'tool_preview_completed', 'previewed', found.toolCall.toolId)
-      return updateToolCall(agentId, callId, { status: 'previewed', preview: result, error: null })
+      return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'previewed', preview: result, error: null })
     } catch (err) {
       traceTool(found, 'tool_preview_completed', 'failed', errorMessage(err))
-      return failToolCall(agentId, callId, found, err, 'preview')
+      return failToolExecution(agentId, callId, found, err, 'preview', execution.executionId, 'previewing')
     }
   }
 
@@ -375,52 +466,82 @@
       : null
   }
 
-  function runToolCall(agentId, callId, actor) {
+  function runToolCall(agentId, callId, actor, options) {
     const found = findToolCall(agentId, callId)
     const state = getToolCallActionState(agentId, callId, actor || (found && found.toolCall.actor) || 'user')
     if (!found || !state || !state.canRun) return null
-    updateToolCall(agentId, callId, { status: 'running' })
+    const execution = beginToolExecution(agentId, callId, 'running')
     traceTool(found, 'tool_run_started', 'running', found.toolCall.toolId)
     const promise = Promise.resolve().then(function () {
-      return callToolPhase(agentId, callId, actor || found.toolCall.actor || 'user', 'run')
+      return invokeToolPhase(agentId, callId, actor || found.toolCall.actor || 'user', 'run', options)
     }).then(function (result) {
       if (resultFailed(result)) {
         traceTool(found, 'tool_run_completed', 'failed', errorMessage(result))
-        return updateToolCall(agentId, callId, { status: 'failed', result: result, error: errorMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'run', result) })
+        return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'failed', result: result, error: errorMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'run', result) })
       }
       traceTool(found, 'tool_run_completed', 'completed', found.toolCall.toolId)
-      return updateToolCall(agentId, callId, { status: 'completed', result: result, error: null })
+      return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'completed', result: result, error: null })
     }, function (err) {
       traceTool(found, 'tool_run_completed', 'failed', errorMessage(err))
-      return failToolCall(agentId, callId, found, err, 'run')
+      return failToolExecution(agentId, callId, found, err, 'run', execution.executionId, 'running')
     })
     return { toolCall: findToolCall(agentId, callId).toolCall, promise: promise }
   }
 
-  function applyToolCall(agentId, callId, actor) {
+  function applyToolCall(agentId, callId, actor, options) {
     const found = findToolCall(agentId, callId)
     const state = getToolCallActionState(agentId, callId, actor || (found && found.toolCall.actor) || 'user')
     if (!found || !state || !state.canApply) return null
-    updateToolCall(agentId, callId, { status: 'applying' })
+    const execution = beginToolExecution(agentId, callId, 'applying')
     traceTool(found, 'tool_apply_started', 'applying', found.toolCall.toolId)
     try {
-      const result = callToolPhase(agentId, callId, actor || found.toolCall.actor || 'user', 'apply')
+      const result = invokeToolPhase(agentId, callId, actor || found.toolCall.actor || 'user', 'apply', options)
       if (!isPromiseLike(result)) {
         traceTool(found, 'tool_apply_completed', applySucceeded(result) ? 'applied' : 'failed', applySucceeded(result) ? found.toolCall.toolId : applyFailureMessage(result))
-        return finishApplyToolCall(agentId, callId, found, result)
+        return applySucceeded(result)
+          ? settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'applied', applyResult: result, error: null })
+          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: result, error: applyFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', result) })
       }
       const promise = Promise.resolve(result).then(function (done) {
         traceTool(found, 'tool_apply_completed', applySucceeded(done) ? 'applied' : 'failed', applySucceeded(done) ? found.toolCall.toolId : applyFailureMessage(done))
-        return finishApplyToolCall(agentId, callId, found, done)
+        return applySucceeded(done)
+          ? settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'applied', applyResult: done, error: null })
+          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: done, error: applyFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', done) })
       }, function (err) {
         traceTool(found, 'tool_apply_completed', 'failed', errorMessage(err))
-        return failToolCall(agentId, callId, found, err, 'apply')
+        return failToolExecution(agentId, callId, found, err, 'apply', execution.executionId, 'applying')
       })
       return { toolCall: findToolCall(agentId, callId).toolCall, promise: promise }
     } catch (err) {
       traceTool(found, 'tool_apply_completed', 'failed', errorMessage(err))
-      return failToolCall(agentId, callId, found, err, 'apply')
+      return failToolExecution(agentId, callId, found, err, 'apply', execution.executionId, 'applying')
     }
+  }
+
+  function cancelRunToolCalls(agentId, runId, reason) {
+    const agent = ai.findAgent(agentId)
+    let cancelled = 0
+    ai.updateAgent(agentId, {
+      messages: agent.messages.map(function (message) {
+        if (!message.meta || message.meta.runId !== runId || !(message.toolCalls || []).length) return message
+        let changed = false
+        const calls = message.toolCalls.map(function (call) {
+          if (call.status === 'applied' || call.status === 'completed' || call.status === 'failed' || call.status === 'rejected') return call
+          changed = true
+          cancelled++
+          const error = reason || 'Tool call was cancelled'
+          return Object.assign({}, call, {
+            status: 'failed',
+            executionId: null,
+            error: error,
+            errorDetails: failureEnvelope(call.toolId, 'run', { code: 'TOOL_CANCELLED', message: error }),
+            updatedAt: Date.now(),
+          })
+        })
+        return changed ? Object.assign({}, message, { toolCalls: calls }) : message
+      }),
+    })
+    return cancelled
   }
 
   function createRunContext(request, controller) {
@@ -453,7 +574,9 @@
   ai.runToolCall = runToolCall
   ai.applyToolCall = applyToolCall
   ai.getToolCallActionState = getToolCallActionState
-  ai.isToolAlwaysAllowed = isToolAlwaysAllowed
-  ai.setToolAlwaysAllowed = setToolAlwaysAllowed
+  ai.isToolCallGranted = isToolCallGranted
+  ai.setToolCallGranted = setToolCallGranted
+  ai.failToolCall = failToolCall
+  ai.cancelRunToolCalls = cancelRunToolCalls
   ai.createRunContext = createRunContext
 })(window.aiditor = window.aiditor || {})

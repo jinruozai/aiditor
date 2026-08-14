@@ -25,19 +25,63 @@
     return refs
   }
 
-  function resolveAttachments(refs, baseCtx) {
-    const out = []
+  function abortError() {
+    const error = new Error('Reference hydration was cancelled')
+    error.code = 'REFERENCE_HYDRATION_CANCELLED'
+    return error
+  }
+
+  function withAbort(value, signal) {
+    if (!signal) return Promise.resolve(value)
+    if (signal.aborted) return Promise.reject(abortError())
+    return new Promise(function (resolve, reject) {
+      function finish(fn, result) {
+        signal.removeEventListener('abort', onAbort)
+        fn(result)
+      }
+      function onAbort() { finish(reject, abortError()) }
+      signal.addEventListener('abort', onAbort, { once: true })
+      Promise.resolve(value).then(function (result) { finish(resolve, result) }, function (error) { finish(reject, error) })
+    })
+  }
+
+  function resolveAttachments(refs, baseCtx, signal) {
     const store = ai.attachments
     const all = store ? store.peek() : []
-    for (let i = 0; i < refs.length; i++) {
-      const ref = resolveAttachmentRef(refs[i], all)
-      if (ai.references && ai.references.read) {
-        out.push(ai.references.read(ref, {}, baseCtx))
-        continue
+    const jobs = refs.map(function (item) {
+      if (signal && signal.aborted) return Promise.reject(abortError())
+      const ref = resolveAttachmentRef(item, all)
+      const targets = ai.references && ai.references.permissionTargets
+        ? ai.references.permissionTargets(ref, baseCtx)
+        : [{ entry: 'reference:' + (ref.resolver || ref.kind || 'attachment'), target: ref.uri || ref.id || '', risk: 'read' }]
+      const details = targets.map(function (target) {
+        return Object.assign({
+          phase: 'read',
+          workspace: baseCtx.workspaceMeta && (baseCtx.workspaceMeta.id || baseCtx.workspaceMeta.name) || '',
+          risk: 'read',
+          runId: baseCtx.runId,
+          traceId: baseCtx.runId,
+        }, target || {})
+      })
+      const decision = ai.permissions.decideMany(baseCtx.actor, baseCtx.agent.id, 'reference.read', details)
+      if (!decision.allowed) {
+        return Promise.resolve({
+          ok: false,
+          code: decision.decision === 'unavailable' ? 'REFERENCE_UNAVAILABLE' : 'REFERENCE_READ_DENIED',
+          error: decision.reason,
+        })
       }
-      out.push(ref)
-    }
-    return out
+      if (!ai.references || !ai.references.read) return Promise.resolve(ref)
+      const ctx = Object.assign({}, baseCtx, { signal: signal || null })
+      return withAbort(ai.references.read(ref, {}, ctx), signal).catch(function (error) {
+        if (signal && signal.aborted) throw abortError()
+        return { ok: false, code: 'REFERENCE_READ_FAILED', error: String(error && error.message || error) }
+      })
+    })
+    return Promise.all(jobs).then(function (out) {
+      if (signal && signal.aborted) throw abortError()
+      return out
+    })
   }
 
   function describeAttachments(refs, ctx) {
@@ -585,7 +629,7 @@
       'skills',
       'skill-catalog',
       75,
-      'Available Skills for this runtime. Active Skills provide the current instructions and Tools. When a required capability is inactive, call skill.activate with its id; the next continuation will expose it. Unavailable Skills state the missing host capability.\n' + compactJson(items, 6000),
+      'Available Skills for this runtime. Active Skills provide the current instructions and Tools. When a required capability is inactive, call skill.activate with its id; the next continuation will expose it. Model-selected activation lasts for the current run only and must be repeated in a new request unless the Skill is configured in agent.skillRefs. Unavailable Skills state the missing host capability.\n' + compactJson(items, 6000),
       7000
     )
   }
@@ -674,7 +718,7 @@
     if (!quest && !(requestCtx && requestCtx.turn) && !queue.length) return null
     return contextCardMessage('task', 'task', 70, [
       'Current task state.',
-      'permissionMode: ' + (agent.permissionMode || 'default'),
+      'permissionMode: ' + (agent.permissionMode || 'auto'),
       'turn: ' + (requestCtx && requestCtx.turn || 0),
       'inputMessageId: ' + (input && input.id || ''),
       quest ? 'questId: ' + quest.id : '',
@@ -730,7 +774,7 @@
     return prefix.concat(budgetMessages(agent, prefix, messages, input))
   }
 
-  function makeRequest(agent, input, runId, actor, turn) {
+  function planRequest(agent, input, runId, actor, turn) {
     const who = actor || 'user'
     const baseCtx = {
       ai: ai,
@@ -752,7 +796,6 @@
     baseCtx.canManage = function (targetId) { return ai.canManage ? ai.canManage(who, targetId) : false }
     const allowedAttachments = ai.canRead(who, agent.id, 'attachments.read')
     const contextRefs = effectiveContextRefs(agent, input)
-    const resolvedAttachments = allowedAttachments ? resolveAttachments(contextRefs, baseCtx) : []
     const attachmentRefs = allowedAttachments ? describeAttachments(contextRefs, baseCtx) : []
     const connectionName = agent.connection || ai.defaultConnection || 'mock'
     const connectionCapabilities = ai.connectionCapabilities ? ai.connectionCapabilities(connectionName) : {}
@@ -782,7 +825,7 @@
       ? ai.toolArguments.prepareSpecs(resolveTools(baseCtx, tools), connectionCapabilities)
       : resolveTools(baseCtx, tools)
     baseCtx.modelToolIds = toolSpecs.map(function (tool) { return tool.id })
-    const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
+    const messages = requestMessages(agent, input, attachmentRefs, [], baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
       for (let i = 0; i < skillActivations.length; i++) {
@@ -828,7 +871,7 @@
         },
       })
     }
-    return {
+    const request = {
       runId: runId,
       agent: agent,
       actor: who,
@@ -841,8 +884,8 @@
       contextPack: contextPack,
       contextRefs: contextRefs.slice(),
       attachmentRefs: attachmentRefs,
-      attachments: resolvedAttachments,
-      resolvedAttachments: resolvedAttachments,
+      attachments: [],
+      resolvedAttachments: [],
       runtimeContext: baseCtx.runtimeContext,
       tools: tools,
       toolSpecs: toolSpecs,
@@ -857,7 +900,44 @@
       turn: turn || 0,
       time: Date.now(),
     }
+    Object.defineProperty(request, '_assembly', {
+      value: { baseCtx: baseCtx, contextRefs: allowedAttachments ? contextRefs.slice() : [], attachmentRefs: attachmentRefs.slice(), toolIds: tools.slice() },
+      enumerable: false,
+    })
+    return request
   }
 
-  ai.makeRequest = makeRequest
+  function resolveRequest(request, signal) {
+    if (request.hydrated || !request._assembly) return Promise.resolve(request)
+    const assembly = request._assembly
+    return resolveAttachments(assembly.contextRefs, assembly.baseCtx, signal).then(function (resolvedAttachments) {
+      const messages = requestMessages(request.agent, request.input, assembly.attachmentRefs, resolvedAttachments, assembly.baseCtx, assembly.toolIds)
+      const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
+      const resolved = Object.assign({}, request, {
+        messages: messages,
+        contextPack: contextPack,
+        attachments: resolvedAttachments,
+        resolvedAttachments: resolvedAttachments,
+        hydrated: true,
+      })
+      if (ai.trace && ai.trace.append) {
+        ai.trace.append({
+          type: 'request_resolved',
+          runId: request.runId,
+          traceId: request.runId,
+          agentId: request.agent.id,
+          messageId: request.input && request.input.id || null,
+          questId: request.input && request.input.questId || null,
+          phase: 'request',
+          status: 'done',
+          summary: 'provider request references hydrated',
+          meta: { attachmentCount: resolvedAttachments.length },
+        })
+      }
+      return resolved
+    })
+  }
+
+  ai.planRequest = planRequest
+  ai.resolveRequest = resolveRequest
 })(window.aiditor = window.aiditor || {})

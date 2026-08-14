@@ -54,6 +54,25 @@
     return (hash >>> 0).toString(36)
   }
 
+  function collisionToolName(id) {
+    const suffix = '__' + hashText(id)
+    return toolNameBase(id).slice(0, 64 - suffix.length) + suffix
+  }
+
+  function providerToolAliasCandidates(name, ids) {
+    const value = String(name || '')
+    const out = []
+    const seen = {}
+    for (let i = 0; i < (ids || []).length; i++) {
+      const id = String(ids[i] || '')
+      if (!id || seen[id]) continue
+      if (value !== toolNameBase(id) && value !== collisionToolName(id)) continue
+      seen[id] = true
+      out.push(id)
+    }
+    return out
+  }
+
   function toolAliasMap(request) {
     const specs = request && request.toolSpecs || []
     const byId = {}
@@ -63,8 +82,7 @@
       let name = toolNameBase(id)
       if (!name) throw new Error('Tool id cannot produce a provider alias')
       if (byName[name] && byName[name] !== id) {
-        const suffix = '__' + hashText(id)
-        name = name.slice(0, 64 - suffix.length) + suffix
+        name = collisionToolName(id)
       }
       if (byName[name] && byName[name] !== id) throw new Error('Provider tool alias collision: ' + id + ' and ' + byName[name])
       byId[id] = name
@@ -639,6 +657,7 @@
     prepareSpecs: prepareToolSpecs,
   }
   ai.toolAliasMap = toolAliasMap
+  ai.providerToolAliasCandidates = providerToolAliasCandidates
   ai.openAiTools = openAiTools
   ai.openAiMessages = openAiMessages
   ai.normalizeOpenAiToolCalls = normalizeOpenAiToolCalls

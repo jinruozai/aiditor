@@ -269,13 +269,13 @@
   }
 
   function canApplyChangeSet(set, target, actor) {
-    if (!ai.canUseChangeSet) return true
-    return ai.canUseChangeSet(actor || 'user', permissionTarget(set, actor), set.id, 'apply', {
+    return ai.permissions.decide(actor || 'user', permissionTarget(set, actor), 'changeset.apply', {
+      entry: set.id,
       changeSetId: set.id,
       phase: 'apply',
       target: target,
       risk: 'write',
-    })
+    }).allowed === true
   }
 
   function apply(idOrSet, scope, actor) {

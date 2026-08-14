@@ -48,6 +48,17 @@ assert.throws(function () { ai.skills.unregister('test.review', { owner: 'other'
 assert.deepEqual(aiditor.runtime.unloadOwner('test:review').skills, ['test.review'])
 assert.equal(ai.skills.get('test.review'), undefined)
 
+ai.skills.register('test.user-only', { title: 'User Only', modelInvocable: false }, { owner: 'test:catalog' })
+ai.skills.register('test.model-only', { title: 'Model Only', userInvocable: false }, { owner: 'test:catalog' })
+const userCatalog = ai.skills.catalog({}, { audience: 'user', limit: 100 })
+const modelCatalog = ai.skills.catalog({}, { audience: 'model', limit: 100 })
+assert.equal(userCatalog.some(function (item) { return item.id === 'test.user-only' }), true)
+assert.equal(userCatalog.some(function (item) { return item.id === 'test.model-only' }), false)
+assert.equal(modelCatalog.some(function (item) { return item.id === 'test.user-only' }), false)
+assert.equal(modelCatalog.some(function (item) { return item.id === 'test.model-only' }), true)
+assert.equal(Array.isArray(userCatalog[0].tools), true)
+aiditor.runtime.unloadOwner('test:catalog')
+
 ai.skills.register('inline.resource', {
   resources: [{ path: 'references/info.md', kind: 'reference' }],
 }, { owner: 'test:inline' })

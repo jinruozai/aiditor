@@ -72,13 +72,24 @@ There are three explicit activation sources:
 
 Every tool-capable request also exposes two system controls:
 
-- `skill.list({ query?, limit? })`: bounded current Skill catalog.
+- `skill.list({ query?, limit? })`: bounded current Skill catalog. Every entry
+  distinguishes host capability `available` from current-run `active`, reports
+  whether it is profile `configured`, and exposes `lifetime: "run" | "agent"`.
 - `skill.activate({ id })`: activate one available model-invocable Skill for
   the current run.
 
 Activation is run-scoped. It survives Tool continuations and approval waits,
 then is released on completion, failure, or cancellation. It never mutates the
 Agent profile or leaks into the next user task.
+
+If a provider calls a registered Tool that belongs to an available but inactive
+Skill, Runtime returns a structured `SKILL_ACTIVATION_REQUIRED` Tool result with
+the canonical `toolId`, original `providerName`, candidate `skillIds`,
+`lifetime: "run"`, and a recovery hint. This is distinct from an unknown Tool
+or a Tool unavailable for another runtime reason. A Skill that must remain
+active across requests belongs in the Agent profile `skillRefs`; that
+configuration is part of the persisted Agent snapshot and may be changed only
+by its user, host, or parent Agent—not by the Agent itself.
 
 Request Tool ids are exactly:
 

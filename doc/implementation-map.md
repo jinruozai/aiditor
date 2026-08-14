@@ -66,9 +66,11 @@ preserved or deliberately replaced.
 | Source | Document | Notes |
 | --- | --- | --- |
 | `src/ai/name-generator.js` | [ai-runtime.md](./ai-runtime.md) | Agent name generation. |
+| `src/ai/i18n.js` | [ai-runtime.md](./ai-runtime.md) | Built-in AI Host UI dictionaries; Core i18n and the host own locale selection. |
 | `src/ai/schema.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | Shared JSON-schema normalization, concrete tagged-union diagnostics, strict Tool wire-schema compilation, and structured-output parsing. |
 | `src/ai/serialize.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | JSON-safe cloning plus canonical summaries and stable hashes for bounded AI diagnostics. |
 | `src/ai/permission.js` | [ai-permission-policy.md](./ai-permission-policy.md), [ai-runtime.md](./ai-runtime.md) | Permission resolver, default hierarchy policy, path rules, and audit log. |
+| `src/ai/tool/scheduler.js` | [ai-runtime.md](./ai-runtime.md) | Ordered Tool parallel groups, exclusive barriers, execution deadline, and cooperative cancellation. |
 | `src/ai/store.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Complete in-memory Agent/message/quest state, JSON-safe snapshots, mutation version, attachments, and permission-scoped read facades. |
 | `src/ai/persistence.js` | [ai-persistence.md](./ai-persistence.md) | Complete IndexedDB transcript persistence, bootstrap manifest, async hydration merge, serialized saves, and storage adapters. |
 | `src/ai/compaction.js` | [ai-context-compaction.md](./ai-context-compaction.md), [ai-runtime.md](./ai-runtime.md) | Semantic compaction records, safe range planning, request filtering, and compaction context messages. |

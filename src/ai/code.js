@@ -228,6 +228,8 @@
       schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, maxSymbols: { type: 'number' }, maxCalls: { type: 'number' }, maxEvents: { type: 'number' } } },
       permissions: ['tool.call'],
       available: workspaceAvailable,
+      permissionTargets: function (args) { return { target: args.path, path: args.path, risk: 'read' } },
+      isConcurrencySafe: function () { return true },
       run: outline,
     }, { owner: owner, layer: 'builtin' })
     ai.tools.register('code.map', {
@@ -236,6 +238,8 @@
       schema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, maxFiles: { type: 'number' }, maxResults: { type: 'number' }, maxSymbols: { type: 'number' }, maxCalls: { type: 'number' }, maxEvents: { type: 'number' } } },
       permissions: ['tool.call'],
       available: workspaceAvailable,
+      permissionTargets: function (args) { return { target: args.path || '', path: args.path || '', risk: 'read' } },
+      isConcurrencySafe: function () { return true },
       run: map,
     }, { owner: owner, layer: 'builtin' })
   }

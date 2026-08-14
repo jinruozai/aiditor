@@ -146,6 +146,31 @@
     return r
   }
 
+  function referencePermissionTargets(ref, ctx) {
+    const r = normalizeReference(ref)
+    const provider = providerFor(r)
+    const meta = r && referenceProviderMeta[r.resolver] || {}
+    if (provider && provider.permissionTargets) {
+      const projected = aiditor.safeCall
+        ? aiditor.safeCall({ scope: 'ai.reference', resolver: r.resolver, method: 'permissionTargets' }, function () { return provider.permissionTargets(r, withRefContext(ctx)) })
+        : provider.permissionTargets(r, withRefContext(ctx))
+      if (projected == null) return [{
+        entry: 'reference:' + r.resolver,
+        target: r.uri,
+        origin: meta.owner || meta.layer || 'builtin',
+        risk: 'read',
+        unavailable: true,
+      }]
+      return Array.isArray(projected) ? projected : [projected]
+    }
+    return [{
+      entry: 'reference:' + r.resolver,
+      target: r.uri,
+      origin: meta.owner || meta.layer || 'builtin',
+      risk: 'read',
+    }]
+  }
+
   function referenceSchema(ref, ctx) {
     const r = normalizeReference(ref)
     if (!r) return null
@@ -207,6 +232,8 @@
       throw new Error('ai.operations.register: model-visible operation requires preview for "' + name + '"')
     if (normalized.exposeToModel === true && typeof normalized.apply !== 'function')
       throw new Error('ai.operations.register: model-visible operation requires apply for "' + name + '"')
+    if (normalized.permissionTargets != null && typeof normalized.permissionTargets !== 'function')
+      throw new Error('ai.operations.register: permissionTargets must be a function for "' + name + '"')
     operations[name] = normalized
     operationMeta[name] = normalizedMeta
     return operations[name]
@@ -244,6 +271,34 @@
     if (!spec) return 'edit'
     if (typeof spec.risk === 'function') return spec.risk(input === undefined ? {} : input, withOperationContext(op, ctx))
     return spec.risk || 'edit'
+  }
+
+  function permissionRisk(value) {
+    if (value === 'destructive' || value === 'delete') return 'delete'
+    if (value === 'external' || value === 'network') return 'network'
+    if (value === 'execute' || value === 'install') return value
+    return value === 'read' ? 'read' : 'write'
+  }
+
+  function operationPermissionTargets(op, input, ctx, phase) {
+    const spec = getOperation(op)
+    const meta = operationMeta[op] || {}
+    const base = {
+      entry: op,
+      target: op,
+      origin: meta.owner || meta.layer || 'builtin',
+      risk: phase === 'apply' ? permissionRisk(operationRisk(op, input, ctx)) : 'read',
+    }
+    if (!spec || !spec.permissionTargets) return [base]
+    const projected = aiditor.safeCall
+      ? aiditor.safeCall({ scope: 'ai.operation', operation: op, method: 'permissionTargets' }, function () { return spec.permissionTargets(input || {}, withOperationContext(op, ctx), phase) })
+      : spec.permissionTargets(input || {}, withOperationContext(op, ctx), phase)
+    if (projected == null) return [Object.assign({}, base, { unavailable: true })]
+    const values = Array.isArray(projected) ? projected : [projected]
+    return values.map(function (value) {
+      if (typeof value === 'string') return Object.assign({}, base, { target: value })
+      return Object.assign({}, base, value || {})
+    })
   }
 
   function makePreviewId() {
@@ -445,12 +500,6 @@
     return transactionDriver
   }
 
-  function canUseOperation(actor, agentId, op, phase, details) {
-    if (ai.canUseOperation) return ai.canUseOperation(actor, agentId, op, phase, details || {})
-    if (ai.canUseTool) return ai.canUseTool(actor, agentId, 'aiditor.' + (phase === 'apply' ? 'applyOperation' : 'previewOperation'), phase === 'apply' ? 'apply' : 'call')
-    return true
-  }
-
   function registerEditorTools() {
     ai.tools.register('aiditor.readReference', {
       title: 'Read Editor Reference',
@@ -468,6 +517,8 @@
       run: function (args, ctx) {
         return readReference(args, args, ctx)
       },
+      permissionTargets: function (args, ctx) { return referencePermissionTargets(args, ctx) },
+      isConcurrencySafe: function () { return true },
     }, TOOL_META)
     ai.tools.register('aiditor.searchReferences', {
       title: 'Search Editor References',
@@ -483,6 +534,10 @@
       run: function (args, ctx) {
         return searchReferences(args || {}, ctx)
       },
+      permissionTargets: function (args) {
+        return { target: 'references:' + (args && args.kind || '*'), risk: 'read' }
+      },
+      isConcurrencySafe: function () { return true },
     }, TOOL_META)
     ai.tools.register('aiditor.getSelection', {
       title: 'Get Editor Selection',
@@ -491,6 +546,8 @@
       run: function (args, ctx) {
         return selectedReferences(ctx)
       },
+      permissionTargets: function () { return { target: 'selection', risk: 'read' } },
+      isConcurrencySafe: function () { return true },
     }, TOOL_META)
     ai.tools.register('aiditor.getCapabilities', {
       title: 'Get Reference Capabilities',
@@ -511,6 +568,8 @@
           capabilities: referenceCapabilities(ref, ctx),
         }
       },
+      permissionTargets: function (args, ctx) { return referencePermissionTargets(args, ctx) },
+      isConcurrencySafe: function () { return true },
     }, TOOL_META)
     ai.tools.register('aiditor.previewOperation', {
       title: 'Preview Editor Operation',
@@ -520,13 +579,12 @@
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
       resolveModelSpecs: function () { return [] },
       available: function (ctx) { return modelOperationNames(ctx).length > 0 },
+      permissionTargets: function (args, ctx, phase) {
+        return operationPermissionTargets(args && args.op, args && args.input, ctx, phase)
+      },
       run: function (args, ctx) {
         const unavailable = unavailableOperationResult(args, ctx)
         if (unavailable) return unavailable
-        const op = args.op
-        if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'preview', { input: args && args.input })) {
-          return operationGatewayError('OPERATION_PREVIEW_DENIED', 'Operation preview not allowed: ' + op, op, ctx)
-        }
         return previewOperation(args, null, ctx)
       },
     }, TOOL_META)
@@ -537,6 +595,10 @@
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
       resolveModelSpecs: function (ctx) { return operationModelSpecs(ctx) },
+      permissionTargets: function (args, ctx, phase) {
+        const preview = args && args.previewId && previews[args.previewId]
+        return operationPermissionTargets(preview && preview.op || args && args.op, preview && preview.input || args && args.input, ctx, phase)
+      },
       preview: function (args, ctx) {
         if (args && args.previewId && previews[args.previewId]) {
           const resolved = previews[args.previewId]
@@ -550,10 +612,6 @@
         }
         const unavailable = unavailableOperationResult(args, ctx)
         if (unavailable) return unavailable
-        const op = args.op
-        if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'preview', { input: args && args.input })) {
-          return operationGatewayError('OPERATION_PREVIEW_DENIED', 'Operation preview not allowed: ' + op, op, ctx)
-        }
         return previewOperation(args, null, ctx)
       },
       apply: function (preview, ctx) {
@@ -561,9 +619,6 @@
         const op = preview && (preview.op || preview.operation)
         if (!operationVisibleToModel(op, ctx)) {
           return Object.assign({ applied: false, preview: preview }, operationGatewayError('OPERATION_NOT_AVAILABLE', 'Operation is not available in the current request context: ' + op, op, ctx))
-        }
-        if (!canUseOperation(ctx && ctx.actor || 'user', ctx && ctx.agent && ctx.agent.id, op, 'apply', { preview: preview, risk: preview && preview.risk })) {
-          return { applied: false, ok: false, error: 'Operation apply not allowed: ' + op, preview: preview }
         }
         return applyOperation(preview, ctx)
       },
@@ -591,6 +646,7 @@
     normalizeAll: normalizeReferences,
     describe: describeReference,
     read: readReference,
+    permissionTargets: referencePermissionTargets,
     schema: referenceSchema,
     capabilities: referenceCapabilities,
     snapshot: snapshotReference,
@@ -615,6 +671,7 @@
     },
     meta: function (name) { return clone(operationMeta[name] || {}) },
     risk: operationRisk,
+    permissionTargets: operationPermissionTargets,
     preview: previewOperation,
     apply: applyOperation,
     getPreview: function (id) { return previews[id] || null },

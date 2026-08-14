@@ -49,6 +49,7 @@ const JS_ORDER = [
 
   // Layer 2.5 - AI session/agent runtime (no UI dependency)
   'ai/name-generator.js',
+  'ai/i18n.js',
   'ai/serialize.js',
   'ai/schema.js',
   'ai/trace.js',
@@ -66,6 +67,7 @@ const JS_ORDER = [
   'ai/provider-connections.js',
   'ai/contribution-registry.js',
   'ai/tool/registry.js',
+  'ai/tool/scheduler.js',
   'ai/context/registry.js',
   'ai/skill/registry.js',
   'ai/tool/runtime.js',

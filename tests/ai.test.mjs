@@ -4,6 +4,8 @@ import vm from 'node:vm'
 
 global.window = { aiditor: {} }
 vm.runInThisContext(readFileSync('src/core/signal.js', 'utf8'), { filename: 'signal.js' })
+vm.runInThisContext(readFileSync('src/core/i18n.js', 'utf8'), { filename: 'i18n.js' })
+vm.runInThisContext(readFileSync('src/ai/i18n.js', 'utf8'), { filename: 'ai/i18n.js' })
 vm.runInThisContext(readFileSync('src/core/log.js', 'utf8'), { filename: 'log.js' })
 vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'names.js' })
 vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
@@ -17,6 +19,7 @@ vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { fil
 vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
 vm.runInThisContext(readFileSync('src/ai/change-set.js', 'utf8'), { filename: 'ai/change-set.js' })
@@ -255,22 +258,22 @@ function assertPermissionContract(agentId) {
   assert.equal(runCtx.canManage(agentId), false)
   assert.equal(runCtx.canRead(managed.id, 'agent.full'), true)
 
-  if (typeof ai.setPermissionResolver === 'function') {
-    const calls = []
-    ai.setPermissionResolver(function (ctx, next) {
-      calls.push(ctx)
-      if (ctx.actor === 'blocked') return false
-      return next(ctx)
-    })
-    assert.equal(ai.canRead('blocked', agentId, 'agent.full'), false)
-    assert.equal(calls.length > 0, true)
-  }
+  const calls = []
+  ai.permissions.setResolver(function (ctx, next) {
+    calls.push(ctx)
+    if (ctx.actor === 'blocked') return false
+    return next(ctx)
+  })
+  assert.equal(ai.canRead('blocked', agentId, 'agent.full'), false)
+  assert.equal(calls.length > 0, true)
+  ai.permissions.setResolver(null)
 
   ai.deleteAgent(sibling.id)
   return managed
 }
 
 async function assertChangeSetPermission(parentId, childId) {
+  ai.updateAgent(childId, { permissionMode: 'full' })
   let applyCount = 0
   aiditor.changeSet.registerAdapter('permission.patch', {
     apply: function () {
@@ -555,6 +558,11 @@ function elementsWithClass(el, className, out) {
   return out
 }
 
+function clickElement(el) {
+  const listeners = el && el.events && el.events.click || []
+  for (let i = 0; i < listeners.length; i++) listeners[i]({ currentTarget: el, stopPropagation: function () {} })
+}
+
 async function assertGdePatchPreviewRendering() {
   const components = {}
   global.document = {
@@ -579,9 +587,21 @@ async function assertGdePatchPreviewRendering() {
     },
     dispose: function (el) { if (el && el.remove) el.remove() },
     collect: function () {},
-    button: function (opts) { return this.h('button', 'aiditor-ui-btn', { text: opts.text || '' }) },
+    bindText: function (el, value) { el.textContent = String(this.isSignal(value) ? value() : (value || '')) },
+    button: function (opts) {
+      const text = this.isSignal(opts.text) ? opts.text() : (opts.text || '')
+      const el = this.h('button', 'aiditor-ui-btn', { text: text })
+      if (opts.onClick) el.addEventListener('click', opts.onClick)
+      return el
+    },
     stateButton: function () { return this.h('button', 'aiditor-ui-state-btn') },
-    'switch': function (opts) { return this.h('label', 'aiditor-ui-switch', { text: opts.label || '' }) },
+    'switch': function (opts) {
+      const label = this.isSignal(opts.label) ? opts.label() : (opts.label || '')
+      const el = this.h('label', 'aiditor-ui-switch', { text: label })
+      el.__change = opts.onChange || function () {}
+      return el
+    },
+    tooltip: function (el) { return el },
     copyButton: function (opts) {
       const el = this.h('button', 'aiditor-ui-copy-btn', { text: 'Copy' })
       const text = opts && opts.text
@@ -846,6 +866,59 @@ async function assertGdePatchPreviewRendering() {
   assert.match(measuredText, /220 tok/)
   assert.match(measuredText, /37\.5 tok\/s/)
   assert.match(measuredText, /\$0\.006/)
+
+  ai.tools.register('test.remember-approval', {
+    title: 'Remember approval',
+    schema: { type: 'object', properties: {} },
+    permissions: ['tool.call', 'tool.apply'],
+    preview: function () { return { ok: true } },
+    apply: function () { return { applied: true } },
+  }, { owner: 'test:transcript-actions' })
+  const rememberAgent = ai.createAgent({ name: 'Remember Approval', permissionMode: 'auto' })
+  const rememberCall = ai.createToolCall(rememberAgent.id, { toolId: 'test.remember-approval', args: {} }, rememberAgent.id)
+  ai.activeAgentId.set(rememberAgent.id)
+  const rememberRoot = components['ai-messages'].factory(null, {})
+  const rememberSwitch = rememberRoot.querySelector('.aiditor-ui-switch')
+  assert.equal(collectText(rememberSwitch).trim(), 'Remember')
+  rememberSwitch.__change(true)
+  assert.equal(ai.isToolCallGranted(rememberAgent.id, rememberCall.id), false)
+  const rememberButtons = elementsWithClass(rememberRoot, 'aiditor-ui-btn')
+  const applyButton = rememberButtons.find(function (button) { return collectText(button).trim() === 'Apply' })
+  clickElement(applyButton)
+  assert.equal(ai.findToolCall(rememberAgent.id, rememberCall.id).toolCall.status, 'applied')
+  assert.equal(ai.isToolCallGranted(rememberAgent.id, rememberCall.id), true)
+
+  ai.tools.register('test.reject-remember', {
+    title: 'Reject remembered approval',
+    schema: { type: 'object', properties: {} },
+    permissions: ['tool.call', 'tool.apply'],
+    preview: function () { return { ok: true } },
+    apply: function () { return { applied: true } },
+  }, { owner: 'test:transcript-actions' })
+  const rejectAgent = ai.createAgent({ name: 'Reject Remember', permissionMode: 'auto' })
+  const rejectCall = ai.createToolCall(rejectAgent.id, { toolId: 'test.reject-remember', args: {} }, rejectAgent.id)
+  ai.activeAgentId.set(rejectAgent.id)
+  const rejectRoot = components['ai-messages'].factory(null, {})
+  const rejectSwitch = rejectRoot.querySelector('.aiditor-ui-switch')
+  rejectSwitch.__change(true)
+  const rejectButton = elementsWithClass(rejectRoot, 'aiditor-ui-btn').find(function (button) { return collectText(button).trim() === 'Reject' })
+  clickElement(rejectButton)
+  assert.equal(ai.findToolCall(rejectAgent.id, rejectCall.id).toolCall.status, 'rejected')
+  assert.equal(ai.isToolCallGranted(rejectAgent.id, rejectCall.id), false)
+
+  const batchAgent = ai.createAgent({ name: 'Batch Approval', permissionMode: 'auto' })
+  const batchMessage = ai.appendMessage(batchAgent.id, { role: 'assistant', content: '', toolCalls: [] })
+  const batchCalls = ai.attachToolCalls(batchAgent.id, batchMessage.id, [
+    { toolId: 'test.remember-approval', args: {} },
+    { toolId: 'test.reject-remember', args: {} },
+  ], batchAgent.id)
+  ai.activeAgentId.set(batchAgent.id)
+  const batchRoot = components['ai-messages'].factory(null, {})
+  assert.match(collectText(batchRoot.querySelector('.aiditor-ai-tool-batch-count')), /2 pending actions/)
+  const applyAll = elementsWithClass(batchRoot, 'aiditor-ui-btn').find(function (button) { return collectText(button).trim() === 'Apply all' })
+  clickElement(applyAll)
+  await new Promise(function (resolve) { setTimeout(resolve, 0) })
+  assert.deepEqual(batchCalls.map(function (call) { return ai.findToolCall(batchAgent.id, call.id).toolCall.status }), ['applied', 'applied'])
 
   const emptyAgent = ai.createAgent({ name: 'Empty Transcript', messages: [] })
   ai.activeAgentId.set(emptyAgent.id)

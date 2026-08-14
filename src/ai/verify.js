@@ -4,8 +4,11 @@
 
   const ai = aiditor.ai = aiditor.ai || {}
   const OWNER = 'aiditor.ai.verify'
+  const version = aiditor.signal(0)
   let adapter = null
   let registered = false
+
+  function bump() { version.set(version.peek() + 1) }
 
   function configureVerify(next) {
     if (registered && ai.tools && ai.tools.unregisterOwner) {
@@ -14,6 +17,7 @@
     }
     adapter = next || null
     if (adapter) registerTools()
+    bump()
     return adapter
   }
 
@@ -44,6 +48,14 @@
       description: description,
       schema: schema || { type: 'object', properties: {} },
       permissions: ['tool.call'],
+      permissionTargets: function (args) {
+        return {
+          target: args && (args.path || args.check || (args.checks && args.checks.join(','))) || 'workspace',
+          path: args && args.path || null,
+          origin: 'host:verify',
+          risk: name === 'run' ? 'execute' : 'read',
+        }
+      },
       run: function (args) { return callAdapter(method, args) },
     }, { owner: OWNER, layer: 'builtin' })
     registered = true
@@ -74,4 +86,5 @@
 
   ai.configureVerify = configureVerify
   ai.currentVerify = currentVerify
+  ai.verifyVersion = function () { return version() }
 })(window.aiditor = window.aiditor || {})

@@ -101,7 +101,7 @@
       connection: agent.connection || null,
       model: agent.model || '',
       contextBudgetTokens: agent.contextBudgetTokens || null,
-      permissionMode: agent.permissionMode || 'full',
+      permissionMode: agent.permissionMode || 'auto',
       createdAt: agent.createdAt || null,
       updatedAt: agent.updatedAt || null,
     }

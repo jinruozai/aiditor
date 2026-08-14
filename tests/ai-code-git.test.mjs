@@ -18,6 +18,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/workdir.js',
   'src/ai/code.js',
@@ -71,6 +72,7 @@ assert.equal(rankedMap.files.some(function (file) { return file.path === 'src/ut
 assert.equal(rankedMap.totalMatches, 1)
 
 assert.equal(ai.tools.get('git.status'), undefined)
+const initialGitVersion = ai.gitVersion()
 ai.configureGit({
   status: function () { return { clean: false, files: ['src/app.js'] } },
   diff: function () { return { text: 'diff --git a/src/app.js b/src/app.js' } },
@@ -81,6 +83,7 @@ ai.configureGit({
   restoreFile: function (args) { return { restored: args.paths || [args.path] } },
   commit: function (args) { return { hash: 'def456', message: args.message } },
 })
+assert.equal(ai.gitVersion(), initialGitVersion + 1)
 
 assert.deepEqual(await ai.tools.get('git.status').run({}), { clean: false, files: ['src/app.js'] })
 assert.match((await ai.tools.get('git.diff').run({})).text, /diff --git/)
@@ -93,12 +96,12 @@ const commitCall = ai.createToolCall(agent.id, {
   args: { message: 'test commit', paths: ['src/app.js'] },
 }, 'user')
 assert.equal(ai.previewToolCall(agent.id, commitCall.id, 'user').status, 'previewed')
-ai.setPermissionResolver(function (perm, next) {
-  if (perm.toolId === 'git.commit' && perm.phase === 'apply') return false
+ai.permissions.setResolver(function (perm, next) {
+  if (perm.entry === 'git.commit' && perm.phase === 'apply') return false
   return next(perm)
 })
 assert.equal(ai.applyToolCall(agent.id, commitCall.id, 'user'), null)
-ai.setPermissionResolver(null)
+ai.permissions.setResolver(null)
 const applied = ai.applyToolCall(agent.id, commitCall.id, 'user')
 await applied.promise
 const finalCall = ai.findToolCall(agent.id, commitCall.id).toolCall
@@ -106,8 +109,10 @@ assert.equal(finalCall.status, 'applied')
 assert.equal(finalCall.applyResult.hash, 'def456')
 ai.configureGit(null)
 assert.equal(ai.tools.get('git.status'), undefined)
+assert.equal(ai.gitVersion(), initialGitVersion + 2)
 
 assert.equal(ai.tools.get('verify.run'), undefined)
+const initialVerifyVersion = ai.verifyVersion()
 ai.configureVerify({
   list: function () {
     return [{ id: 'check', title: 'Check' }]
@@ -124,11 +129,13 @@ ai.configureVerify({
     return [{ path: 'src/app.js', line: 1, message: 'sample diagnostic' }]
   },
 })
+assert.equal(ai.verifyVersion(), initialVerifyVersion + 1)
 
 assert.deepEqual(await ai.tools.get('verify.list').run({}), [{ id: 'check', title: 'Check' }])
 assert.equal((await ai.tools.get('verify.run').run({ check: 'check' })).ok, true)
 assert.equal((await ai.tools.get('verify.diagnostics').run({ path: 'src/app.js' }))[0].line, 1)
 ai.configureVerify(null)
 assert.equal(ai.tools.get('verify.run'), undefined)
+assert.equal(ai.verifyVersion(), initialVerifyVersion + 2)
 
 console.log('ai code/git/verify tests ok')

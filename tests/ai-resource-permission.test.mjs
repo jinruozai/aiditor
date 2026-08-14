@@ -17,6 +17,7 @@ vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { fil
 vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
 vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
@@ -55,7 +56,7 @@ const res = ai.addAttachment({
   meta: { id: 'one' },
 })
 ai.updateAgent(target.id, { contextRefs: [res.id] })
-ai.setPermissionResolver(function (ctx, next) {
+ai.permissions.setResolver(function (ctx, next) {
   if (ctx.scope === 'attachments.read') return false
   return next(ctx)
 })
@@ -70,7 +71,7 @@ assert.equal(requestSeen.messages.some(function (m) {
 }), false)
 assert.equal(deniedReferenceCalls, 0)
 
-ai.setPermissionResolver(null)
+ai.permissions.setResolver(null)
 let readCtx = null
 let schemaCtx = null
 let capabilitiesCtx = null
@@ -111,6 +112,41 @@ assert.equal(typeof readCtx.canRead, 'function')
 assert.equal(readCtx.canRead(visibleAgent.id, 'attachments.read'), true)
 assert.equal(requestSeen.attachmentRefs[0].schema.properties.text.type, 'string')
 assert.equal(requestSeen.attachmentRefs[0].capabilities[0].op, 'inspect.update')
+
+let asyncReads = 0
+let releaseAsyncRead
+ai.references.register('async-inspect', {
+  read: function (ref, options, ctx) {
+    asyncReads++
+    return new Promise(function (resolve) {
+      releaseAsyncRead = function () { resolve({ uri: ref.uri, text: 'hydrated', aborted: ctx.signal && ctx.signal.aborted }) }
+    })
+  },
+}, { owner: 'test:resource-permission' })
+const asyncAgent = ai.createAgent({ name: 'Async Reference' })
+const asyncRef = ai.addAttachment({ resolver: 'async-inspect', uri: 'async-inspect://one', kind: 'inspect.item' })
+ai.updateAgent(asyncAgent.id, { contextRefs: [asyncRef.id] })
+const asyncPlan = ai.planRequest(ai.findAgent(asyncAgent.id), null, 'async-reference-plan', 'user', 0)
+assert.deepEqual(asyncPlan.attachments, [])
+assert.equal(asyncReads, 0)
+const asyncResolvedPromise = ai.resolveRequest(asyncPlan)
+await Promise.resolve()
+assert.equal(asyncReads, 1)
+releaseAsyncRead()
+const asyncResolved = await asyncResolvedPromise
+assert.equal(asyncResolved.hydrated, true)
+assert.equal(asyncResolved.attachments[0].text, 'hydrated')
+assert.equal(asyncResolved.messages.some(function (message) { return String(message.content || '').indexOf('hydrated') >= 0 }), true)
+
+let releaseCancelledRead
+const cancelledPlan = ai.planRequest(ai.findAgent(asyncAgent.id), null, 'cancelled-reference-plan', 'user', 0)
+const hydrationController = new AbortController()
+const cancelledHydration = ai.resolveRequest(cancelledPlan, hydrationController.signal)
+await Promise.resolve()
+releaseCancelledRead = releaseAsyncRead
+hydrationController.abort()
+await assert.rejects(cancelledHydration, function (error) { return error.code === 'REFERENCE_HYDRATION_CANCELLED' })
+releaseCancelledRead()
 
 const imageAgent = ai.createAgent({
   name: 'Image Target',

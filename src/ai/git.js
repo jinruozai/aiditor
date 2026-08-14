@@ -4,8 +4,11 @@
 
   const ai = aiditor.ai = aiditor.ai || {}
   const OWNER = 'aiditor.ai.git'
+  const version = aiditor.signal(0)
   let adapter = null
   let registered = false
+
+  function bump() { version.set(version.peek() + 1) }
 
   function configureGit(next) {
     if (registered && ai.tools && ai.tools.unregisterOwner) {
@@ -14,6 +17,7 @@
     }
     adapter = next || null
     if (adapter) registerTools()
+    bump()
     return adapter
   }
 
@@ -59,12 +63,26 @@
     })
   }
 
+  function permissionTargets(name, args, phase) {
+    const paths = args && (args.paths || (args.path ? [args.path] : [])) || []
+    const targets = paths.length ? paths : ['repository']
+    return targets.map(function (target) {
+      return {
+        target: target,
+        path: target === 'repository' ? null : target,
+        origin: 'host:git',
+        risk: phase === 'apply' ? (name === 'restoreFile' ? 'delete' : 'write') : 'read',
+      }
+    })
+  }
+
   function registerReadTool(name, method, title, description, schema) {
     ai.tools.register('git.' + name, {
       title: title,
       description: description,
       schema: schema || { type: 'object', properties: {} },
       permissions: ['tool.call'],
+      permissionTargets: function (args, ctx, phase) { return permissionTargets(name, args, phase) },
       run: function (args) { return callAdapter(method, args) },
     }, { owner: OWNER, layer: 'builtin' })
   }
@@ -75,6 +93,7 @@
       description: description,
       schema: schema || { type: 'object', properties: {} },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: function (args, ctx, phase) { return permissionTargets(name, args, phase) },
       preview: function (args) { return previewGitChange(name, args) },
       apply: function (preview) { return applyGit(method, preview) },
       run: function (args) { return callAdapter(method, args) },
@@ -123,4 +142,5 @@
 
   ai.configureGit = configureGit
   ai.currentGit = currentGit
+  ai.gitVersion = function () { return version() }
 })(window.aiditor = window.aiditor || {})

@@ -22,6 +22,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/orchestration.js',
   'src/ai/request.js',
@@ -55,7 +56,7 @@ ai.registerTransport('quest-capture', {
 })
 ai.registerConnection('quest-capture', { auth: { type: 'none' }, transport: { type: 'quest-capture' }, configDefaults: {} })
 
-const parent = ai.createAgent({ name: 'Parent', connection: 'quest-capture' })
+const parent = ai.createAgent({ name: 'Parent', connection: 'quest-capture', permissionMode: 'full' })
 const child = ai.createAgent({ name: 'Child', parentAgentId: parent.id, connection: 'quest-capture' })
 
 replies.push('first result')
@@ -123,14 +124,22 @@ ai.registerTransport('quest-hold', {
 })
 ai.registerConnection('quest-hold', { auth: { type: 'none' }, transport: { type: 'quest-hold' }, configDefaults: {} })
 const queued = ai.createAgent({ name: 'Queued', parentAgentId: parent.id, connection: 'quest-hold' })
-const firstQueued = ai.message.send(queued.id, { content: 'hold' })
+const firstQueued = ai.message.send(queued.id, {
+  content: {
+    type: 'rich-prompt',
+    text: 'hold',
+    tokens: {},
+    renderedText: 'hold [asset]',
+  },
+})
 assert.equal(ai.findAgent(queued.id).status, 'running')
+assert.equal(ai.findAgent(queued.id).statusText, 'hold [asset]')
 const secondQueued = ai.message.send(queued.id, { content: 'after' })
 assert.equal(ai.message.read(queued.id, secondQueued.messageId, 'user').status, 'queued')
 assert.equal(ai.findAgent(queued.id).queue.length, 1)
 const finalQueued = ai.message.send(queued.id, { content: 'final queued task' })
 assert.equal(ai.findAgent(queued.id).queue.length, 2)
-const queuedRequest = ai.makeRequest(ai.findAgent(queued.id), ai.message.read(queued.id, firstQueued.messageId, 'user'), 'run_queued_context', queued.id, 1)
+const queuedRequest = ai.planRequest(ai.findAgent(queued.id), ai.message.read(queued.id, firstQueued.messageId, 'user'), 'run_queued_context', queued.id, 1)
 assert.equal(queuedRequest.messages.some(function (message) {
   return message.role === 'system' && message.content.includes('Queued user messages') && message.content.includes('final queued task')
 }), true)
@@ -241,6 +250,7 @@ const approvalMessage = ai.findAgent(approvalAgent.id).messages.find(function (m
   return message.toolCalls && message.toolCalls.length
 })
 const approvalCall = approvalMessage.toolCalls[0]
+assert.equal(approvalCall.actor, approvalAgent.id)
 assert.equal(ai.applyToolCall(approvalAgent.id, approvalCall.id, 'user').status, 'applied')
 const resumed = ai.resumeAgent(approvalAgent.id)
 await resumed.promise
@@ -488,7 +498,7 @@ for (let i = 0; i < 40; i++) {
   ai.appendMessage(budgetAgent.id, { role: 'user', content: 'old message ' + i + ' ' + 'x'.repeat(80) })
 }
 const budgetInput = ai.appendMessage(budgetAgent.id, { role: 'user', content: 'current message' })
-const budgetRequest = ai.makeRequest(ai.findAgent(budgetAgent.id), budgetInput, 'run_budget', budgetAgent.id, 0)
+const budgetRequest = ai.planRequest(ai.findAgent(budgetAgent.id), budgetInput, 'run_budget', budgetAgent.id, 0)
 assert.equal(budgetRequest.messages.some(function (message) { return message.id === budgetInput.id }), true)
 assert.equal(budgetRequest.messages.length < 42, true)
 assert.equal(budgetRequest.messages[0].role, 'system')
@@ -505,7 +515,7 @@ ai.appendMessage(hugeToolAgent.id, {
 })
 ai.appendMessage(hugeToolAgent.id, { role: 'tool', content: { applied: true, text: hugeSource }, meta: { toolCallId: 'call_huge' } })
 const hugeInput = ai.appendMessage(hugeToolAgent.id, { role: 'user', content: 'next' })
-const hugeRequest = ai.makeRequest(ai.findAgent(hugeToolAgent.id), hugeInput, 'run_huge', hugeToolAgent.id, 0)
+const hugeRequest = ai.planRequest(ai.findAgent(hugeToolAgent.id), hugeInput, 'run_huge', hugeToolAgent.id, 0)
 const hugeAssistant = hugeRequest.messages.find(function (message) { return message.toolCalls && message.toolCalls.length })
 assert.equal(hugeAssistant.toolCalls[0].args.text.omitted, true)
 assert.equal(hugeAssistant.toolCalls[0].args.text.originalLength, hugeSource.length)
@@ -549,6 +559,40 @@ await limitedRunB.promise
 assert.equal(limitedPeak, 1)
 ai.configureRuntime({ maxConcurrentAgents: 8 })
 
+let createBatchTurn = 0
+ai.registerTransport('batch-create-parent', {
+  toolProtocol: 'native',
+  send: function () {
+    createBatchTurn++
+    if (createBatchTurn > 1) return { role: 'assistant', content: 'created two children' }
+    return {
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        { toolId: 'agent.create', actor: 'user', args: { name: 'Created Batch A' } },
+        { toolId: 'agent.create', actor: 'user', args: { name: 'Created Batch B' } },
+      ],
+    }
+  },
+})
+ai.registerConnection('batch-create-parent', { auth: { type: 'none' }, transport: { type: 'batch-create-parent' }, configDefaults: {} })
+const createBatchParent = ai.createAgent({
+  name: 'Create Batch Parent',
+  parentAgentId: parent.id,
+  connection: 'batch-create-parent',
+  permissionMode: 'full',
+  skillRefs: skillRefs(['agent.create']),
+})
+const createBatchRun = ai.message.send(createBatchParent.id, { content: 'create two agents' })
+await createBatchRun.promise
+const createBatchMessage = ai.findAgent(createBatchParent.id).messages.find(function (message) {
+  return message.toolCalls && message.toolCalls.length === 2
+})
+assert.deepEqual(createBatchMessage.toolCalls.map(function (call) { return call.actor }), [createBatchParent.id, createBatchParent.id])
+assert.deepEqual(ai.agents.peek().filter(function (agent) {
+  return agent.parentAgentId === createBatchParent.id
+}).map(function (agent) { return agent.name }).sort(), ['Created Batch A', 'Created Batch B'])
+
 let releaseBatchA
 let releaseBatchB
 const batchA = new Promise(function (resolve) { releaseBatchA = resolve })
@@ -581,12 +625,12 @@ ai.registerTransport('batch-parent', {
   },
 })
 ai.registerConnection('batch-parent', { auth: { type: 'none' }, transport: { type: 'batch-parent' }, configDefaults: {} })
-const batchParent = ai.createAgent({ name: 'Batch Parent', parentAgentId: parent.id, connection: 'batch-parent', skillRefs: skillRefs(['agent.delegate', 'quest.result']) })
+const batchParent = ai.createAgent({ name: 'Batch Parent', parentAgentId: parent.id, connection: 'batch-parent', permissionMode: 'full', skillRefs: skillRefs(['agent.delegate', 'quest.result']) })
 const batchChildA = ai.createAgent({ name: 'Batch A', parentAgentId: batchParent.id, connection: 'batch-child' })
 const batchChildB = ai.createAgent({ name: 'Batch B', parentAgentId: batchParent.id, connection: 'batch-child' })
 const batchRun = ai.message.send(batchParent.id, { content: 'delegate two and do local work' })
 await batchRun.promise
-await flush(3)
+await flush(8)
 const batchParentMessages = ai.findAgent(batchParent.id).messages
 const batchResponseId = batchRun.message.meta.responseId
 assert.equal(batchResponseId, batchRun.message.id)

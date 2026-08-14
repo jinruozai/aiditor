@@ -25,6 +25,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/orchestration.js',
   'src/ai/request.js',
@@ -62,6 +63,7 @@ ai.context.register('selection.test', function () {
 const agent = ai.createAgent({
   name: 'Root Agent',
   connection: 'agent-primitives',
+  permissionMode: 'full',
   skillRefs: skillRefs(['trace-edit']),
 })
 const child = ai.createAgent({
@@ -88,7 +90,7 @@ assert.equal(ai.quest.read(child.id, quest.id, agent.id).plan[0].status, 'comple
 assert.equal(ai.quest.read(child.id, quest.id, agent.id).currentStepId, 'inspect')
 
 const input = ai.appendMessage(agent.id, { role: 'user', from: 'user', content: 'context please' })
-const request = ai.makeRequest(agent, input, 'run_context_test', agent.id, 0)
+const request = ai.planRequest(agent, input, 'run_context_test', agent.id, 0)
 assert.ok(request.contextPack)
 assert.equal(request.contextPack.items.some(function (item) { return item.layer === 'runtime' }), true)
 assert.equal(request.contextPack.items.some(function (item) { return item.layer === 'context' }), true)
@@ -114,7 +116,7 @@ const run = ai.message.send(agent.id, { content: 'edit' })
 await run.promise
 await flush()
 
-const capabilityRequest = ai.makeRequest(ai.findAgent(agent.id), null, 'run_capability_test', agent.id, 0)
+const capabilityRequest = ai.planRequest(ai.findAgent(agent.id), null, 'run_capability_test', agent.id, 0)
 assert.equal(capabilityRequest.connectionCapabilities.stream, true)
 assert.equal(capabilityRequest.connectionCapabilities.toolProtocol, 'native')
 assert.equal(capabilityRequest.connectionCapabilities.toolCalling, true)
@@ -170,7 +172,7 @@ const noToolAgent = ai.createAgent({
   skillRefs: skillRefs(['trace-edit']),
   select: false,
 })
-const noToolRequest = ai.makeRequest(noToolAgent, null, 'no_tool_request', noToolAgent.id, 0)
+const noToolRequest = ai.planRequest(noToolAgent, null, 'no_tool_request', noToolAgent.id, 0)
 assert.deepEqual(noToolRequest.tools, [])
 assert.equal(noToolRequest.connectionCapabilities.toolProtocol, 'none')
 assert.equal(noToolRequest.messages.some(function (message) {

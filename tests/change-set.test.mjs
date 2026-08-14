@@ -7,6 +7,11 @@ global.aiditor = global.window.aiditor
 
 for (const file of [
   'src/core/signal.js',
+  'src/core/log.js',
+  'src/core/names.js',
+  'src/ai/name-generator.js',
+  'src/ai/permission.js',
+  'src/ai/store.js',
   'src/ai/change-set.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })

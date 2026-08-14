@@ -48,6 +48,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/workdir.js',
   'src/ai/reference.js',
@@ -78,7 +79,7 @@ const extensionAgent = ai.createAgent({
   name: 'Extension Agent',
   skillRefs: ['test.extension-runtime'],
 })
-const extensionRequest = ai.makeRequest(extensionAgent, null, 'run_extension_tools', 'user', 0)
+const extensionRequest = ai.planRequest(extensionAgent, null, 'run_extension_tools', 'user', 0)
 assert.equal(extensionRequest.tools.includes('aiditor.installExtension'), false)
 assert.equal(extensionRequest.tools.includes('aiditor.inspectDocks'), true)
 assert.equal(extensionRequest.tools.includes('aiditor.addPanelToDock'), true)

@@ -10,7 +10,41 @@
   }
 
   function actor(ctx) {
-    return ctx.actor || (ctx.toolCall && ctx.toolCall.actor) || 'user'
+    return ctx.actor || (ctx.toolCall && ctx.toolCall.actor) || (ctx.agent && ctx.agent.id) || 'user'
+  }
+
+  function caller(ctx) {
+    return (ctx.toolCall && ctx.toolCall.actor) || actor(ctx)
+  }
+
+  function parentResolutionError(message) {
+    const error = new Error(message)
+    error.code = 'AGENT_PARENT_RESOLUTION_FAILED'
+    return error
+  }
+
+  function questAccessError(args, ctx) {
+    const who = actor(ctx)
+    const agentId = args && args.agentId || ''
+    const questId = args && args.questId || ''
+    let code = 'QUEST_UNAVAILABLE'
+    let message = 'Quest is unavailable to the current agent'
+    if (who === 'user') {
+      if (!ai.findAgent(agentId)) {
+        code = 'AGENT_NOT_FOUND'
+        message = 'Agent not found: ' + agentId
+      } else if (!ai.findQuest(agentId, questId)) {
+        code = 'QUEST_NOT_FOUND'
+        message = 'Quest not found: ' + questId
+      }
+    }
+    const error = new Error(message)
+    error.code = code
+    error.hint = code === 'QUEST_UNAVAILABLE'
+      ? 'Use the agentId and questId returned by agent.delegate or agent.send, and read only quests delegated by this agent.'
+      : 'Check the agentId and questId returned by the originating delegation.'
+    error.details = { agentId: agentId, questId: questId }
+    return error
   }
 
   function sourceResponseId(ctx) {
@@ -70,9 +104,11 @@
   }
 
   function resolveParentAgentId(args, ctx, movingAgentId) {
-    const who = actor(ctx)
+    const who = caller(ctx)
     const explicit = hasOwn(args, 'parentAgentId')
     const parentAgentId = explicit ? (args.parentAgentId || null) : (who === 'user' ? null : who)
+    if (who !== 'user' && !ai.findAgent(who)) throw parentResolutionError('Agent caller is no longer available: ' + who)
+    if (parentAgentId && !ai.findAgent(parentAgentId)) throw parentResolutionError('Parent agent is not available: ' + parentAgentId)
     if (movingAgentId && parentAgentId && (parentAgentId === movingAgentId || ai.isDescendant(movingAgentId, parentAgentId))) {
       throw new Error('Agent tree cycle is not allowed')
     }
@@ -100,7 +136,7 @@
       outputSchema: args.outputSchema ? ai.schema.normalize(args.outputSchema, 'outputSchema') : null,
       contextRefs: clone(args.contextRefs || []),
       skillRefs: clone(args.skillRefs || []),
-      permissionMode: inherited && inherited.permissionMode || 'full',
+      permissionMode: inherited && inherited.permissionMode || 'auto',
       permissions: clone(inherited && inherited.permissions || null),
     }
   }
@@ -191,8 +227,24 @@
     }
   }
 
-  function createAgentApply(args) {
+  function validateAgentCreation(args, ctx) {
+    const spec = args && args.agent
+    if (!spec) throw parentResolutionError('Agent creation preview is missing')
+    const who = caller(ctx)
+    const input = ctx && ctx.toolCall && ctx.toolCall.args || {}
+    const explicit = hasOwn(input, 'parentAgentId')
+    const expected = explicit ? (input.parentAgentId || null) : (who === 'user' ? null : who)
+    if ((spec.parentAgentId || null) !== expected) {
+      throw parentResolutionError('Agent parent no longer matches the originating ToolCall')
+    }
+    resolveParentAgentId(input, ctx)
+    return expected
+  }
+
+  function createAgentApply(args, ctx) {
+    const parentAgentId = validateAgentCreation(args, ctx)
     const spec = clone(args.agent)
+    spec.parentAgentId = parentAgentId
     spec.select = false
     const agent = ai.createAgent(spec)
     return Object.assign({ applied: true }, agentSummary(agent, true))
@@ -274,10 +326,10 @@
   }
 
   function delegateAgentApply(args, ctx) {
-    const agent = args.agentId ? ai.findAgent(args.agentId) : createAgentApply({ agent: args.agent })
+    const agent = args.agentId ? ai.findAgent(args.agentId) : createAgentApply({ agent: args.agent }, ctx)
     if (!agent) throw new Error('Agent not found')
     const sent = ai.agent.send(agent.id, {
-      fromAgentId: actor(ctx) === 'user' ? null : actor(ctx),
+      fromAgentId: caller(ctx) === 'user' ? null : caller(ctx),
       sourceResponseId: sourceResponseId(ctx),
       content: args.content || '',
       contextRefs: clone(args.contextRefs || []),
@@ -353,7 +405,7 @@
   function readQuest(args, ctx) {
     if (args.questId) {
       const result = ai.quest.read(args.agentId, args.questId, actor(ctx))
-      if (!result) throw new Error('Quest not found or permission denied')
+      if (!result) throw questAccessError(args, ctx)
       return result
     }
     const agent = ai.findAgent(args.agentId)
@@ -371,7 +423,7 @@
 
   function readQuestResult(args, ctx) {
     const result = ai.quest.result(args.agentId, args.questId, actor(ctx))
-    if (!result) throw new Error('Quest not found or permission denied')
+    if (!result) throw questAccessError(args, ctx)
     return result
   }
 
@@ -383,7 +435,7 @@
 
   function cancelQuest(args, ctx) {
     const result = ai.quest.cancel(args.agentId, args.questId, actor(ctx))
-    if (!result) throw new Error('Quest not found or permission denied')
+    if (!result) throw questAccessError(args, ctx)
     return result
   }
 
@@ -419,6 +471,26 @@
 
   const STRING_ARRAY_SCHEMA = { type: 'array', items: { type: 'string' } }
 
+  function agentTarget(args, ctx, phase) {
+    return {
+      target: args && (args.agentId || args.parentAgentId) || ctx && ctx.agent && ctx.agent.id || 'root',
+      risk: phase === 'apply' ? 'write' : 'read',
+    }
+  }
+
+  function mutableAgentTarget(args, ctx, phase) {
+    const target = agentTarget(args, ctx, phase)
+    if (phase === 'run') target.risk = 'write'
+    return target
+  }
+
+  function questTarget(args, ctx, phase) {
+    return {
+      target: (args && args.agentId || ctx && ctx.agent && ctx.agent.id || '') + '/quest/' + (args && args.questId || '*'),
+      risk: phase === 'run' && args && args.__readOnly !== true ? 'write' : 'read',
+    }
+  }
+
   ai.tools.register('agent.read', {
     title: 'Read Agents',
     description: 'Read one bounded agent profile by id, or list a tree level. Without arguments, agents see their direct children and the user sees root agents.',
@@ -431,6 +503,8 @@
       },
     },
     permissions: ['tool.call'],
+    permissionTargets: agentTarget,
+    isConcurrencySafe: function () { return true },
     run: readAgent,
   }, META)
 
@@ -451,6 +525,7 @@
       },
     },
     permissions: ['tool.call', 'tool.apply'],
+    permissionTargets: agentTarget,
     preview: createAgentPreview,
     apply: createAgentApply,
   }, META)
@@ -473,20 +548,21 @@
       },
     },
     permissions: ['tool.call', 'tool.apply'],
+    permissionTargets: agentTarget,
     preview: configureAgentPreview,
     apply: configureAgentApply,
   }, META)
 
   ai.tools.register('agent.delegate', {
     title: 'Delegate Agent Task',
-    description: 'Create or reuse an agent and send it a delegated task in one workflow. Returns agentId and questId. Delegation does not force the parent to wait.',
+    description: 'Create or reuse an agent and send it a delegated task in one workflow. A new agent defaults under the calling agent, or at root when called by the user. Returns agentId and questId. Delegation does not force the parent to wait.',
     schema: {
       type: 'object',
       required: ['content'],
       properties: {
         agentId: { type: 'string' },
         name: { type: 'string' },
-        parentAgentId: { type: 'string' },
+        parentAgentId: { type: 'string', description: 'Parent for a newly created agent. Omit to create under the calling agent, or at root when called by the user.' },
         connection: { type: 'string' },
         model: { type: 'string' },
         systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
@@ -500,6 +576,8 @@
       },
     },
     permissions: ['tool.call', 'tool.apply'],
+    permissionTargets: agentTarget,
+    isConcurrencySafe: function (args) { return !!(args && args.agentId) },
     preview: delegateAgentPreview,
     apply: delegateAgentApply,
   }, META)
@@ -517,6 +595,7 @@
       },
     },
     permissions: ['tool.call', 'tool.apply'],
+    permissionTargets: agentTarget,
     preview: reparentAgentPreview,
     apply: reparentAgentApply,
   }, META)
@@ -526,6 +605,7 @@
     description: 'Delete an agent and its descendants after preview approval.',
     schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call', 'tool.apply'],
+    permissionTargets: agentTarget,
     preview: deleteAgentPreview,
     apply: deleteAgentApply,
   }, META)
@@ -546,6 +626,8 @@
       },
     },
     permissions: ['tool.call'],
+    permissionTargets: mutableAgentTarget,
+    isConcurrencySafe: function () { return true },
     run: sendAgent,
   }, META)
 
@@ -563,6 +645,11 @@
       },
     },
     permissions: ['tool.call'],
+    permissionTargets: function (args, ctx) {
+      const target = questTarget(Object.assign({ __readOnly: true }, args || {}), ctx, 'run')
+      return target
+    },
+    isConcurrencySafe: function () { return true },
     run: readQuest,
   }, META)
 
@@ -578,6 +665,11 @@
       },
     },
     permissions: ['tool.call'],
+    permissionTargets: function (args, ctx) {
+      const target = questTarget(Object.assign({ __readOnly: true }, args || {}), ctx, 'run')
+      return target
+    },
+    isConcurrencySafe: function () { return true },
     run: readQuestResult,
   }, META)
 
@@ -593,6 +685,7 @@
       },
     },
     permissions: ['tool.call'],
+    permissionTargets: questTarget,
     run: cancelQuest,
   }, META)
 
@@ -608,6 +701,8 @@
       },
     },
     permissions: ['tool.call'],
+    permissionTargets: function (args) { return { target: args.agentId + '/message/' + args.messageId, risk: 'read' } },
+    isConcurrencySafe: function () { return true },
     run: readMessage,
   }, META)
 
@@ -616,6 +711,7 @@
     description: 'Emergency-stop the agent current run. Returns outcome stopped or not_running; use quest.cancel when a specific delegated quest is known.',
     schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call'],
+    permissionTargets: mutableAgentTarget,
     run: stopAgent,
   }, META)
 })(window.aiditor = window.aiditor || {})

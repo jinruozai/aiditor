@@ -491,30 +491,71 @@
     }))
   }
 
-  function applyToolCallSmart(agentId, call) {
+  function translatedText(owner, key, vars) {
+    const text = aiditor.i18n.text(key, vars)
+    ui.collect(owner, text.dispose)
+    return text
+  }
+
+  function performToolCallSmart(agentId, call) {
     let state = aiditor.ai.getToolCallActionState ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user') : null
     if (!state) return null
-    if (state.canApply) return afterToolAction(agentId, aiditor.ai.applyToolCall(agentId, call.id, 'user'))
+    if (state.canApply) return aiditor.ai.applyToolCall(agentId, call.id, 'user')
     if (state.canPreview) {
       const preview = aiditor.ai.previewToolCall(agentId, call.id, 'user')
       if (preview && preview.promise) {
-        return afterToolAction(agentId, {
+        return {
           promise: preview.promise.then(function () {
             const next = aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
             const applied = next && next.canApply ? aiditor.ai.applyToolCall(agentId, call.id, 'user') : null
             return applied && applied.promise ? applied.promise : applied
           }),
-        })
+        }
       }
       state = aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
-      if (state && state.canApply) return afterToolAction(agentId, aiditor.ai.applyToolCall(agentId, call.id, 'user'))
+      if (state && state.canApply) return aiditor.ai.applyToolCall(agentId, call.id, 'user')
       return null
     }
     if (state.canApprove) {
       aiditor.ai.approveToolCall(agentId, call.id, 'user')
       state = aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
     }
-    return state && state.canRun ? afterToolAction(agentId, aiditor.ai.runToolCall(agentId, call.id, 'user')) : null
+    return state && state.canRun ? aiditor.ai.runToolCall(agentId, call.id, 'user') : null
+  }
+
+  function rememberKey(agentId, callId) {
+    return String(agentId || '') + '/' + String(callId || '')
+  }
+
+  function rememberChoice(viewState, agentId, call) {
+    const key = rememberKey(agentId, call.id)
+    if (viewState && viewState.rememberToolCalls[key]) return true
+    return !!(aiditor.ai.isToolCallGranted && aiditor.ai.isToolCallGranted(agentId, call.id))
+  }
+
+  function clearRememberChoice(viewState, agentId, call) {
+    if (viewState) delete viewState.rememberToolCalls[rememberKey(agentId, call.id)]
+  }
+
+  function rememberSuccessfulAction(agentId, call, action, remember, viewState) {
+    if (!action || !remember) return action
+    function done(value) {
+      const found = aiditor.ai.findToolCall && aiditor.ai.findToolCall(agentId, call.id)
+      const status = found && found.toolCall && found.toolCall.status
+      if (status === 'applied' || status === 'completed') {
+        if (aiditor.ai.setToolCallGranted) aiditor.ai.setToolCallGranted(agentId, call.id, true)
+        clearRememberChoice(viewState, agentId, call)
+      }
+      return value
+    }
+    if (action.promise) return Object.assign({}, action, { promise: Promise.resolve(action.promise).then(done) })
+    done(action)
+    return action
+  }
+
+  function applyToolCallSmart(agentId, call, viewState) {
+    const action = performToolCallSmart(agentId, call)
+    return afterToolAction(agentId, rememberSuccessfulAction(agentId, call, action, rememberChoice(viewState, agentId, call), viewState))
   }
 
   function afterToolAction(agentId, action) {
@@ -531,27 +572,41 @@
     return action
   }
 
-  function renderToolActions(card, agentId, call) {
+  function renderToolActions(card, agentId, call, viewState) {
     const state = aiditor.ai.getToolCallActionState
       ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
       : null
     const actions = ui.h('div', 'aiditor-ai-tool-call-actions')
     const hasForwardAction = state && (state.canPreview || state.canApply || state.canApprove || state.canRun)
     if (hasForwardAction) {
-      actions.appendChild(ui['switch']({
-        value: !!(aiditor.ai.isToolAlwaysAllowed && aiditor.ai.isToolAlwaysAllowed(agentId, call.toolId)),
-        label: 'Always',
+      const rememberLabel = translatedText(actions, 'ai.tool.remember')
+      const rememberHint = translatedText(actions, 'ai.tool.remember_hint')
+      const remember = ui['switch']({
+        value: rememberChoice(viewState, agentId, call),
+        label: rememberLabel,
         onChange: function (value) {
-          if (aiditor.ai.setToolAlwaysAllowed) aiditor.ai.setToolAlwaysAllowed(agentId, call.toolId, value)
+          const key = rememberKey(agentId, call.id)
+          if (value) viewState.rememberToolCalls[key] = true
+          else {
+            delete viewState.rememberToolCalls[key]
+            if (aiditor.ai.setToolCallGranted) aiditor.ai.setToolCallGranted(agentId, call.id, false)
+          }
         },
-      }))
+      })
+      ui.tooltip(remember, {
+        text: rememberHint,
+        side: 'top',
+        delay: 250,
+      })
+      actions.appendChild(remember)
     }
-    appendToolButton(actions, 'Reject', state && state.canReject, function () {
+    appendToolButton(actions, translatedText(actions, 'ai.tool.reject'), state && state.canReject, function () {
+      clearRememberChoice(viewState, agentId, call)
       aiditor.ai.rejectToolCall(agentId, call.id, 'Rejected by user', 'user')
       if (aiditor.ai.resumeAgent) aiditor.ai.resumeAgent(agentId, 'user')
     }, 'danger')
-    appendToolButton(actions, 'Apply', state && (state.canApply || state.canPreview || state.canApprove || state.canRun), function () {
-      applyToolCallSmart(agentId, call)
+    appendToolButton(actions, translatedText(actions, 'ai.tool.apply'), state && (state.canApply || state.canPreview || state.canApprove || state.canRun), function () {
+      applyToolCallSmart(agentId, call, viewState)
     }, 'primary')
     if (actions.firstChild) card.appendChild(actions)
 
@@ -589,7 +644,7 @@
     const state = aiditor.ai.getToolCallActionState
       ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
       : null
-    renderToolActions(right, agentId, call)
+    renderToolActions(right, agentId, call, viewState)
     head.appendChild(right)
     card.appendChild(head)
     if (call.description || call.title) {
@@ -622,9 +677,75 @@
     return shown.join(' · ')
   }
 
+  function actionableToolCalls(agentId, calls) {
+    return (calls || []).filter(function (call) {
+      const state = aiditor.ai.getToolCallActionState
+        ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
+        : null
+      return !!(state && (state.canApply || state.canPreview || state.canApprove || state.canRun))
+    })
+  }
+
+  function applyToolCallBatch(agentId, calls, viewState) {
+    let chain = Promise.resolve()
+    for (let i = 0; i < calls.length; i++) {
+      chain = chain.then(function () {
+        const call = calls[i]
+        const action = performToolCallSmart(agentId, call)
+        const remembered = rememberSuccessfulAction(agentId, call, action, rememberChoice(viewState, agentId, call), viewState)
+        return remembered && remembered.promise ? remembered.promise : remembered
+      })
+    }
+    return afterToolAction(agentId, { promise: chain })
+  }
+
+  function rejectToolCallBatch(agentId, calls, viewState) {
+    for (let i = 0; i < calls.length; i++) {
+      const state = aiditor.ai.getToolCallActionState
+        ? aiditor.ai.getToolCallActionState(agentId, calls[i].id, 'user')
+        : null
+      if (!state || !state.canReject) continue
+      clearRememberChoice(viewState, agentId, calls[i])
+      aiditor.ai.rejectToolCall(agentId, calls[i].id, 'Rejected by user', 'user')
+    }
+    return afterToolAction(agentId, {})
+  }
+
+  function renderToolBatchActions(parent, agentId, calls, viewState) {
+    const actionable = actionableToolCalls(agentId, calls)
+    if (actionable.length < 2) return
+    const row = ui.h('div', 'aiditor-ai-tool-batch-actions')
+    const countText = translatedText(row, 'ai.tool.pending_actions', { count: actionable.length })
+    const count = ui.h('span', 'aiditor-ai-tool-batch-count')
+    ui.bindText(count, countText)
+    row.appendChild(count)
+    const reject = ui.button({
+      text: translatedText(row, 'ai.tool.reject_all'),
+      size: 'sm',
+      kind: 'danger',
+      onClick: function () { rejectToolCallBatch(agentId, actionable, viewState) },
+    })
+    const apply = ui.button({
+      text: translatedText(row, 'ai.tool.apply_all'),
+      size: 'sm',
+      kind: 'primary',
+      onClick: function () { applyToolCallBatch(agentId, actionable, viewState) },
+    })
+    const applyHint = translatedText(row, 'ai.tool.apply_all_hint')
+    ui.tooltip(apply, {
+      text: applyHint,
+      side: 'top',
+      delay: 250,
+    })
+    row.appendChild(reject)
+    row.appendChild(apply)
+    parent.appendChild(row)
+  }
+
   function renderToolCalls(parent, agentId, messageId, calls, viewState) {
     if (!calls || !calls.length) return
     const wrap = ui.h('div', 'aiditor-ai-tool-calls')
+    renderToolBatchActions(wrap, agentId, calls, viewState)
     for (let i = 0; i < calls.length; i++) wrap.appendChild(renderToolCall(agentId, messageId, calls[i], viewState))
     parent.appendChild(wrap)
   }
@@ -810,7 +931,7 @@
     scroll.appendChild(bottomSpacer)
     scroll.appendChild(liveStrip.el)
 
-    const viewState = { expandedToolCalls: {}, disclosureStates: {} }
+    const viewState = { expandedToolCalls: {}, disclosureStates: {}, rememberToolCalls: {} }
     const rows = {}
     const virtualizer = aiditor.ai.createMessageVirtualizer({ estimateHeight: 96, overscanPx: 640 })
     const visibleRevision = aiditor.signal(0)

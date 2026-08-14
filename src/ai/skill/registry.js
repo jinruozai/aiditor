@@ -99,21 +99,28 @@
 
   function catalog(ctx, options) {
     options = options || {}
+    const audience = options.audience === 'user' ? 'user' : 'model'
     const query = String(options.query || '').trim().toLowerCase()
     const limit = Math.max(1, Math.min(Number(options.limit) || 50, 100))
     const out = []
-    const ids = registry.list()
+    const ids = registry.list().slice().sort()
     for (let i = 0; i < ids.length && out.length < limit; i++) {
       const skill = registry.get(ids[i])
-      if (!skill.modelInvocable) continue
+      if (audience === 'user' ? !skill.userInvocable : !skill.modelInvocable) continue
       const text = [ids[i], skill.title, skill.description, skill.whenToUse, skill.whenNotToUse].join('\n').toLowerCase()
       if (query && text.indexOf(query) < 0) continue
       const state = availability(ids[i], ctx)
+      const meta = registry.meta(ids[i])
       out.push({
         id: ids[i],
         title: skill.title,
         description: skill.description,
         whenToUse: skill.whenToUse,
+        argumentHint: skill.argumentHint,
+        tools: skill.tools.slice(),
+        source: meta.source || '',
+        owner: meta.owner || '',
+        layer: meta.layer || '',
         available: state.available,
         unavailableReason: state.reason,
       })

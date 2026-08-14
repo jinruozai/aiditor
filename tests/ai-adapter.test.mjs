@@ -72,6 +72,9 @@ const collidingTools = ai.openAiTools({
 })
 assert.equal(collidingTools[0].function.name, 'same__name')
 assert.notEqual(collidingTools[1].function.name, collidingTools[0].function.name)
+assert.deepEqual(ai.providerToolAliasCandidates('verify__list', ['verify.list']), ['verify.list'])
+assert.deepEqual(ai.providerToolAliasCandidates('same__name', ['same.name', 'same__name']), ['same.name', 'same__name'])
+assert.deepEqual(ai.providerToolAliasCandidates(collidingTools[1].function.name, ['same.name', 'same__name']), ['same__name'])
 const normalizedCollision = ai.normalizeOpenAiToolCalls([{
   id: 'call_collision',
   function: { name: collidingTools[1].function.name, arguments: '{}' },

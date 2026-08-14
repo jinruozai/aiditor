@@ -269,6 +269,12 @@ schemas, assistant tool calls, replay, and response decoding. Aliases are wire
 identifiers only; permission checks, execution, logs, and UI always use the
 public tool id.
 
+When provider output repeats an alias for a Tool omitted from the current
+request, Runtime may resolve it against registered Tool ids only for diagnostics.
+One unique alias candidate is restored to its canonical id so Skill activation
+guidance remains accurate. Multiple candidates remain ambiguous and must never
+be guessed or executed.
+
 Tool schemas are normalized and validated when tools are registered. An object
 schema with `required` entries must define matching `properties`; invalid schemas
 are rejected before a provider request is made.

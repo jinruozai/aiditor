@@ -1,19 +1,20 @@
 # AI Request Assembly
 
-Request assembly is deterministic and Skill-first.
+Request assembly is deterministic and Skill-first. Capability planning is
+synchronous; Reference payload hydration is asynchronous and abortable.
 
 ```text
 Agent + input + run
-  │
-  ├─ resolve readable attachments/references
-  ├─ capture factual Context providers
-  ├─ resolve explicit + configured + run-selected Skills
-  ├─ evaluate Skill availability
-  ├─ union system Skill controls + active Skill Tool ids
-  ├─ filter Tool availability
-  ├─ project model-visible Operations
-  ├─ prepare provider Tool schemas
-  └─ assemble bounded context cards and transcript
+  ├─ planRequest
+  │  ├─ capture factual Context providers
+  │  ├─ resolve explicit + configured + run-selected Skills
+  │  ├─ evaluate Skill and Tool availability
+  │  ├─ project model-visible Operations and Tool schemas
+  │  └─ assemble bounded context cards and transcript shell
+  └─ resolveRequest
+     ├─ check each Reference through the unified Permission policy
+     ├─ hydrate readable payloads concurrently
+     └─ atomically publish the provider request
 ```
 
 Context capture precedes Skill availability so project Skills may inspect the

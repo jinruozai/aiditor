@@ -51,18 +51,19 @@
     return parts.join(' · ')
   }
 
-  function skillItems(draft) {
-    if (!ai.skills || !ai.skills.list) return []
+  function skillItems(draft, ctx) {
+    if (!ai.skills || !ai.skills.catalog) return []
     const active = {}
     const selected = ai.richPrompt.skills(draft)
     for (let i = 0; i < selected.length; i++) active[selected[i]] = true
-    const names = ai.skills.list().slice().sort()
+    const catalog = ai.skills.catalog(ctx || {}, { audience: 'user', limit: 100 })
     const out = []
-    for (let j = 0; j < names.length; j++) {
-      const id = names[j]
+    for (let j = 0; j < catalog.length; j++) {
+      const item = catalog[j]
+      const id = item.id
       const skill = ai.skills.get(id)
-      if (!skill || skill.userInvocable === false) continue
-      const meta = ai.skills.meta ? ai.skills.meta(id) : {}
+      const meta = { source: item.source, owner: item.owner, layer: item.layer }
+      const unavailable = !item.available
       out.push({
         key: 'skill:' + id,
         kind: 'skill',
@@ -70,10 +71,10 @@
         name: id,
         label: '/' + id,
         description: skill.title && skill.title !== id ? skill.title : '',
-        detail: active[id] ? 'Already selected' : skillDetail(skill, meta),
+        detail: active[id] ? 'Already selected' : (unavailable ? item.unavailableReason : skillDetail(skill, meta)),
         icon: 'tag',
         group: 'Skills',
-        disabled: !!active[id],
+        disabled: !!active[id] || unavailable,
         search: [id, skill.title, skill.description, skill.whenToUse, skill.argumentHint, meta.owner, meta.layer, meta.source, (skill.tools || []).join(' ')],
         skill: skill,
       })
@@ -110,7 +111,7 @@
 
   function projectedItems(draft, ctx, includeCommands) {
     const out = includeCommands ? commandItems(ctx) : []
-    return out.concat(skillItems(draft))
+    return out.concat(skillItems(draft, ctx))
   }
 
   function install(opts) {

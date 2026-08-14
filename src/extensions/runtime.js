@@ -59,8 +59,8 @@
     }
     if (permissionPolicy && permissionPolicy[action]) return permissionPolicy[action](details) === true
     if (permissionPolicy && permissionPolicy.can) return permissionPolicy.can(details) === true
-    if (aiditor.ai && aiditor.ai.decidePermission) {
-      return aiditor.ai.decidePermission(details.actor, details.agentId, 'extension.' + action, {
+    if (aiditor.ai && aiditor.ai.permissions) {
+      return aiditor.ai.permissions.decide(details.actor, details.agentId, 'extension.' + action, {
         extensionId: manifest.id,
         entry: 'extension.' + action,
         phase: action === 'preview' ? 'preview' : action,

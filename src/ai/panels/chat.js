@@ -4,10 +4,10 @@
   const ui = aiditor.ui
 
   const PERMISSION_OPTIONS = [
-    { value: 'default', label: 'Default permissions', icon: 'settings' },
-    { value: 'auto', label: 'Auto review', icon: 'clock' },
-    { value: 'full', label: 'Full access', icon: 'alert-circle' },
-    { value: 'custom', label: 'Custom', icon: 'sliders' },
+    { value: 'default', label: 'Read only', icon: 'eye' },
+    { value: 'auto', label: 'Ask before changes', icon: 'clock' },
+    { value: 'full', label: 'Full workspace access', icon: 'alert-circle' },
+    { value: 'custom', label: 'Host policy', icon: 'sliders' },
   ]
 
   function read(v) {
@@ -295,12 +295,49 @@
     ui.menu({ anchor: anchor, items: items, side: 'top', align: 'start' })
   }
 
+  function environmentCapabilities() {
+    if (aiditor.ai.workspaceVersion) aiditor.ai.workspaceVersion()
+    if (aiditor.ai.gitVersion) aiditor.ai.gitVersion()
+    if (aiditor.ai.verifyVersion) aiditor.ai.verifyVersion()
+    const workspace = aiditor.ai.currentWorkspace && aiditor.ai.currentWorkspace()
+    const workspaceMeta = aiditor.ai.workspaceMeta && aiditor.ai.workspaceMeta()
+    const git = aiditor.ai.currentGit && aiditor.ai.currentGit()
+    const verify = aiditor.ai.currentVerify && aiditor.ai.currentVerify()
+    return [
+      {
+        label: aiditor.i18n.t(workspace ? 'ai.environment.workspace_ready' : 'ai.environment.workspace_missing', {
+          label: workspaceMeta && workspaceMeta.label || 'Ready',
+        }),
+        ready: !!workspace,
+      },
+      { label: aiditor.i18n.t(git ? 'ai.environment.git_ready' : 'ai.environment.git_missing'), ready: !!git },
+      { label: aiditor.i18n.t(verify ? 'ai.environment.verify_ready' : 'ai.environment.verify_missing'), ready: !!verify },
+    ]
+  }
+
+  function environmentSummary() {
+    return environmentCapabilities().map(function (item) { return item.label }).join('\n')
+  }
+
+  function openEnvironmentMenu(anchor) {
+    const items = [{ type: 'header', label: aiditor.i18n.t('ai.environment.title') }]
+    const capabilities = environmentCapabilities()
+    for (let i = 0; i < capabilities.length; i++) {
+      items.push({
+        label: capabilities[i].label,
+        icon: capabilities[i].ready ? 'check-circle' : 'alert-circle',
+        disabled: true,
+      })
+    }
+    ui.menu({ anchor: anchor, items: items, side: 'top', align: 'start' })
+  }
+
   function factory(propsSig, ctx) {
     const props = propsSig.peek() || {}
     const compact = aiditor.signal(false)
     const connection = aiditor.signal(props.connection || defaultConnection())
     const model = aiditor.signal(props.model || defaultModel(connection.peek()))
-    const permissionMode = aiditor.signal(props.permissionMode || 'full')
+    const permissionMode = aiditor.signal(props.permissionMode || 'auto')
     const draft = aiditor.signal(aiditor.ai.richPrompt.empty())
     const hasTarget = aiditor.derived(function () { return !!activeAgent() })
     const responseState = aiditor.derived(function () {
@@ -379,6 +416,18 @@
       disabled: controlDisabled,
       onClick: function (ev) { openAttachmentMenu(ev.currentTarget, insertAttachments) },
     })
+    const environmentTip = aiditor.derived(environmentSummary)
+    const environmentAria = aiditor.i18n.text('ai.environment.aria')
+    ui.collect(root, environmentTip.dispose)
+    ui.collect(root, environmentAria.dispose)
+    const environment = ui.iconButton({
+      icon: 'sliders',
+      title: environmentTip,
+      ariaLabel: environmentAria,
+      size: 'sm',
+      kind: 'ghost',
+      onClick: function (ev) { openEnvironmentMenu(ev.currentTarget) },
+    })
     const permissionText = aiditor.derived(function () { return permissionLabel(permissionMode()) })
     ui.collect(root, permissionText.dispose)
     const permission = ui.button({
@@ -451,6 +500,7 @@
       onClick: sendClick,
     })
     leftActions.appendChild(add)
+    leftActions.appendChild(environment)
     leftActions.appendChild(permission)
     rightActions.appendChild(contextMeter)
     rightActions.appendChild(modelSlot)
@@ -518,7 +568,7 @@
       }
       connection.set(a.connection || defaultConnection())
       model.set(a.model || defaultModel(a.connection || defaultConnection()))
-      permissionMode.set(a.permissionMode || 'full')
+      permissionMode.set(a.permissionMode || 'auto')
     }))
 
     return root

@@ -13,6 +13,7 @@ vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/sto
 vm.runInThisContext(readFileSync('src/ai/connection.js', 'utf8'), { filename: 'ai/connection.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
 vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
@@ -160,10 +161,10 @@ assert.equal(tx[0].label, 'Set value')
 assert.equal(tx[0].meta.op, 'case.setValue')
 
 const agent = ai.createAgent({ name: 'Reference Agent' })
-const defaultRequest = ai.makeRequest(agent, null, 'inspect', 'user', 0)
+const defaultRequest = ai.planRequest(agent, null, 'inspect', 'user', 0)
 assert.equal(defaultRequest.tools.includes('aiditor.previewOperation'), false)
 assert.equal(defaultRequest.tools.includes('aiditor.applyOperation'), false)
-const explicitRequest = ai.makeRequest(ai.createAgent({
+const explicitRequest = ai.planRequest(ai.createAgent({
   name: 'Explicit Operation Agent',
   skillRefs: skillRefs(['aiditor.previewOperation', 'aiditor.applyOperation']),
 }), null, 'inspect_explicit', 'user', 0)
@@ -192,7 +193,7 @@ registerOperation('case.sharedSchema', {
   preview: function () { return { ok: true } },
   apply: function () { return { applied: true } },
 })
-const sharedSchemaRequest = ai.makeRequest(ai.createAgent({
+const sharedSchemaRequest = ai.planRequest(ai.createAgent({
   name: 'Shared Schema Agent',
   skillRefs: skillRefs(['aiditor.applyOperation']),
 }), null, 'inspect_shared_schema', 'user', 0)
@@ -204,7 +205,7 @@ assert.deepEqual(sharedSchemaSpec.schema.properties.second.items.required, ['x',
 ai.operations.unregister('case.sharedSchema', TEST_META)
 
 unavailableOperationEnabled = true
-const requestWithAvailableOperation = ai.makeRequest(ai.createAgent({
+const requestWithAvailableOperation = ai.planRequest(ai.createAgent({
   name: 'Available Operation Agent',
   skillRefs: skillRefs(['aiditor.applyOperation']),
 }), null, 'inspect_available', 'user', 0)
@@ -219,7 +220,7 @@ ai.tools.register('case.setValue', {
   run: function () { return null },
 }, TEST_META)
 assert.throws(function () {
-  ai.makeRequest(ai.createAgent({
+  ai.planRequest(ai.createAgent({
     name: 'Conflicting Operation Agent',
     skillRefs: skillRefs(['case.setValue', 'aiditor.applyOperation']),
   }), null, 'inspect_conflict', 'user', 0)
@@ -248,26 +249,19 @@ const hostOnlyPreview = ai.operations.preview('case.unavailable', {})
 const hiddenPreview = ai.tools.get('aiditor.applyOperation').preview({ previewId: hostOnlyPreview.id }, { actor: 'user', agent: agent })
 assert.equal(hiddenPreview.code, 'OPERATION_NOT_AVAILABLE')
 
-const savedCanUseOperation = ai.canUseOperation
-const savedCanUseTool = ai.canUseTool
 const fallbackPermissionCalls = []
-ai.canUseOperation = null
-ai.canUseTool = function (actor, target, toolId, phase) {
-  fallbackPermissionCalls.push({ actor, target, toolId, phase })
-  return phase !== 'apply'
-}
-try {
-  ai.tools.get('aiditor.previewOperation').run({ op: 'case.setValue', input: { value: 8 } }, { actor: 'user', agent: agent })
-  const deniedApply = ai.tools.get('aiditor.applyOperation').apply({ op: 'case.setValue', ok: true, risk: 'edit', next: 8 }, { actor: 'user', agent: agent })
-  assert.equal(deniedApply.applied, false)
-} finally {
-  ai.canUseOperation = savedCanUseOperation
-  ai.canUseTool = savedCanUseTool
-}
-assert.equal(fallbackPermissionCalls[0].toolId, 'aiditor.previewOperation')
-assert.equal(fallbackPermissionCalls[0].phase, 'call')
-assert.equal(fallbackPermissionCalls[1].toolId, 'aiditor.applyOperation')
-assert.equal(fallbackPermissionCalls[1].phase, 'apply')
+ai.permissions.setResolver(function (ctx, next) {
+  fallbackPermissionCalls.push({ scope: ctx.scope, entry: ctx.entry, phase: ctx.phase })
+  if (ctx.scope === 'tool.apply') return false
+  return next(ctx)
+})
+const projectedTargets = ai.tools.permissionTargets('aiditor.applyOperation', { op: 'case.setValue', input: { value: 8 } }, { actor: 'user', agent: agent }, 'apply')
+assert.equal(projectedTargets[0].entry, 'case.setValue')
+assert.equal(projectedTargets[0].risk, 'write')
+assert.equal(ai.permissions.decideMany('user', agent.id, 'tool.apply', projectedTargets).allowed, false)
+ai.permissions.setResolver(null)
+assert.equal(fallbackPermissionCalls[0].entry, 'case.setValue')
+assert.equal(fallbackPermissionCalls[0].phase, 'apply')
 
 const runTool = ai.createToolCall(agent.id, { toolId: 'aiditor.readReference', args: { uri: 'case://item/one' } }, 'user')
 ai.approveToolCall(agent.id, runTool.id, 'user')

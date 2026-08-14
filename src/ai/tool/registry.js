@@ -32,6 +32,12 @@
         throw new Error('ai.tools.register: resolveSchema must be a function for "' + name + '"')
       if (tool.resolveModelSpecs != null && typeof tool.resolveModelSpecs !== 'function')
         throw new Error('ai.tools.register: resolveModelSpecs must be a function for "' + name + '"')
+      if (tool.permissionTargets != null && typeof tool.permissionTargets !== 'function')
+        throw new Error('ai.tools.register: permissionTargets must be a function for "' + name + '"')
+      if (tool.isConcurrencySafe != null && typeof tool.isConcurrencySafe !== 'function')
+        throw new Error('ai.tools.register: isConcurrencySafe must be a function for "' + name + '"')
+      if (tool.timeoutMs != null && (!Number.isFinite(tool.timeoutMs) || tool.timeoutMs <= 0))
+        throw new Error('ai.tools.register: timeoutMs must be a positive finite number for "' + name + '"')
       return Object.assign({}, tool, { schema: normalizeToolSchema(tool.schema) })
     },
   })
@@ -89,11 +95,68 @@
     return out
   }
 
+  function executionMode(name, args) {
+    const tool = registry.get(name)
+    if (!tool || !tool.isConcurrencySafe) return 'exclusive'
+    const value = aiditor.safeCall
+      ? aiditor.safeCall({ scope: 'ai.tool', tool: name, phase: 'concurrency' }, function () { return tool.isConcurrencySafe(args) })
+      : tool.isConcurrencySafe(args)
+    return value === true ? 'parallel' : 'exclusive'
+  }
+
+  function permissionOrigin(name) {
+    const meta = registry.meta(name) || {}
+    if (meta.owner && meta.owner.indexOf('extension:') === 0) return meta.owner
+    if (meta.owner && meta.owner.indexOf('host:') === 0) return meta.owner
+    return meta.layer || 'builtin'
+  }
+
+  function permissionContract(name, ctx) {
+    const value = schema(name, ctx)
+    return ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(value) : JSON.stringify(value)
+  }
+
+  function permissionTargets(name, args, ctx, phase) {
+    const tool = registry.get(name)
+    if (!tool) return [{
+      entry: name,
+      phase: phase || 'call',
+      target: name,
+      origin: 'unregistered',
+      risk: 'read',
+      contract: '',
+      unavailable: true,
+    }]
+    const caps = capabilities(name)
+    const workspace = ai.workspaceMeta ? ai.workspaceMeta() : null
+    const base = {
+      entry: name,
+      phase: phase || 'call',
+      target: name,
+      workspace: workspace && workspace.id || null,
+      origin: permissionOrigin(name),
+      risk: phase === 'preview' || (phase === 'run' && tool.apply) ? 'read' : caps.risk,
+      contract: permissionContract(name, ctx),
+    }
+    if (!tool.permissionTargets) return [base]
+    const projected = aiditor.safeCall
+      ? aiditor.safeCall({ scope: 'ai.tool', tool: name, phase: 'permissionTargets' }, function () { return tool.permissionTargets(args, ctx || {}, phase || 'call') })
+      : tool.permissionTargets(args, ctx || {}, phase || 'call')
+    if (projected == null) return [Object.assign({}, base, { unavailable: true, reason: 'Tool permission targets are unavailable.' })]
+    const values = Array.isArray(projected) ? projected : [projected]
+    return values.map(function (value) {
+      if (typeof value === 'string') return Object.assign({}, base, { target: value })
+      return Object.assign({}, base, value || {})
+    })
+  }
+
   ai.tools = Object.assign(registry, {
     visible: visible,
     visibleList: visibleList,
     capabilities: capabilities,
     schema: schema,
+    executionMode: executionMode,
+    permissionTargets: permissionTargets,
   })
   ai.toolMeta = registry.meta
   ai.normalizeToolSchema = normalizeToolSchema

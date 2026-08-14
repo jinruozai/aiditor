@@ -10,6 +10,7 @@
   const runtimeConfig = {
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
+    maxConcurrentTools: 4,
     maxDelegationDepth: 4,
     maxToolArgumentCorrections: 2,
     limits: {
@@ -52,6 +53,75 @@
     })()
   }
 
+  function inactiveSkillIdsForTool(request, toolId) {
+    if (!ai.skills || !ai.skills.list) return []
+    const active = {}
+    const activeIds = request && request.skills || []
+    for (let i = 0; i < activeIds.length; i++) active[activeIds[i]] = true
+    const matches = []
+    const ids = ai.skills.list()
+    const skillCtx = Object.assign({}, request || {}, {
+      ai: ai,
+      agent: request && request.agent || null,
+      actor: request && request.actor || 'user',
+      runId: request && request.runId || null,
+      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
+      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
+      runtimeContext: request && request.runtimeContext || [],
+    })
+    for (let j = 0; j < ids.length; j++) {
+      const id = ids[j]
+      if (active[id]) continue
+      const skill = ai.skills.get(id)
+      if (!skill || skill.modelInvocable === false || (skill.tools || []).indexOf(toolId) < 0) continue
+      const availability = ai.skills.availability(id, skillCtx)
+      if (availability.available) matches.push(id)
+    }
+    return matches
+  }
+
+  function canonicalToolCandidates(value) {
+    if (!ai.tools) return []
+    if (ai.tools.get(value)) return [value]
+    return ai.providerToolAliasCandidates
+      ? ai.providerToolAliasCandidates(value, ai.tools.list())
+      : []
+  }
+
+  function unavailableToolFailure(request, value, providerName) {
+    const candidates = canonicalToolCandidates(value)
+    const toolId = candidates.length === 1 ? candidates[0] : value
+    const skillIds = candidates.length === 1 ? inactiveSkillIdsForTool(request, toolId) : []
+    if (skillIds.length) {
+      const message = 'Skill activation is required for this request before calling Tool: ' + toolId
+      return {
+        ok: false,
+        code: 'SKILL_ACTIVATION_REQUIRED',
+        error: message,
+        message: message,
+        hint: 'Call skill.activate with one of: ' + skillIds.join(', ') + '. The Tool becomes available on the next continuation. Run-scoped activation from an earlier request does not carry over. Persistent agent.skillRefs are configured only by the user, host, or parent Agent.',
+        toolId: toolId,
+        providerName: providerName || value,
+        skillIds: skillIds,
+        lifetime: 'run',
+      }
+    }
+    const message = candidates.length
+      ? 'Tool was not available in this request: ' + toolId
+      : 'Tool was not found: ' + value
+    const failure = {
+      ok: false,
+      code: candidates.length ? 'TOOL_UNAVAILABLE_IN_REQUEST' : 'TOOL_NOT_FOUND',
+      error: message,
+      message: message,
+      hint: 'Use the Tools exposed in the current request. Call skill.list to discover available capabilities.',
+      toolId: toolId,
+      providerName: providerName || value,
+    }
+    if (candidates.length > 1) failure.candidateToolIds = candidates
+    return failure
+  }
+
   function deltaContent(delta) {
     if (delta == null) return ''
     if (typeof delta === 'string') return delta
@@ -89,7 +159,7 @@
 
   function normalizeToolCalls(calls, actor) {
     const request = actor && actor.toolSpecs ? actor : null
-    const who = request ? request.actor : actor
+    const who = request ? request.agent.id : actor
     const allowed = requestToolMap(request)
     const list = calls || []
     const aliases = request && ai.toolAliasMap ? ai.toolAliasMap(request) : { byName: {} }
@@ -105,6 +175,7 @@
       let id = call.id || call.providerCallId || ('tc_provider_' + Date.now().toString(36) + '_' + nextProviderToolCallId++)
       let providerName = call && call.function && call.function.name || call.providerName || call.name || call.toolId || call.tool || ''
       let providerToolId = expectedNames[i]
+      let normalizedToolId = providerToolId
       let spec = requestToolSpec(request, providerToolId)
       let argumentMode = call.argumentMode || spec && spec.argumentMode || request && request.connectionCapabilities && request.connectionCapabilities.toolArguments || 'json'
       let providerArgs = null
@@ -125,10 +196,13 @@
         const route = spec && spec.route
         const executorToolId = route && route.toolId || null
         const executorArgs = routeToolArguments(providerArgs, route)
+        const unavailable = denied ? unavailableToolFailure(request, providerToolId, providerName) : null
+        normalizedToolId = unavailable ? unavailable.toolId : providerToolId
         normalized.push(Object.assign({}, call, {
           id: id,
-          toolId: providerToolId,
-          name: providerToolId,
+          toolId: normalizedToolId,
+          name: normalizedToolId,
+          providerName: providerName || null,
           providerToolId: route ? providerToolId : null,
           providerArgs: route ? providerArgs : null,
           args: providerArgs,
@@ -136,8 +210,9 @@
           executorArgs: route ? executorArgs : null,
           argumentMode: argumentMode,
           status: denied ? 'failed' : (call.status || 'proposed'),
-          error: denied ? ('Tool was not available in this request: ' + providerToolId) : call.error,
-          actor: call.actor || who || 'user',
+          error: denied ? unavailable.message : call.error,
+          errorDetails: denied ? unavailable : call.errorDetails,
+          actor: who || 'user',
           createdAt: call.createdAt || Date.now(),
           updatedAt: call.updatedAt || Date.now(),
         }))
@@ -148,7 +223,7 @@
       batch.push({
         callId: id,
         providerName: providerName,
-        toolId: providerToolId,
+        toolId: normalizedToolId,
         argumentMode: argumentMode,
         hasArgs: hasArgs,
         args: hasArgs ? providerArgs : null,
@@ -837,11 +912,10 @@
     return { closed: closed }
   }
 
-  function executeToolCalls(agentId, message, actor) {
+  function executeToolCalls(agentId, message, actor, signal) {
     const calls = message.toolCalls || []
     if (!calls.length) return Promise.resolve({ count: 0, waiting: false })
-    const jobs = []
-    let waiting = false
+    const pending = []
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i]
       if (isTerminalToolStatus(call.status)) {
@@ -850,22 +924,31 @@
         }
         continue
       }
-      let job = null
-      try {
-        job = Promise.resolve(executeOneToolCall(agentId, call, actor))
-      } catch (err) {
-        job = Promise.reject(err)
-      }
-      jobs.push(job.catch(function (err) {
-        appendToolResult(agentId, call, { error: String(err && err.message || err) }, 'error')
-        if (aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: call.toolId || call.name || 'tool' }, err)
-        return { waiting: false, error: err }
-      }).then(function (state) {
-        if (state && state.waiting) waiting = true
-        return state
-      }))
+      pending.push(call)
     }
-    return Promise.all(jobs).then(function () {
+    return ai.toolScheduler.schedule(pending, {
+      signal: signal,
+      parallelLimit: runtimeConfig.maxConcurrentTools,
+      halt: function (state) { return !!(state && state.waiting) },
+      mode: function (call) {
+        return ai.tools.executionMode(call.executorToolId || call.toolId, call.executorArgs == null ? call.args : call.executorArgs)
+      },
+      execute: function (call) {
+        let job = null
+        try {
+          job = Promise.resolve(executeOneToolCall(agentId, call, actor, { signal: signal }))
+        } catch (err) {
+          job = Promise.reject(err)
+        }
+        return job.catch(function (err) {
+          appendToolResult(agentId, call, { error: String(err && err.message || err) }, 'error')
+          if (err && err.code !== 'TOOL_CANCELLED' && aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: call.toolId || call.name || 'tool' }, err)
+          return { waiting: false, error: err }
+        })
+      },
+    }).then(function (states) {
+      let waiting = false
+      for (let i = 0; i < states.length; i++) if (states[i] && states[i].waiting) waiting = true
       return { count: calls.length, waiting: waiting }
     })
   }
@@ -892,18 +975,13 @@
   }
 
   function shouldAutoApplyTool(agent, call, state) {
-    if (!agent) return false
-    const id = call && (call.toolId || call.name || '')
-    if (ai.isToolAlwaysAllowed && ai.isToolAlwaysAllowed(agent.id, id)) return !!(state && state.canApply)
-    const risk = call && call.preview && call.preview.risk || call && call.result && call.result.risk || ''
-    if (risk === 'destructive' || risk === 'external') return false
-    return agent.permissionMode === 'full' && !!(state && state.canApply)
+    return !!(agent && state && state.applyDecision && state.applyDecision.allowed && state.canApply)
   }
 
-  function prepareApprovalTool(agentId, call, actor, tool) {
+  function prepareApprovalTool(agentId, call, actor, tool, options) {
     let state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
     if (state && state.canPreview) {
-      const preview = ai.previewToolCall(agentId, call.id, actor)
+      const preview = ai.previewToolCall(agentId, call.id, actor, options)
       if (preview && preview.promise) return preview.promise.then(function () { return { done: true } })
       return Promise.resolve({ done: true })
     }
@@ -912,14 +990,14 @@
       state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
     }
     if (state && state.canRun) {
-      const run = ai.runToolCall(agentId, call.id, actor)
+      const run = ai.runToolCall(agentId, call.id, actor, options)
       if (run && run.promise) return run.promise.then(function () { return { done: true } })
     }
     return Promise.resolve({ done: !!(tool.preview || tool.run) })
   }
 
-  function applyPreparedApprovalTool(agentId, call, actor) {
-    const applied = ai.applyToolCall(agentId, call.id, actor)
+  function applyPreparedApprovalTool(agentId, call, actor, options) {
+    const applied = ai.applyToolCall(agentId, call.id, actor, options)
     if (applied && applied.promise) {
       return applied.promise.then(function (done) {
         appendToolResult(agentId, call, done && done.status === 'failed' ? failedToolPayload(done) : done && (done.applyResult || done), done && done.status === 'failed' ? 'error' : 'done')
@@ -931,15 +1009,21 @@
   }
 
   function isWaitingForUser(state) {
-    return !!(state && (state.canPreview || state.canApply || state.canApprove || state.canRun || state.canReject))
+    return !!(state && ((state.runDecision && state.runDecision.decision === 'ask') || (state.applyDecision && state.applyDecision.decision === 'ask')))
   }
 
-  function executeOneToolCall(agentId, call, actor) {
+  function permissionFailure(call, decision) {
+    const code = decision && decision.decision === 'unavailable' ? 'PERMISSION_UNAVAILABLE' : 'PERMISSION_DENIED'
+    return { ok: false, code: code, error: decision && decision.reason || 'Tool call was not allowed', toolId: call.toolId }
+  }
+
+  function executeOneToolCall(agentId, call, actor, options) {
     const executorToolId = call.executorToolId || call.toolId
     const tool = ai.tools.get(executorToolId)
     if (!tool) {
       trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_missing', status: 'failed', summary: 'tool not found' }))
-      appendToolResult(agentId, call, { error: 'Tool not found: ' + call.toolId }, 'error')
+      const failed = ai.failToolCall(agentId, call.id, { code: 'TOOL_NOT_FOUND', message: 'Tool not found: ' + call.toolId }, 'run')
+      appendToolResult(agentId, call, failedToolPayload(failed), 'error')
       return Promise.resolve({ waiting: false })
     }
     trace(Object.assign(toolTraceBase(agentId, call), {
@@ -951,7 +1035,7 @@
     publishToolActivity(agentId, call, 'preparing')
     if (tool.apply) {
       publishToolActivity(agentId, call, tool.preview ? 'previewing' : 'preparing')
-      return prepareApprovalTool(agentId, call, actor, tool).then(function () {
+      return prepareApprovalTool(agentId, call, actor, tool, options).then(function () {
         const current = ai.findToolCall ? ai.findToolCall(agentId, call.id) : null
         const prepared = current && current.toolCall || call
         const state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
@@ -962,7 +1046,7 @@
         }
         if (shouldAutoApplyTool(ai.findAgent(agentId), prepared, state)) {
           publishToolActivity(agentId, call, 'applying')
-          return applyPreparedApprovalTool(agentId, call, actor).then(function (result) {
+          return applyPreparedApprovalTool(agentId, call, actor, options).then(function (result) {
             trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: 'applied', summary: toolCallName(call) }))
             return result
           })
@@ -971,16 +1055,31 @@
           trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
           return { waiting: true }
         }
-        trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: 'failed', summary: 'not actionable' }))
-        appendToolResult(agentId, call, { error: 'Tool call was not allowed or did not produce an actionable preview: ' + call.toolId }, 'error')
+        const denied = state && state.applyDecision || state && state.runDecision
+        trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_completed', status: 'failed', summary: denied && denied.reason || 'not actionable' }))
+        const failure = permissionFailure(call, denied)
+        const failed = ai.failToolCall(agentId, call.id, failure, 'apply')
+        appendToolResult(agentId, call, failedToolPayload(failed), 'error')
         return { waiting: false }
       })
     }
+    const state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
+    if (state && state.runDecision && state.runDecision.decision === 'ask') {
+      trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
+      return Promise.resolve({ waiting: true })
+    }
+    if (!state || !state.runDecision || !state.runDecision.allowed) {
+      const failure = permissionFailure(call, state && state.runDecision)
+      const failed = ai.failToolCall(agentId, call.id, failure, 'run')
+      appendToolResult(agentId, call, failedToolPayload(failed), 'error')
+      return Promise.resolve({ waiting: false })
+    }
     const approved = ai.approveToolCall(agentId, call.id, actor)
     publishToolActivity(agentId, call, 'running')
-    const run = approved && ai.runToolCall(agentId, call.id, actor)
+    const run = approved && ai.runToolCall(agentId, call.id, actor, options)
     if (!run || !run.promise) {
-      appendToolResult(agentId, call, { error: 'Tool call was not allowed: ' + call.toolId }, 'error')
+      const failed = ai.failToolCall(agentId, call.id, { code: 'PERMISSION_DENIED', message: 'Tool call was not allowed: ' + call.toolId }, 'run')
+      appendToolResult(agentId, call, failedToolPayload(failed), 'error')
       return Promise.resolve({ waiting: false })
     }
     return run.promise.then(function (done) {
@@ -1130,7 +1229,7 @@
         status: 'failed',
         error: payload.message,
         errorDetails: payload,
-        actor: request.actor || 'user',
+        actor: request.agent.id,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
@@ -1309,6 +1408,9 @@
       return { message: done, result: providerResult || result, request: attemptRequest }
     }
     function sendAttempt(attemptRequest) {
+      return ai.resolveRequest(attemptRequest, controller.signal).then(sendResolvedAttempt)
+    }
+    function sendResolvedAttempt(attemptRequest) {
       attemptRequest.stream = attemptRequest.stream || !!provider.stream
       trace({
         type: 'provider_request_started',
@@ -1397,7 +1499,7 @@
   function continueAfterTools(agentId, provider, message, result, request, controller, actor) {
     const calls = message.toolCalls || []
     if (!calls.length) return message
-    return executeToolCalls(agentId, message, actor).then(function (state) {
+    return executeToolCalls(agentId, message, agentId, controller.signal).then(function (state) {
       if (controller.signal.aborted || !state.count) return message
       const current = ai.findAgent(agentId)
       if (!current || state.waiting) {
@@ -1437,7 +1539,7 @@
         return message
       }
       if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agentId, null, { phase: 'before_tool_continuation' })
-      const nextRequest = makeRequest(ai.findAgent(agentId) || current, null, request.runId, actor, (request.turn || 0) + 1)
+      const nextRequest = planRunRequest(ai.findAgent(agentId) || current, null, request.runId, actor, (request.turn || 0) + 1)
       nextRequest.input = request.input
       nextRequest.budget = request.budget
       nextRequest.startedAt = request.startedAt
@@ -1459,12 +1561,12 @@
     return null
   }
 
-  function makeRequest(agent, input, runId, actor, turn) {
+  function planRunRequest(agent, input, runId, actor, turn) {
     const selected = runSkillRefs[runId] || []
     const requestInput = selected.length
       ? Object.assign({}, input || {}, { selectedSkillRefs: selected.slice() })
       : input
-    const request = ai.makeRequest(agent, requestInput, runId, actor, turn)
+    const request = ai.planRequest(agent, requestInput, runId, actor, turn)
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
     request.budget = quest && quest.budget || effectiveRunBudget()
     request.startedAt = quest && quest.startedAt || Date.now()
@@ -2062,8 +2164,8 @@
     closeStaleToolCalls(agent.id)
     if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agent.id, input, { phase: 'before_request' })
     agent = ai.findAgent(agent.id)
-    const request = makeRequest(agent, input, runId, actor, 0)
-    return startRunningRequest(agent.id, request, actor, input && input.content ? String(input.content).slice(0, 120) : '', true)
+    const request = planRunRequest(agent, input, runId, actor, 0)
+    return startRunningRequest(agent.id, request, actor, runStatusText(input), true)
   }
 
   function activeRunCount() {
@@ -2086,6 +2188,7 @@
     if (run) {
       run.controller.__aiditorStopReason = stopReason
       run.controller.abort()
+      if (ai.cancelRunToolCalls) ai.cancelRunToolCalls(agent.id, run.runId, 'Tool call was cancelled because the run stopped')
       ai.setActiveRunState(agent.id, {
         runId: run.runId,
         messageId: run.messageId || null,
@@ -2139,7 +2242,7 @@
     delete waitingRuns[agent.id]
     if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agent.id, waiting.request.input, { phase: 'before_resume' })
 
-    const request = makeRequest(ai.findAgent(agent.id), waiting.request.input, waiting.runId, waiting.actor, waiting.turn + 1)
+    const request = planRunRequest(ai.findAgent(agent.id), waiting.request.input, waiting.runId, waiting.actor, waiting.turn + 1)
     request.accumulatedUsage = waiting.usage || emptyUsage()
     request.startedAt = waiting.request.startedAt
     return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing after tool approval', false)
@@ -2474,6 +2577,15 @@
     return null
   }
 
+  function runStatusText(input) {
+    const content = input && input.content
+    if (content == null) return ''
+    const supported = typeof content === 'string' || Array.isArray(content) || content.type === 'rich-prompt'
+    if (!supported) return ''
+    const text = ai.messageText ? ai.messageText(content) : String(content)
+    return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 120)
+  }
+
   function activateRunSkill(runId, skillId, ctx) {
     const record = runRecord(runId)
     if (!record) throw new Error('Skill activation requires a live run.')
@@ -2486,14 +2598,26 @@
     }
     const active = (request.skills || []).indexOf(skillId) >= 0
     const selected = runSkillRefs[runId] = runSkillRefs[runId] || []
-    if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId }
+    if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId, lifetime: 'run' }
     selected.push(skillId)
-    return { outcome: 'activated', id: skillId, continuation: true }
+    return { outcome: 'activated', id: skillId, continuation: true, lifetime: 'run' }
   }
 
   function runSkillContext(runId, ctx) {
     const record = runRecord(runId)
     const request = record && record.request || {}
+    const active = []
+    const seen = {}
+    const requestSkills = request.skills || []
+    const selected = runSkillRefs[runId] || []
+    for (let i = 0; i < requestSkills.length; i++) {
+      if (!seen[requestSkills[i]]) active.push(requestSkills[i])
+      seen[requestSkills[i]] = true
+    }
+    for (let j = 0; j < selected.length; j++) {
+      if (!seen[selected[j]]) active.push(selected[j])
+      seen[selected[j]] = true
+    }
     return Object.assign({}, ctx || {}, {
       ai: ai,
       agent: request.agent,
@@ -2502,6 +2626,8 @@
       workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
       workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
       runtimeContext: request.runtimeContext || [],
+      skillRefs: active,
+      configuredSkillRefs: request.agent && request.agent.skillRefs ? request.agent.skillRefs.slice() : [],
     })
   }
 
@@ -2516,6 +2642,7 @@
     const next = config || {}
     if (next.maxConcurrentAgents != null) runtimeConfig.maxConcurrentAgents = next.maxConcurrentAgents
     if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
+    if (next.maxConcurrentTools != null) runtimeConfig.maxConcurrentTools = next.maxConcurrentTools
     if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
     if (next.maxToolArgumentCorrections != null) runtimeConfig.maxToolArgumentCorrections = next.maxToolArgumentCorrections
     if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)

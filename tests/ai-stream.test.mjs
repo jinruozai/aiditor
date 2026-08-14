@@ -24,6 +24,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/reference.js',
   'src/ai/request.js',
@@ -137,10 +138,13 @@ assert.equal(disabledStreamRequest.stream, false)
 let release
 const held = new Promise(function (resolve) { release = resolve })
 let abortCtx = null
+let markAbortStarted
+const abortStarted = new Promise(function (resolve) { markAbortStarted = resolve })
 ai.registerTransport('stream-hold', {
   toolProtocol: 'native',
   send: function (connection, request, ctx) {
     abortCtx = ctx
+    markAbortStarted()
     return held.then(function () {
       return { role: 'assistant', content: ctx.signal.aborted ? 'aborted' : 'late' }
     })
@@ -156,6 +160,7 @@ const run = ai.runAgent(aborting.id)
 assert.equal(run.request.stream, true)
 await Promise.resolve()
 await Promise.resolve()
+await abortStarted
 assert.equal(byId(ai.agents(), aborting.id).status, 'running')
 assert.equal(ai.stopAgent(aborting.id), true)
 assert.equal(abortCtx.signal.aborted, true)

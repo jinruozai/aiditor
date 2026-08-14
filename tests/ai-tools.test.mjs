@@ -24,6 +24,7 @@ for (const file of [
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
   'src/ai/skill/runtime.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/rich-prompt.js',
   'src/ai/request.js',
@@ -122,7 +123,7 @@ const defaultToolAgent = ai.createAgent({
   path: 'tools/default',
   connection: 'tool-test',
 })
-const defaultToolRequest = ai.makeRequest(defaultToolAgent, null, 'run_default_tools', 'user', 0)
+const defaultToolRequest = ai.planRequest(defaultToolAgent, null, 'run_default_tools', 'user', 0)
 assert.deepEqual(defaultToolRequest.tools, ['skill.list', 'skill.activate'])
 assert.equal(defaultToolRequest.toolSpecs.length, 2)
 
@@ -147,7 +148,7 @@ registerSkill('filtered-tools', {
   systemPrompt: 'Use only the filtered tool surface.',
   tools: ['hidden-by-default', 'currently-unavailable', 'ctx-visible'],
 }, { owner: 'test:filtered', layer: 'app', source: 'test-suite' })
-const filteredToolRequest = ai.makeRequest(ai.createAgent({
+const filteredToolRequest = ai.planRequest(ai.createAgent({
   name: 'Filtered Tool Agent',
   path: 'tools/filtered',
   connection: 'tool-test',
@@ -173,7 +174,7 @@ let explicitSkillDraft = ai.richPrompt.insertSkill(ai.richPrompt.empty(), 0, {
   title: 'Filtered Tools',
 })
 explicitSkillDraft = ai.richPrompt.insertText(explicitSkillDraft, explicitSkillDraft.text.length, ' inspect this')
-const explicitSkillRequest = ai.makeRequest(ai.createAgent({
+const explicitSkillRequest = ai.planRequest(ai.createAgent({
   name: 'Explicit Skill Agent',
   connection: 'tool-test',
 }), {
@@ -187,14 +188,14 @@ assert.deepEqual(explicitSkillRequest.tools, ['skill.list', 'skill.activate', 'h
 registerContext('tool-surface', {
   capture: function () { return { title: 'Current surface', tools: ['ctx-visible'] } },
 })
-const contextToolRequest = ai.makeRequest(ai.createAgent({
+const contextToolRequest = ai.planRequest(ai.createAgent({
   name: 'Context Tool Agent',
   connection: 'tool-test',
 }), null, 'run_context_tools', 'user', 0)
 assert.deepEqual(contextToolRequest.tools, ['skill.list', 'skill.activate'])
 ai.context.unregister('tool-surface', TEST_META)
 registerSkill('explicit-tools', { title: 'Explicit Tools', tools: ['hidden-by-default', 'currently-unavailable', 'edit-record'] })
-const explicitToolRequest = ai.makeRequest(ai.createAgent({
+const explicitToolRequest = ai.planRequest(ai.createAgent({
   name: 'Explicit Tool Agent',
   path: 'tools/explicit',
   connection: 'tool-test',
@@ -375,27 +376,28 @@ assert.equal(failedState.canApprove, false)
 assert.equal(failedState.canRun, false)
 
 const calls = []
-ai.setPermissionResolver(function (ctx, next) {
-  calls.push({ actor: ctx.actor, scope: ctx.scope, toolId: ctx.toolId, phase: ctx.phase, runId: ctx.runId, risk: ctx.risk })
+ai.permissions.setResolver(function (ctx, next) {
+  calls.push({ actor: ctx.actor, scope: ctx.scope, entry: ctx.entry, phase: ctx.phase, runId: ctx.runId, risk: ctx.risk })
   if (ctx.actor === 'blocked') return false
   if (ctx.scope === 'tool.apply') return false
   return next(ctx)
 })
 
-assert.equal(ai.canUseTool('user', agent.id, 'edit-record', 'call'), true)
-assert.equal(ai.canUseTool('user', agent.id, 'edit-record', 'apply'), false)
+assert.equal(ai.permissions.decide('user', agent.id, 'tool.call', { entry: 'edit-record', phase: 'run', target: 'edit-record', risk: 'read' }).allowed, true)
+assert.equal(ai.permissions.decide('user', agent.id, 'tool.apply', { entry: 'edit-record', phase: 'apply', target: 'edit-record', risk: 'write' }).allowed, false)
 const permissionCall = ai.createToolCall(agent.id, { toolId: 'edit-record' }, 'user')
 ai.updateMessage(agent.id, permissionCall.messageId, { meta: { runId: 'run_permission_test' } })
 assert.equal(ai.getToolCallActionState(agent.id, permissionCall.id, 'user').canApply, false)
 assert.equal(ai.permissionAuditRecords().some(function (item) {
   return item.scope === 'tool.apply' && item.entry === 'edit-record' && item.decision === 'deny' && item.runId === 'run_permission_test' && item.risk === 'write'
 }), true)
-assert.equal(ai.createToolCall(agent.id, { toolId: 'edit-record' }, 'blocked'), null)
+const blockedCall = ai.createToolCall(agent.id, { toolId: 'edit-record' }, 'blocked')
+assert.equal(ai.getToolCallActionState(agent.id, blockedCall.id, 'blocked').canApprove, false)
 assert.equal(ai.applyToolCall(agent.id, permissionCall.id, 'user'), null)
 assert.deepEqual(calls.some(function (call) {
-  return call.scope === 'tool.apply' && call.toolId === 'edit-record' && call.phase === 'apply' && call.runId === 'run_permission_test' && call.risk === 'write'
+  return call.scope === 'tool.apply' && call.entry === 'edit-record' && call.phase === 'apply' && call.runId === 'run_permission_test' && call.risk === 'write'
 }), true)
-ai.setPermissionResolver(null)
+ai.permissions.setResolver(null)
 
 let loopRequests = []
 registerTool('read-number', {
@@ -474,15 +476,98 @@ assert.equal(dynamicReply.content, 'dynamic complete')
 assert.equal(dynamicRequests.length, 3)
 ai.skills.unregister('dynamic.read', TEST_META)
 
+registerTool('diagnostic.readNumber', {
+  title: 'Diagnostic Read Number',
+  schema: { id: 'string' },
+  run: function (args) { return { id: args.id, value: 42 } },
+})
+registerSkill('diagnostic.read', {
+  title: 'Diagnostic Read',
+  description: 'Read a number after explicit run-scoped activation.',
+  tools: ['diagnostic.readNumber'],
+})
+const diagnosticRequests = []
+ai.registerTransport('diagnostic-skill', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    diagnosticRequests.push(request)
+    const index = diagnosticRequests.length
+    if (index === 1) {
+      assert.deepEqual(request.tools, ['skill.list', 'skill.activate'])
+      const state = ai.tools.get('skill.list').run({}, { runId: request.runId }).skills.find(function (skill) { return skill.id === 'diagnostic.read' })
+      assert.equal(state.available, true)
+      assert.equal(state.active, false)
+      assert.equal(state.configured, false)
+      assert.equal(state.lifetime, 'run')
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'skill.activate', args: { id: 'diagnostic.read' } }] }
+    }
+    if (index === 2) {
+      assert.equal(request.tools.includes('diagnostic.readNumber'), true)
+      const state = ai.tools.get('skill.list').run({}, { runId: request.runId }).skills.find(function (skill) { return skill.id === 'diagnostic.read' })
+      assert.equal(state.active, true)
+      assert.equal(state.configured, false)
+      assert.equal(state.lifetime, 'run')
+      return { role: 'assistant', content: 'first request complete' }
+    }
+    if (index === 3) {
+      assert.deepEqual(request.tools, ['skill.list', 'skill.activate'])
+      return { role: 'assistant', content: '', toolCalls: [{ function: { name: 'diagnostic__readNumber', arguments: '{"id":"stale"}' } }] }
+    }
+    if (index === 4) {
+      const payload = JSON.parse(request.messages[request.messages.length - 1].content)
+      assert.equal(payload.code, 'SKILL_ACTIVATION_REQUIRED')
+      assert.equal(payload.toolId, 'diagnostic.readNumber')
+      assert.equal(payload.providerName, 'diagnostic__readNumber')
+      assert.deepEqual(payload.skillIds, ['diagnostic.read'])
+      assert.equal(payload.lifetime, 'run')
+      assert.match(payload.hint, /Call skill\.activate/)
+      assert.match(payload.hint, /earlier request does not carry over/)
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'skill.activate', args: { id: 'diagnostic.read' } }] }
+    }
+    if (index === 5) {
+      assert.equal(request.tools.includes('diagnostic.readNumber'), true)
+      const activation = JSON.parse(request.messages[request.messages.length - 1].content)
+      assert.equal(activation.lifetime, 'run')
+      return { role: 'assistant', content: '', toolCalls: [{ function: { name: 'diagnostic__readNumber', arguments: '{"id":"recovered"}' } }] }
+    }
+    if (index === 7) {
+      const state = ai.tools.get('skill.list').run({}, { runId: request.runId }).skills.find(function (skill) { return skill.id === 'diagnostic.read' })
+      assert.equal(state.active, true)
+      assert.equal(state.configured, true)
+      assert.equal(state.lifetime, 'agent')
+      return { role: 'assistant', content: 'configured request complete' }
+    }
+    return { role: 'assistant', content: 'second request recovered' }
+  },
+})
+ai.registerConnection('diagnostic-skill', { auth: { type: 'none' }, transport: { type: 'diagnostic-skill' }, configDefaults: {} })
+const diagnosticAgent = ai.createAgent({ name: 'Diagnostic Skill Agent', connection: 'diagnostic-skill', permissionMode: 'full' })
+assert.equal((await ai.message.send(diagnosticAgent.id, 'activate once', 'user').promise).content, 'first request complete')
+assert.equal((await ai.message.send(diagnosticAgent.id, 'use it again', 'user').promise).content, 'second request recovered')
+assert.equal(diagnosticRequests.length, 6)
+const unavailableCall = ai.findAgent(diagnosticAgent.id).messages.flatMap(function (message) { return message.toolCalls || [] }).find(function (call) {
+  return call.toolId === 'diagnostic.readNumber' && call.args && call.args.id === 'stale'
+})
+assert.equal(unavailableCall.errorDetails.code, 'SKILL_ACTIVATION_REQUIRED')
+assert.equal(unavailableCall.providerName, 'diagnostic__readNumber')
+
+const configuredDiagnostic = ai.createAgent({ name: 'Configured Diagnostic Skill', connection: 'diagnostic-skill', skillRefs: ['diagnostic.read'] })
+assert.equal(ai.planRequest(configuredDiagnostic, null, 'run_configured_one', 'user', 0).tools.includes('diagnostic.readNumber'), true)
+assert.equal(ai.planRequest(configuredDiagnostic, null, 'run_configured_two', 'user', 0).tools.includes('diagnostic.readNumber'), true)
+assert.equal((await ai.message.send(configuredDiagnostic.id, 'configured skill', 'user').promise).content, 'configured request complete')
+assert.equal(diagnosticRequests.length, 7)
+ai.skills.unregister('diagnostic.read', TEST_META)
+ai.tools.unregister('diagnostic.readNumber', TEST_META)
+
 registerSkill('manual.once', {
   title: 'Manual Once',
   rules: ['Manual once rule'],
 })
-const inactiveSkillRequest = ai.makeRequest(loopAgent, null, 'run_inactive_skill', 'user', 0)
+const inactiveSkillRequest = ai.planRequest(loopAgent, null, 'run_inactive_skill', 'user', 0)
 assert.equal(inactiveSkillRequest.skills.includes('manual.once'), false)
 assert.equal(ai.skills.catalog({}, { query: 'manual' })[0].id, 'manual.once')
 ai.updateAgent(loopAgent.id, { skillRefs: ['manual.once'] })
-const configuredSkillRequest = ai.makeRequest(ai.findAgent(loopAgent.id), null, 'run_manual_skill', 'user', 0)
+const configuredSkillRequest = ai.planRequest(ai.findAgent(loopAgent.id), null, 'run_manual_skill', 'user', 0)
 assert.equal(configuredSkillRequest.skillActivations.find(function (item) { return item.id === 'manual.once' }).reason, 'configured')
 assert.match(configuredSkillRequest.messages[0].content, /Manual once rule/)
 ai.skills.unregister('manual.once', TEST_META)
@@ -490,7 +575,7 @@ ai.skills.unregister('manual.once', TEST_META)
 registerSkill('removed.skill', { title: 'Removed', rules: ['Never exposed'] })
 const staleSkillAgent = ai.createAgent({ name: 'Stale Skill Agent', connection: 'tool-test', skillRefs: ['removed.skill'] })
 ai.skills.unregister('removed.skill', TEST_META)
-const staleSkillRequest = ai.makeRequest(staleSkillAgent, null, 'run_stale_skill', 'user', 0)
+const staleSkillRequest = ai.planRequest(staleSkillAgent, null, 'run_stale_skill', 'user', 0)
 assert.deepEqual(staleSkillRequest.skills, [])
 assert.deepEqual(staleSkillRequest.skillActivations, [])
 

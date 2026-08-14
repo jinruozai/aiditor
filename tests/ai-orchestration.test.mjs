@@ -23,6 +23,7 @@ for (const file of [
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
   'src/ai/skill/builtins.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/orchestration.js',
   'src/ai/request.js',
@@ -74,11 +75,28 @@ assert.equal('guidance' in ai.tools.get('agent.send').schema.properties, false)
 assert.equal('permissions' in ai.tools.get('agent.create').schema.properties, false)
 assert.deepEqual(ai.tools.get('agent.reparent').schema.required, ['agentId', 'parentAgentId'])
 assert.match(ai.tools.get('agent.read').description, /direct children/)
+assert.match(ai.tools.get('agent.delegate').schema.properties.parentAgentId.description, /calling agent/)
 assert.equal(ai.skills.get('aiditor.agent-orchestration').tools.includes('agent.delegate'), true)
 
 const root = ai.createAgent({
   name: 'Root',
   skillRefs: ['aiditor.agent-orchestration'],
+  permissionMode: 'full',
+})
+assert.throws(function () {
+  ai.createAgent({ name: 'Orphan', parentAgentId: 'missing-parent' })
+}, /Parent agent not found/)
+
+const contextOwnedPreview = ai.tools.get('agent.create').preview({ name: 'Context Child' }, { agent: root })
+assert.equal(contextOwnedPreview.agent.parentAgentId, root.id)
+assert.throws(function () {
+  ai.tools.get('agent.create').preview({ name: 'Missing Caller Child' }, {
+    actor: 'missing-caller',
+    agent: root,
+    toolCall: { actor: 'missing-caller', args: { name: 'Missing Caller Child' } },
+  })
+}, function (error) {
+  return error && error.code === 'AGENT_PARENT_RESOLUTION_FAILED'
 })
 
 const createdAgent = previewApply(root.id, 'agent.create', {
@@ -102,6 +120,27 @@ const userRoot = previewApply(root.id, 'agent.create', {
   name: 'User Root',
 }, 'user')
 assert.equal(userRoot.parentAgentId, null)
+
+const approvedChildCall = ai.createToolCall(root.id, {
+  toolId: 'agent.create',
+  args: { name: 'User Approved Child' },
+}, root.id)
+assert.equal(ai.previewToolCall(root.id, approvedChildCall.id, root.id).status, 'previewed')
+const approvedChild = ai.applyToolCall(root.id, approvedChildCall.id, 'user')
+assert.equal(approvedChild.status, 'applied')
+assert.equal(approvedChild.applyResult.parentAgentId, root.id)
+
+const removedParent = ai.createAgent({ name: 'Removed Before Apply', parentAgentId: root.id, select: false })
+const staleParentCall = ai.createToolCall(root.id, {
+  toolId: 'agent.create',
+  args: { name: 'Stale Parent Child', parentAgentId: removedParent.id },
+}, root.id)
+assert.equal(ai.previewToolCall(root.id, staleParentCall.id, root.id).status, 'previewed')
+ai.deleteAgent(removedParent.id)
+const staleParentApply = ai.applyToolCall(root.id, staleParentCall.id, 'user')
+assert.equal(staleParentApply.status, 'failed')
+assert.equal(staleParentApply.errorDetails.code, 'AGENT_PARENT_RESOLUTION_FAILED')
+assert.equal(ai.agents.peek().some(function (agent) { return agent.name === 'Stale Parent Child' }), false)
 
 const rootEscapeCall = ai.createToolCall(root.id, {
   toolId: 'agent.create',
@@ -205,6 +244,16 @@ const completedCancellation = await runCall(root.id, 'quest.cancel', { agentId: 
 assert.equal(completedCancellation.result.cancelled, false)
 assert.equal(completedCancellation.result.outcome, 'already_terminal')
 assert.equal(completedCancellation.result.previousStatus, 'completed')
+assert.throws(function () {
+  ai.tools.get('quest.result').run({ agentId: createdAgent.id, questId: 'missing-quest' }, { actor: 'user', agent: root })
+}, function (error) {
+  return error && error.code === 'QUEST_NOT_FOUND' && error.details.agentId === createdAgent.id
+})
+assert.throws(function () {
+  ai.tools.get('quest.result').run({ agentId: createdAgent.id, questId: 'missing-quest' }, { actor: root.id, agent: root })
+}, function (error) {
+  return error && error.code === 'QUEST_UNAVAILABLE' && /agentId and questId/.test(error.hint)
+})
 assert.equal(sentRequest.agent.id, createdAgent.id)
 assert.equal(sentRequest.messages.some(function (message) {
   return message.role === 'system'

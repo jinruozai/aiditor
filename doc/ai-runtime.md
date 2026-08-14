@@ -18,6 +18,10 @@ Permission   centralized actor/target/scope decision and audit
 Targets, attachments, rich-prompt ranges, checkpoints, and provider wire
 formats are runtime/UX details rather than new capability models.
 
+Transient `statusText` is a bounded single-line projection of the current
+input. Rich prompts use the shared message text normalization contract; runtime
+state must never persist JavaScript object coercions such as `[object Object]`.
+
 ## Agent profile
 
 An Agent owns stable configuration:
@@ -45,13 +49,14 @@ configuration, and delegation accept `skillRefs` only.
 
 ```text
 queued input
-  -> makeRequest
+  -> planRequest (pure synchronous capability plan)
+  -> resolveRequest (abortable asynchronous Reference hydration)
   -> provider turn
   -> assistant Tool calls?
        no  -> validate optional outputSchema -> finish
        yes -> decode whole batch -> schema validation -> permission
               -> run/preview/apply or wait for approval
-              -> append Tool results -> makeRequest continuation
+              -> append Tool results -> plan/resolve continuation
 ```
 
 Each run has a stable `runId` and bounded `{maxTurns, timeoutMs, maxTokens}`.
@@ -81,10 +86,19 @@ Tools may implement:
 - `resolveSchema(ctx)` for request-time schema;
 - `resolveModelSpecs(ctx)` for provider-facing semantic projections;
 - `available(ctx)` for current host capability.
+- `permissionTargets(input, ctx, phase)` for exact Policy targets;
+- `isConcurrencySafe(input)` to opt a call into bounded parallel scheduling;
+- `timeoutMs` for an execution deadline.
 
 Skill activation never bypasses `available(ctx)` or Permission. Runtime decodes
 and validates the entire provider batch before executing any call. Strict Tool
 argument recovery is bounded and does not replay side effects.
+
+Tool batches preserve provider order. Consecutive calls run in parallel only
+when every call explicitly opts in through `isConcurrencySafe`; every other
+call is an exclusive barrier. `tool/runtime.js` remains the only ToolCall state
+owner. Execution ids prevent a timed-out or cancelled promise from settling a
+newer or terminal ToolCall.
 
 ## Context and references
 
@@ -124,16 +138,36 @@ The version is exact; there is no legacy migration path in the framework.
 `message.*` Tools. Agents may create or manage descendants only. Delegation
 selects focused child `skillRefs`; it does not pass raw Tool ids.
 
+Model-selected Skills remain run-scoped. When provider output calls a Tool from
+an available but inactive Skill, Runtime reports `SKILL_ACTIVATION_REQUIRED`
+with the canonical Tool id, original provider alias, and candidate Skill ids
+instead of the ambiguous generic Tool-unavailable message. `skill.list`
+separately reports `available`, `active`, `configured`, and activation lifetime.
+Cross-request capability configuration remains owned by persisted
+`agent.skillRefs`.
+
+The runtime, not provider output, owns each ToolCall actor. `agent.create` and
+new-agent `agent.delegate` resolve an omitted parent from that originating
+actor, revalidate it at apply time, and fail if the caller or parent no longer
+exists. Agent-originated creation can never fall back to a root Agent, and the
+Store rejects orphan parent ids.
+
 Quest result/cancel is the precise task lifecycle. `agent.stop` remains an
 emergency current-run control, not the normal quest completion mechanism.
+At the Agent boundary, an unreadable or missing Quest is reported uniformly as
+`QUEST_UNAVAILABLE` so existence is not leaked across ownership boundaries.
+User-originated diagnostics retain exact `AGENT_NOT_FOUND` and
+`QUEST_NOT_FOUND` codes.
 
 ## File ownership
 
 ```text
 src/ai/
+  i18n.js                   built-in AI Host UI dictionaries
   contribution-registry.js  shared exact-owner Registry primitive
   tool/
     registry.js              executable Tool definitions
+    scheduler.js             ordered parallel groups, barriers, deadline/abort
     runtime.js               Tool-call lifecycle and run context
   context/
     registry.js              factual Context providers
@@ -143,8 +177,8 @@ src/ai/
     builtins.js              framework Skill taxonomy
     packages.js              bounded SKILL.md discovery
     reference.js             Skill reference projection
-  request.js                 deterministic request assembly
-  runtime.js                 scheduler, run state, continuation, approval
+  request.js                 synchronous plan + async Reference hydration
+  runtime.js                 Agent run state, continuation, approval
   orchestration.js           Agent/Quest control Tools
   permission.js              centralized policy and audit
   store.js                   in-memory Agent state

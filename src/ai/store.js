@@ -78,7 +78,7 @@
       connection: connection,
       model: defaultAgentModel(spec, connection),
       contextBudgetTokens: spec.contextBudgetTokens || null,
-      permissionMode: spec.permissionMode || 'full',
+      permissionMode: spec.permissionMode || 'auto',
       status: spec.status || 'idle',
       statusText: spec.statusText || '',
       activeMessageId: spec.activeMessageId || null,
@@ -345,10 +345,9 @@
 
   function createAgent(spec) {
     spec = spec || {}
+    if (spec.parentAgentId != null && !findAgent(spec.parentAgentId)) throw new Error('Parent agent not found: ' + spec.parentAgentId)
     const agent = makeAgent(spec)
-    if (agent.parentAgentId && (!findAgent(agent.parentAgentId) || isDescendant(agent.id, agent.parentAgentId))) {
-      agent.parentAgentId = null
-    }
+    if (findAgent(agent.id)) throw new Error('Agent already exists: ' + agent.id)
     updateAgents(function (agents) { return agents.concat([agent]) })
     bumpAgent(agent.id)
     if (!spec || spec.select !== false) {
@@ -820,8 +819,8 @@
   }
 
   function permissionAllowed(actor, targetAgentId, scope, details) {
-    return ai.decidePermission
-      ? ai.decidePermission(actor || 'user', targetAgentId, scope, details || {}).allowed === true
+    return ai.permissions
+      ? ai.permissions.allowed(actor || 'user', targetAgentId, scope, details || {})
       : true
   }
 
@@ -980,8 +979,8 @@
     return next
   }
 
-  if (ai.configurePermissionAccessors) {
-    ai.configurePermissionAccessors({
+  if (ai.permissions) {
+    ai.permissions.configureAccessors({
       findAgent: findAgent,
       findQuest: findQuest,
       isDescendant: isDescendant,

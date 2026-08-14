@@ -1485,6 +1485,23 @@
   height: 10px;
 }
 
+.aiditor-ai-tool-batch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aiditor-space-1);
+  padding: var(--aiditor-space-1) var(--aiditor-space-2);
+  border-bottom: 1px solid var(--aiditor-border);
+  background: var(--aiditor-bg-1);
+}
+
+.aiditor-ai-tool-batch-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--aiditor-fg-3);
+  font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
+}
+
 .aiditor-ai-tool-call-permission {
   padding: 0 var(--aiditor-space-2) var(--aiditor-space-1);
   color: var(--aiditor-warn);

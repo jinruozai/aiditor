@@ -10,6 +10,7 @@ vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'a
 vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
 vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
@@ -50,7 +51,7 @@ const after = ai.findAgent(agent.id)
 assert.equal(after.contextRefs.length, 2)
 assert.equal(ai.attachments().length, 2)
 
-const request = ai.makeRequest(after, { attachments: [{ uri: 'case://item/c', kind: 'case.item', title: 'C' }] }, 'run-1', 'user', 0)
+const request = ai.planRequest(after, { attachments: [{ uri: 'case://item/c', kind: 'case.item', title: 'C' }] }, 'run-1', 'user', 0)
 assert.equal(request.contextRefs.length, 3)
 assert.equal(request.attachmentRefs.some(function (ref) { return ref.uri === 'case://item/c' }), true)
 

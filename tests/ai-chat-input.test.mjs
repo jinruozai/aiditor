@@ -144,6 +144,8 @@ window.ResizeObserver = FakeResizeObserver
 
 for (const file of [
   'src/core/signal.js',
+  'src/core/i18n.js',
+  'src/ai/i18n.js',
   'src/ui/_internal/_signal.js',
   'src/ui/_internal/_css.js',
   'src/ai/rich-prompt.js',
@@ -156,6 +158,8 @@ for (const file of [
 const aiditor = window.aiditor
 const ui = aiditor.ui
 const rich = aiditor.ai.richPrompt
+const iconButtons = []
+let openedMenu = null
 
 const inlineValue = aiditor.signal(rich.empty())
 const inlineMode = aiditor.signal(true)
@@ -208,6 +212,8 @@ ui.view = function (opts) { return ui.h('div', 'aiditor-ui-view ' + (opts.classN
 ui.icon = function () { return new FakeEl('span') }
 ui.iconButton = function (opts) {
   const el = new FakeEl('button')
+  el.__opts = opts
+  iconButtons.push(el)
   if (opts.onClick) el.addEventListener('click', opts.onClick)
   return el
 }
@@ -217,7 +223,7 @@ ui.button = function (opts) {
   return el
 }
 ui.select = function () { return new FakeEl('div') }
-ui.menu = function () {}
+ui.menu = function (opts) { openedMenu = opts }
 ui.tooltip = function () {}
 
 aiditor.settings = {
@@ -244,11 +250,34 @@ aiditor.ai.getConnectionConfig = function () { return { defaultModel: 'mock-mode
 aiditor.ai.response = { read() { return null } }
 aiditor.ai.updateAgent = function () {}
 aiditor.ai.message = { send() {} }
+aiditor.ai.currentWorkspace = function () { return null }
+aiditor.ai.workspaceMeta = function () { return null }
+aiditor.ai.workspaceVersion = function () { return 0 }
+aiditor.ai.currentGit = function () { return null }
+aiditor.ai.gitVersion = function () { return 0 }
+aiditor.ai.currentVerify = function () { return {} }
+aiditor.ai.verifyVersion = function () { return 0 }
 
 vm.runInThisContext(readFileSync('src/ai/panels/chat.js', 'utf8'), { filename: 'src/ai/panels/chat.js' })
 
 const chatInput = components['ai-chatinput']
 const chatRoot = chatInput.factory({ peek() { return {} } }, {})
+const environmentButton = iconButtons.find(function (button) {
+  const label = button.__opts.ariaLabel
+  return (typeof label === 'function' ? label() : label) === 'Agent environment capabilities'
+})
+assert.ok(environmentButton)
+environmentButton.dispatch('click', { currentTarget: environmentButton })
+assert.deepEqual(openedMenu.items.slice(1).map(function (item) { return item.label }), [
+  'Workspace · Not open',
+  'Git · Not configured',
+  'Verify · Ready',
+])
+aiditor.i18n.setLocale('zh')
+environmentButton.dispatch('click', { currentTarget: environmentButton })
+assert.equal(openedMenu.items[0].label, 'Agent 环境')
+assert.equal(openedMenu.items[1].label, '工作区 · 未打开')
+aiditor.i18n.setLocale('en')
 const chatObserver = resizeObservers.at(-1)
 const composer = chatRoot.querySelector('.aiditor-ai-composer')
 const prompt = chatRoot.querySelector('.aiditor-richprompt')

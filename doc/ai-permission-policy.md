@@ -27,18 +27,25 @@ baseVersion  optional ResourceVersion inspected during preview
 `actor` is the caller asking for the action. It may be the user, an agent, an
 extension, or system code acting through an explicit host policy.
 
-`agentId` is the agent run or conversation the action belongs to. It is not
+`targetAgentId` is the agent run or conversation the action belongs to. It is not
 automatically the actor. Helpers must preserve this distinction:
 
 ```text
 canRead(actor, target, scope)
 canSend(actor, target)
 canManage(actor, target)
-canUseTool(actor, agentId, toolId, phase, details)
+permissions.decide(actor, targetAgentId, scope, details)
+permissions.decideMany(actor, targetAgentId, scope, targets)
 ```
 
 Using the target agent as the actor silently widens permissions for delegated
 agents and provider/runtime hooks, so it is a contract violation.
+
+The actor that supplied a user message remains available to Context and
+Reference hydration. Provider-emitted Tool calls are always attributed to the
+running Agent; a user-originated prompt never turns subsequent model actions
+into user actions. A transcript approval executes only that exact ToolCall as
+the user.
 
 The resolver returns:
 
@@ -67,22 +74,26 @@ Full access is scoped. It does not automatically allow hidden tools, extension
 code install, shell execution, network calls, or writes outside the granted
 workspace.
 
-## Always Allow
+## Scoped grants
 
 "Always allow" is not a global bypass. It is a cached resolver decision scoped
 to:
 
 ```text
-agentId + entry + phase + target scope + workspace + origin + risk
+agentId + entry + phase + target + workspace + origin + risk + contract
 ```
 
-It should support expiry, manual revoke, and agent deletion cleanup. A changed
+The Tool transcript may create or revoke these exact grants. Its localized
+"Remember" control records approval intent only: the grant is persisted after
+that ToolCall applies successfully, while rejection or execution failure never
+creates a grant. Grants support expiry and are stored with the Agent. A changed
 workspace root, extension origin, tool schema, or risk classification invalidates
 the cached decision.
 
 ## Audit
 
-Every decision and every executed action writes an audit record:
+Every decision writes a permission audit record. Executed actions remain in the
+run trace, linked by the same run and entry fields:
 
 ```text
 traceId

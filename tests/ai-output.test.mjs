@@ -24,6 +24,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
@@ -54,7 +55,7 @@ const outputSchema = {
   },
 }
 const agent = ai.createAgent({ name: 'Structured', connection: 'structured-test', outputSchema: outputSchema })
-const request = ai.makeRequest(agent, null, 'output-request', 'user', 0)
+const request = ai.planRequest(agent, null, 'output-request', 'user', 0)
 assert.deepEqual(request.outputSchema, outputSchema)
 assert.equal(request.messages.some(function (message) { return String(message.content).includes('FINAL_OUTPUT_CONTRACT') }), true)
 

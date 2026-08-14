@@ -249,16 +249,21 @@ aiditor/
 - `aiditor.inspector` 是 UI 层通用检查器协议:ordered targets + provider.inspect + 内置 `inspector` dock panel。多选显示第一个 target,只有所有 target 都有且可写的字段才可编辑;业务对象语义、校验、持久化由 provider 所属编辑器负责。
 
 **AI Host(可选层)**:
-- `src/ai/permission.js` 是统一 permission resolver / audit / path rule owner。Tools、operations、ChangeSet apply、workspace writes、extension install、host adapter 调用都走同一套 actor/target/scope 判断。
+- `src/ai/permission.js` 是统一 Policy owner。四态 `allow/deny/ask/unavailable`、模式语义、精确 target/contract grant、audit 和 path rule 全部只在这里维护。Tools、References、Operations、ChangeSet、Workspace、Extension 和 host adapter 不得另建许可模型。
+- Tool 审批里的 `Remember` 是走 `aiditor.i18n` 的通用文案,只记录本次审批意图;仅 ToolCall 成功 apply 后写入精确 grant,Reject 或执行失败不得留下授权。批量审批只提供逐项操作入口,不承诺事务或回滚。
+- AI chat 的环境状态直接读取当前 Workspace、Git、Verify owner 的真实响应式能力,不得维护第二份 capability 状态。
 - AI contributions 分为 `tool/registry.js`、`context/registry.js`、`skill/registry.js`;`contribution-registry.js` 只提供必须 owner 的精确生命周期。Dotted name 只负责命名/发现,不能用于卸载。
 - `src/ai/tool/runtime.js` 只负责 tool-call lifecycle 和 run context helper。
 - `src/ai/persistence.js` 将完整 JSON-safe 聊天转录异步保存到 IndexedDB;`localStorage` 只保存轻量 Agent 启动清单。持久化边界负责 v2 → v3 快照迁移并立即回写;损坏的单条 transcript 用当前有效启动状态覆盖恢复,不得清空整个数据库或永久阻塞启动。模型上下文压缩只影响 provider request projection,不得删除 UI transcript。
-- `src/ai/request.js` 负责 Skill-first 请求组装:Context 只提供事实;Tool 面严格等于 `skill.list/skill.activate + activeSkill.tools`,再经过 availability/permission,不接受 Agent 直配 Tool、Context/Reference 注入 Tool,也不回退全量 Tool。
+- `src/ai/request.js` 负责 Skill-first 请求组装:`planRequest()` 同步确定能力面,`resolveRequest()` 只负责可取消的异步 Reference hydration。Context 只提供事实;Tool 面严格等于 `skill.list/skill.activate + activeSkill.tools`,再经过 availability/permission,不接受 Agent 直配 Tool、Context/Reference 注入 Tool,也不回退全量 Tool。
 - Skill registry 使用统一 `SkillSpec` 和精确 owner/source/hash 生命周期;显式 Skill、`agent.skillRefs`、run-scoped `skill.activate` 写入 `skill_activated` trace。框架不做关键词/`auto(ctx)` 猜测。`src/ai/skill/packages.js` 可从 bounded workspace 加载标准 `SKILL.md` 并按需读取 `references/`,但绝不执行 package scripts 或绕过 Tool/permission registry。
+- `skill.activate` 只属于当前 run,不得静默写入 Agent 配置;跨请求能力只由持久 `agent.skillRefs` 拥有,且 Agent 不能修改自身稳定配置。`skill.list` 必须区分 `available/active/configured/lifetime`。Provider 在新请求调用可用但未激活 Skill 的 Tool 时,Adapter/Runtime 必须把唯一 wire alias 还原为 canonical Tool id,返回 `SKILL_ACTIVATION_REQUIRED + providerName + skillIds + lifetime:run`;alias 多候选时不得猜测或执行。
 - Agent 可声明 provider-neutral `outputSchema`;最终无工具调用的回复统一解析/校验到 `message.output`。Connection 层提供 bounded retry 与 health signal;流开始后不重放。可选 `ai.checkpoints` 只恢复安全排队状态,`ai.evals` 复用现有 trace 做确定性评估,都不引入项目 workflow 语义。
 - Tool envelope (`toolProtocol`) 与参数可靠性 (`toolArguments: strict|structured|json|none`) 是正交能力。严格连接按请求期 Tool Schema 约束生成;Adapter 只做一次 wire decode;Runtime 先完整解码并保留整批结构化参数,再按原始 Schema 校验,最后才允许执行。完整 strict 批次可先做一次隐藏约束恢复;其他无副作用的参数错误以结构化 Tool Result 进入同一 run 的有限纠正状态机。重复指纹包含 Tool、规范化参数哈希和具体错误;trace/log 只保存有界摘要与哈希。联合 Schema 只有在所有分支共同声明唯一 `const`/单值 `enum` 判别字段时才展开具体分支错误;候选由 Schema 决定且与输入字段顺序无关,缺失分支属性只会使候选失效,不得抛异常或猜测业务形状。
-- `src/ai/runtime.js` 负责 scheduler/run/resume/tool approval/continuation。Quest 使用统一 `{maxTurns,timeoutMs,maxTokens}` budget,达到边界后以稳定 `stopReason` 停止并通知父 Agent;模型委托另受 `maxDelegationDepth` 限制。
-- `src/ai/orchestration.js` 的 `agent.create` / `agent.delegate` 共用父链解析:Agent 省略 `parentAgentId` 时默认创建自己的子节点,用户省略时创建根节点;Agent 不可逃逸到根级。`agent.read` 只返回有界 profile/树级摘要,`agent.configure` 只允许用户或父级修改后代的稳定配置,不能改自身或运行状态。Quest 用 `read/result/cancel` 形成精确任务闭环;`agent.stop` 只是当前 run 的紧急停止。模型控制工具用稳定 `outcome` 区分成功、无活动 run 和已终态 Quest,不存在/无权限仍然是错误。
+- `src/ai/runtime.js` 负责 Agent run/resume/tool approval/continuation。Quest 使用统一 `{maxTurns,timeoutMs,maxTokens}` budget,达到边界后以稳定 `stopReason` 停止并通知父 Agent;模型委托另受 `maxDelegationDepth` 限制。
+- Agent 的瞬时 `statusText` 只保存当前输入经共享 message text contract 归一化后的有界单行文本;rich prompt 不得直接 `String(object)` 产生 `[object Object]`,也不得另建一套 prompt 解析。
+- `src/ai/tool/scheduler.js` 只负责 Tool batch 的顺序、显式并行组、exclusive barrier 和 deadline/abort;`src/ai/tool/runtime.js` 是唯一 ToolCall 状态 owner,execution id 阻止超时/取消后的晚到 Promise 覆盖终态。
+- `src/ai/orchestration.js` 的 `agent.create` / `agent.delegate` 共用父链解析:ToolCall 来源 Agent 由 Runtime 固定,不能被 Provider 输出覆盖;Agent 省略 `parentAgentId` 时默认创建自己的子节点,用户省略时创建根节点;preview 经过审批后 apply 仍按原 ToolCall 来源重新校验,来源或父级失效必须失败,绝不降级到根级;Store 拒绝孤儿父级。`agent.read` 只返回有界 profile/树级摘要,`agent.configure` 只允许用户或父级修改后代的稳定配置,不能改自身或运行状态。Quest 用 `read/result/cancel` 形成精确任务闭环;`agent.stop` 只是当前 run 的紧急停止。模型控制工具用稳定 `outcome` 区分成功、无活动 run 和已终态 Quest,不存在/无权限仍然是错误。
 - `src/ai/message-markdown.js` + `message-renderers.js` 负责安全 Markdown 文本渲染、主流 provider content block 归一化、结构化 message part renderer registry 和一致的复制文本;不执行 raw HTML,不把任意 JSON 猜成 UI。
 - `src/ai/reference.js` 提供 references + operations 协议;`src/ai/change-set.js` 提供 grouped review/apply。
 - Model-facing operation 只通过显式 `exposeToModel:true + inputSchema + preview/apply` 进入模型能力面;request builder 按当前 `available(ctx)` 把每个 operation 直接投影为 `operationId(inputSchema)` 并独立 strict 编译。模型看不到 preview/apply gateway、`{input}` 包装或 `previewId`;Runtime 以独立 `executorToolId/executorArgs` 隐藏路由回唯一 canonical preview/apply 生命周期,而日志、错误、权限审计和回放始终使用原 operation id 与直接输入。一个不兼容 schema 只能降级自己的投影。

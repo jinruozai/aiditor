@@ -19,6 +19,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
+  'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
   'src/ai/skill/builtins.js',
   'src/ai/workdir.js',
@@ -39,23 +40,23 @@ const workspace = aiditor.workspace.memory({
 })
 
 const agent = ai.createAgent({ name: 'Workspace Agent', permissionMode: 'default', skillRefs: ['aiditor.workspace-authoring'] })
-const noWorkspaceRequest = ai.makeRequest(agent, null, 'run_no_workspace_tools', 'user', 0)
+const noWorkspaceRequest = ai.planRequest(agent, null, 'run_no_workspace_tools', 'user', 0)
 assert.equal(noWorkspaceRequest.tools.some(function (tool) { return tool.indexOf('workspace.') === 0 }), false)
 assert.equal(noWorkspaceRequest.tools.some(function (tool) { return tool.indexOf('code.') === 0 }), false)
-const blockedUiRequest = ai.makeRequest(agent, { role: 'user', content: '写一个简单的背包界面，放在主dock' }, 'run_blocked_ui_tools', 'user', 0)
+const blockedUiRequest = ai.planRequest(agent, { role: 'user', content: '写一个简单的背包界面，放在主dock' }, 'run_blocked_ui_tools', 'user', 0)
 assert.equal(blockedUiRequest.tools.length, 0)
 assert.doesNotMatch(blockedUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
 assert.equal(blockedUiRequest.skills.includes('aiditor.workspace-authoring'), false)
 assert.equal(ai.skills.availability('aiditor.workspace-authoring', {}).available, false)
 assert.match(blockedUiRequest.messages[0].content, /Current runtime state and available tools/)
-const escapedChineseUiRequest = ai.makeRequest(agent, { role: 'user', content: '\u5199\u4e00\u4e2a\u7b80\u5355\u7684\u80cc\u5305\u754c\u9762\uff0c\u653e\u5728\u4e3bdock' }, 'run_escaped_chinese_ui_tools', 'user', 0)
+const escapedChineseUiRequest = ai.planRequest(agent, { role: 'user', content: '\u5199\u4e00\u4e2a\u7b80\u5355\u7684\u80cc\u5305\u754c\u9762\uff0c\u653e\u5728\u4e3bdock' }, 'run_escaped_chinese_ui_tools', 'user', 0)
 assert.equal(escapedChineseUiRequest.tools.length, 0)
 assert.doesNotMatch(escapedChineseUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
 const dir = ai.setWorkspace(workspace, { id: 'memory:test', label: 'Test Workspace', kind: 'memory' })
-const plainWorkspaceRequest = ai.makeRequest(ai.createAgent({ name: 'Plain Workspace Agent' }), null, 'run_plain_workspace', 'user', 0)
+const plainWorkspaceRequest = ai.planRequest(ai.createAgent({ name: 'Plain Workspace Agent' }), null, 'run_plain_workspace', 'user', 0)
 assert.deepEqual(plainWorkspaceRequest.tools, [])
 assert.equal(plainWorkspaceRequest.skills.includes('aiditor.workspace-authoring'), false)
-const workspaceRequest = ai.makeRequest(agent, null, 'run_workspace_tools', 'user', 0)
+const workspaceRequest = ai.planRequest(agent, null, 'run_workspace_tools', 'user', 0)
 assert.equal(workspaceRequest.tools.includes('workspace.fileSummary'), true)
 assert.equal(workspaceRequest.tools.includes('workspace.mkdir'), true)
 assert.equal(workspaceRequest.tools.includes('workspace.move'), true)
@@ -212,8 +213,8 @@ const deleted = await ai.tools.get('workspace.delete').run({ path: 'src/extra.js
 assert.equal(deleted.applied, true)
 assert.equal(deleted.effects[0].path, 'src/extra.js')
 
-ai.setPermissionResolver(function (perm, next) {
-  if (perm.toolId === 'workspace.delete' && perm.phase === 'apply') return false
+ai.permissions.setResolver(function (perm, next) {
+  if (perm.entry === 'workspace.delete' && perm.phase === 'apply') return false
   return next(perm)
 })
 const deleteCall = ai.createToolCall(agent.id, {
@@ -224,6 +225,6 @@ const deletePreview = ai.previewToolCall(agent.id, deleteCall.id, 'user')
 await deletePreview.promise
 assert.equal(ai.applyToolCall(agent.id, deleteCall.id, 'user'), null)
 assert.equal((await ai.tools.get('workspace.stat').run({ path: 'src/via-apply.js' }, ctx)).path, 'src/via-apply.js')
-ai.setPermissionResolver(null)
+ai.permissions.setResolver(null)
 
 console.log('ai workdir tests ok')

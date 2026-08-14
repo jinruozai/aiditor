@@ -7,7 +7,7 @@
 
   ai.tools.register('skill.list', {
     title: 'List Skills',
-    description: 'Discover focused capabilities available in the current AIditor runtime. Use this when the task needs a capability that is not already active.',
+    description: 'Discover focused capabilities and their current active/configured state. Use this when the task needs a capability that is not already active.',
     schema: {
       type: 'object',
       properties: {
@@ -17,13 +17,24 @@
     },
     run: function (input, ctx) {
       const catalogCtx = ai._runSkillContext ? ai._runSkillContext(ctx && ctx.runId, ctx || {}) : (ctx || {})
-      return { skills: ai.skills.catalog(catalogCtx, input || {}) }
+      const active = catalogCtx.skillRefs || []
+      const configured = catalogCtx.configuredSkillRefs || catalogCtx.agent && catalogCtx.agent.skillRefs || []
+      return {
+        skills: ai.skills.catalog(catalogCtx, input || {}).map(function (skill) {
+          const isConfigured = configured.indexOf(skill.id) >= 0
+          return Object.assign({}, skill, {
+            active: active.indexOf(skill.id) >= 0,
+            configured: isConfigured,
+            lifetime: isConfigured ? 'agent' : 'run',
+          })
+        }),
+      }
     },
   }, META)
 
   ai.tools.register('skill.activate', {
     title: 'Activate Skill',
-    description: 'Activate one available Skill for the current run. Its instructions and Tools become available on the next continuation.',
+    description: 'Activate one available Skill for the current run only. Its instructions and Tools become available on the next continuation. Activate it again in a new request unless it is configured in agent.skillRefs.',
     schema: {
       type: 'object',
       required: ['id'],

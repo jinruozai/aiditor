@@ -27,7 +27,8 @@ function loadRequestRuntime() {
   vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
   vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
-  vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
+  vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
+vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
   vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
   vm.runInThisContext(readFileSync('src/ai/runtime.js', 'utf8'), { filename: 'ai/runtime.js' })
 }
@@ -103,7 +104,7 @@ function assertCompactionRecordAndRequestView() {
   assert.equal(updatedMemory.openItems.includes('Add visual compaction inspector later.'), true)
   assert.equal(ai.compaction.records(agent.id).length, 1)
 
-  const request = ai.makeRequest(ai.findAgent(agent.id), null, 'run-test', 'user', 0)
+  const request = ai.planRequest(ai.findAgent(agent.id), null, 'run-test', 'user', 0)
   const text = requestText(request)
   const requestIds = request.messages.map(function (message) { return message.id }).filter(Boolean)
   assert.match(text, /Compact durable agent memory/)
@@ -162,7 +163,7 @@ function assertToolGroupBudgetStaysTogether() {
   const tool = agent.messages[2]
   ai.updateMessage(agent.id, tool.id, { meta: { sourceMessageId: assistant.id, toolCallId: 'call-1', toolId: 'workspace.readText' } })
   const current = ai.findAgent(agent.id).messages[3]
-  const request = ai.makeRequest(ai.findAgent(agent.id), current, 'run-budget', 'user', 0)
+  const request = ai.planRequest(ai.findAgent(agent.id), current, 'run-budget', 'user', 0)
   const ids = request.messages.map(function (message) { return message.id }).filter(Boolean)
   if (ids.includes(assistant.id)) assert.equal(ids.includes(tool.id), true)
 }

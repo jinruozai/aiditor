@@ -323,6 +323,32 @@
     })
   }
 
+  function pathTarget(args) {
+    const path = args && args.path || ''
+    return { target: path, path: path }
+  }
+
+  function mutationTarget(args, ctx, phase) {
+    const target = pathTarget(args)
+    return Object.assign(target, { risk: phase === 'apply' ? 'write' : 'read', baseVersion: args && args.baseHash || null })
+  }
+
+  function copyTargets(args, ctx, phase) {
+    const write = phase === 'apply'
+    return [
+      { target: args.from, path: args.from, risk: write ? 'read' : 'read', baseVersion: args.baseHash || null },
+      { target: args.to, path: args.to, risk: write ? 'write' : 'read' },
+    ]
+  }
+
+  function moveTargets(args, ctx, phase) {
+    const risk = phase === 'apply' ? 'write' : 'read'
+    return [
+      { target: args.from, path: args.from, risk: risk, baseVersion: args.baseHash || null },
+      { target: args.to, path: args.to, risk: risk },
+    ]
+  }
+
   function registerTools() {
     const owner = 'aiditor.ai.workspace'
     ai.tools.register('workspace.listFiles', {
@@ -330,6 +356,8 @@
       description: 'List files under the current AI workspace.',
       schema: { type: 'object', properties: { path: { type: 'string' } } },
       permissions: ['tool.call'],
+      permissionTargets: pathTarget,
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: function (args) { return requireWorkspace().list(args && args.path || '') },
     }, { owner: owner, layer: 'builtin' })
@@ -338,6 +366,8 @@
       description: 'Read a compact recursive file tree summary. Use this before reading many files.',
       schema: { type: 'object', properties: { path: { type: 'string' }, maxFiles: { type: 'number' }, maxDepth: { type: 'number' } } },
       permissions: ['tool.call'],
+      permissionTargets: pathTarget,
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: fileSummary,
     }, { owner: owner, layer: 'builtin' })
@@ -346,6 +376,8 @@
       description: 'Read the generic capabilities supported by the current workspace adapter.',
       schema: { type: 'object', properties: {} },
       permissions: ['tool.call'],
+      permissionTargets: function () { return { target: '' } },
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: function () {
         const ws = requireWorkspace()
@@ -357,6 +389,8 @@
       description: 'Search text in the current AI workspace. Results include fileHash, line, column, and preview ranges for precise follow-up reads.',
       schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, path: { type: 'string' }, include: { type: 'array' }, exclude: { type: 'array' }, mode: { type: 'string', enum: ['literal', 'regex'] }, caseSensitive: { type: 'boolean' }, before: { type: 'number' }, after: { type: 'number' }, limit: { type: 'number' }, maxPerFile: { type: 'number' }, maxFiles: { type: 'number' }, maxFileBytes: { type: 'number' } } },
       permissions: ['tool.call'],
+      permissionTargets: pathTarget,
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: function (args) { return requireWorkspace().search(args.query || '', args || {}) },
     }, { owner: owner, layer: 'builtin' })
@@ -365,6 +399,8 @@
       description: 'Read one text file from the current AI workspace. Use readTextRange for large source files.',
       schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, full: { type: 'boolean' }, maxChars: { type: 'number' }, maxLines: { type: 'number' } } },
       permissions: ['tool.call'],
+      permissionTargets: pathTarget,
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: readText,
     }, { owner: owner, layer: 'builtin' })
@@ -373,6 +409,8 @@
       description: 'Read a 1-based line range from one workspace file.',
       schema: { type: 'object', required: ['path', 'startLine', 'endLine'], properties: { path: { type: 'string' }, startLine: { type: 'number' }, endLine: { type: 'number' } } },
       permissions: ['tool.call'],
+      permissionTargets: pathTarget,
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: readTextRange,
     }, { owner: owner, layer: 'builtin' })
@@ -401,6 +439,7 @@
         },
       },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: mutationTarget,
       available: workspaceAvailable,
       preview: function (args) { return previewTextOperation('edit', args) },
       apply: applyWriteText,
@@ -411,6 +450,7 @@
       description: 'Write one complete text file inside the current AI workspace. JS/JSON writes are validated before commit; prefer editText for existing source files.',
       schema: { type: 'object', required: ['path', 'text'], properties: { path: { type: 'string' }, text: { type: 'string' }, baseHash: { type: 'string' }, overwrite: { type: 'boolean' }, confirmOverwrite: { type: 'boolean' }, confirmWarnings: { type: 'boolean' }, validate: { type: 'string', enum: ['auto', 'none', 'javascript', 'json'] } } },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: mutationTarget,
       available: workspaceAvailable,
       preview: function (args) { return previewTextOperation('write', args) },
       apply: applyWriteText,
@@ -421,6 +461,7 @@
       description: 'Patch a workspace file with 1-based line patches and a base hash. JS/JSON results are validated before commit.',
       schema: { type: 'object', required: ['path', 'baseHash', 'patches'], properties: { path: { type: 'string' }, baseHash: { type: 'string' }, patches: { type: 'array' }, validate: { type: 'string', enum: ['auto', 'none', 'javascript', 'json'] } } },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: mutationTarget,
       available: workspaceAvailable,
       preview: function (args) { return previewTextOperation('patch', args) },
       apply: applyWriteText,
@@ -431,6 +472,7 @@
       description: 'Create one directory inside the current workspace.',
       schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: mutationTarget,
       available: workspaceAvailable,
       preview: function (args) { return previewPathOperation('mkdir', args) },
       apply: function (preview) { return applyPathOperation('mkdir', preview) },
@@ -441,6 +483,7 @@
       description: 'Copy one file or directory inside the current workspace.',
       schema: { type: 'object', required: ['from', 'to'], properties: { from: { type: 'string' }, to: { type: 'string' }, baseHash: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: copyTargets,
       available: workspaceAvailable,
       preview: function (args) { return previewPathOperation('copy', args) },
       apply: function (preview) { return applyPathOperation('copy', preview) },
@@ -451,6 +494,7 @@
       description: 'Move or rename one file or directory inside the current workspace.',
       schema: { type: 'object', required: ['from', 'to'], properties: { from: { type: 'string' }, to: { type: 'string' }, baseHash: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
+      permissionTargets: moveTargets,
       available: workspaceAvailable,
       preview: function (args) { return previewPathOperation('move', args) },
       apply: function (preview) { return applyPathOperation('move', preview) },
@@ -461,6 +505,10 @@
       description: 'Delete one file or directory inside the current workspace. Directories require recursive:true.',
       schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, recursive: { type: 'boolean' }, baseHash: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
+      capabilities: { delete: true },
+      permissionTargets: function (args, ctx, phase) {
+        return Object.assign(pathTarget(args), { risk: phase === 'apply' ? 'delete' : 'read', baseVersion: args.baseHash || null })
+      },
       available: workspaceAvailable,
       preview: function (args) { return previewPathOperation('delete', args) },
       apply: function (preview) { return applyPathOperation('delete', preview) },
@@ -471,6 +519,8 @@
       description: 'Read metadata for one path in the current AI workspace.',
       schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' } } },
       permissions: ['tool.call'],
+      permissionTargets: pathTarget,
+      isConcurrencySafe: function () { return true },
       available: workspaceAvailable,
       run: function (args) { return requireWorkspace().stat(args.path) },
     }, { owner: owner, layer: 'builtin' })
