@@ -3,12 +3,13 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const OWNER = 'aiditor.ai.git'
   let adapter = null
   let registered = false
 
   function configureGit(next) {
-    if (registered && ai.tools && ai.tools.unregisterPrefix) {
-      ai.tools.unregisterPrefix('git')
+    if (registered && ai.tools && ai.tools.unregisterOwner) {
+      ai.tools.unregisterOwner(OWNER)
       registered = false
     }
     adapter = next || null
@@ -65,7 +66,7 @@
       schema: schema || { type: 'object', properties: {} },
       permissions: ['tool.call'],
       run: function (args) { return callAdapter(method, args) },
-    }, { owner: 'aiditor.ai.git', layer: 'builtin' })
+    }, { owner: OWNER, layer: 'builtin' })
   }
 
   function registerApplyTool(name, method, title, description, schema) {
@@ -77,7 +78,7 @@
       preview: function (args) { return previewGitChange(name, args) },
       apply: function (preview) { return applyGit(method, preview) },
       run: function (args) { return callAdapter(method, args) },
-    }, { owner: 'aiditor.ai.git', layer: 'builtin' })
+    }, { owner: OWNER, layer: 'builtin' })
   }
 
   function registerTools() {

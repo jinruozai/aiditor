@@ -367,6 +367,14 @@ underlying `aiditor.ui.richPromptInput` accepts a boolean or signal for
 `singleLine`, allowing its ARIA and keyboard semantics to follow the layout
 without remounting.
 
+At the prompt start, `/` opens the AI-owned composer discovery surface. It
+reuses `ui.quickPick` in controlled-query mode, so DOM focus, selection, IME,
+and the rich prompt remain owned by the composer. The surface projects
+user-invocable Skills plus Command contributions targeting
+`ai.composer.slash`; it does not enumerate raw model Tools. Skill selection
+creates a removable structured token for the current message, while Command
+selection runs through the existing Command registry.
+
 ## UI Library
 
 The UI library provides reusable components and primitive constructors. Generic
@@ -395,6 +403,16 @@ that arrange rows and stable items on one horizontal numeric axis. It provides
 pure geometry through `createLayout()` and a controlled DOM/input/paint shell
 through `createSurface()`. The caller owns data, painting, selection, commands,
 history, playback, and domain meaning. See [timeline.md](./timeline.md).
+
+`aiditor.ui.colorInput` owns the complete edit session for its inline text field
+and portal-mounted picker. `onChange(value, meta)` remains the live value path;
+during a gesture `meta.edit.phase` is `update`. `onCommit(value, meta)` fires
+once when that gesture finishes, and `onCancel(initialValue, meta)` fires after
+the component has restored the value captured at gesture start. Hue, alpha,
+saturation/value, channel scrubbing, text, favorites, and eyedropper selection
+all use this same contract. Hosts and inspectors must consume these callbacks or
+the forwarded edit metadata instead of inferring a session from ancestor DOM
+pointer events, because the picker intentionally lives in the Portal.
 
 ## Interaction State Priority
 
@@ -908,6 +926,22 @@ aiditor.ui.registerScopedOverlay(anchor, close, options)
 ```
 
 This prevents tooltips, popovers, and menus from leaking across tabs or panels.
+
+The overlay owner exposes one public stack projection:
+
+```js
+aiditor.ui.modalDepth()       // current modal-class overlay count
+aiditor.ui.modalDepth.peek()  // untracked snapshot
+```
+
+`modalDepth` is a read-only signal; it has no `set`, `update`, or lifecycle
+method. Every `modal: true` overlay frame contributes one level, including
+`ui.modal` and the modal-class `ui.drawer`. Menus, popovers, and other ordinary
+floating overlays do not contribute. Opening and every close path publish the
+new depth synchronously from the shared overlay stack, before component
+`onClose` cleanup runs. Disposing an overlay root also closes its stack frame,
+so callers never need to mirror or repair the count. Hosts may observe this
+signal to coordinate external surfaces; AIditor does not manage those surfaces.
 
 ## Themes
 

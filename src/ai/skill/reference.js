@@ -1,4 +1,4 @@
-// aiditor.ai Skill reference provider.
+// AIditor Skill resources exposed through the reference protocol.
 ;(function (aiditor) {
   'use strict'
 
@@ -84,7 +84,6 @@
       title: 'AIditor Skills',
       summary: 'Generated list of registered AIditor skills and when to use them.',
       meta: { count: skillNames().length },
-      tools: ['aiditor.readReference'],
     }
   }
 
@@ -97,7 +96,6 @@
       title: compact.title,
       summary: compact.whenToUse || compact.description || '',
       meta: compact,
-      tools: ['aiditor.readReference'],
     }
   }
 
@@ -155,7 +153,6 @@
   function search(query) {
     const q = String(query && (query.query || query.q || '') || '').trim().toLowerCase()
     const limit = Math.max(1, Math.min(50, Number(query && query.limit) || 10))
-    if (q && q.indexOf('skill') < 0 && q.indexOf('authoring') < 0 && q.indexOf('aiditor') < 0) return []
     const out = [indexRef()]
     const terms = q ? q.split(/\s+/).filter(function (term) { return term !== 'skills' && term !== 'skill' }) : []
     const names = skillNames()
@@ -206,5 +203,5 @@
     read: read,
     schema: schema,
     capabilities: capabilities,
-  }, { owner: 'aiditor.skills', layer: 'builtin' })
+  }, { owner: 'aiditor.ai.skills', layer: 'builtin' })
 })(window.aiditor = window.aiditor || {})

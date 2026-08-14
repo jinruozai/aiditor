@@ -69,6 +69,12 @@ class FakeEl {
   }
   removeAttribute(name) { delete this.attributes[name] }
   addEventListener(type, fn) { (this.events[type] = this.events[type] || []).push(fn) }
+  removeEventListener(type, fn) {
+    const list = this.events[type]
+    if (!list) return
+    const index = list.indexOf(fn)
+    if (index >= 0) list.splice(index, 1)
+  }
   dispatch(type, input) {
     const ev = Object.assign({
       type: type,
@@ -142,6 +148,7 @@ for (const file of [
   'src/ui/_internal/_css.js',
   'src/ai/rich-prompt.js',
   'src/ai/panels/rich-prompt-input.js',
+  'src/ai/panels/composer-slash.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }

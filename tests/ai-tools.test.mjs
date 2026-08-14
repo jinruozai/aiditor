@@ -19,8 +19,13 @@ for (const file of [
   'src/ai/provider-connections.js',
   'src/ai/schema.js',
   'src/ai/trace.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/skill/runtime.js',
+  'src/ai/tool/runtime.js',
+  'src/ai/rich-prompt.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
 ]) {
@@ -28,46 +33,41 @@ for (const file of [
 }
 
 const ai = window.aiditor.ai
+const TEST_META = { owner: 'test:tools' }
+function registerTool(name, spec, meta) { return ai.tools.register(name, spec, meta || TEST_META) }
+function registerSkill(name, spec, meta) { return ai.skills.register(name, spec, meta || TEST_META) }
+function registerContext(name, spec, meta) { return ai.context.register(name, spec, meta || TEST_META) }
 
-ai.tools.register('dupe.tool', { run: function () { return 'one' } })
+assert.throws(function () { ai.tools.register('owner.missing', {}) }, /owner is required/)
+assert.throws(function () { ai.skills.register('owner.missing', {}) }, /owner is required/)
+assert.throws(function () { ai.context.register('owner.missing', {}) }, /owner is required/)
+
+registerTool('dupe.tool', { run: function () { return 'one' } })
 assert.throws(function () {
-  ai.tools.register('dupe.tool', { run: function () { return 'hidden overwrite' } })
+  registerTool('dupe.tool', { run: function () { return 'hidden overwrite' } })
 }, /duplicate name "dupe.tool"/)
-ai.tools.register('dupe.tool', { run: function () { return 'two' } }, { replace: true })
+assert.throws(function () {
+  registerTool('dupe.tool', { run: function () { return 'foreign' } }, { owner: 'test:foreign', replace: true })
+}, /owner mismatch/)
+registerTool('dupe.tool', { run: function () { return 'two' } }, { owner: 'test:tools', replace: true })
 assert.equal(ai.tools.get('dupe.tool').run(), 'two')
-ai.tools.unregister('dupe.tool')
+ai.tools.unregister('dupe.tool', TEST_META)
 
-ai.context.register('dupe.context', { capture: function () { return 'one' } })
+registerContext('dupe.context', { capture: function () { return 'one' } })
 assert.throws(function () {
-  ai.context.register('dupe.context', { capture: function () { return 'hidden overwrite' } })
+  registerContext('dupe.context', { capture: function () { return 'hidden overwrite' } })
 }, /duplicate name "dupe.context"/)
-ai.context.register('dupe.context', { capture: function () { return 'two' } }, { replace: true })
+registerContext('dupe.context', { capture: function () { return 'two' } }, { owner: 'test:tools', replace: true })
 assert.equal(ai.context.get('dupe.context').capture(), 'two')
-ai.context.unregister('dupe.context')
+ai.context.unregister('dupe.context', TEST_META)
 
-ai.skills.register('dupe.skill', { title: 'One' })
+registerSkill('dupe.skill', { title: 'One' })
 assert.throws(function () {
-  ai.skills.register('dupe.skill', { title: 'Hidden overwrite' })
+  registerSkill('dupe.skill', { title: 'Hidden overwrite' })
 }, /duplicate name "dupe.skill"/)
-ai.skills.register('dupe.skill', { title: 'Two' }, { replace: true })
+registerSkill('dupe.skill', { title: 'Two' }, { owner: 'test:tools', replace: true })
 assert.equal(ai.skills.get('dupe.skill').title, 'Two')
-ai.skills.unregister('dupe.skill')
-
-ai.agentTemplates.register('dupe.agent', { title: 'One' })
-assert.throws(function () {
-  ai.agentTemplates.register('dupe.agent', { title: 'Hidden overwrite' })
-}, /duplicate name "dupe.agent"/)
-ai.agentTemplates.register('dupe.agent', { title: 'Two' }, { replace: true })
-assert.equal(ai.agentTemplates.get('dupe.agent').title, 'Two')
-ai.agentTemplates.unregister('dupe.agent')
-
-ai.bundles.register('dupe.bundle', {})
-assert.throws(function () {
-  ai.bundles.register('dupe.bundle', {})
-}, /duplicate name "dupe.bundle"/)
-ai.bundles.register('dupe.bundle', {}, { replace: true })
-assert.equal(ai.bundles.get('dupe.bundle') != null, true)
-ai.bundles.unregister('dupe.bundle')
+ai.skills.unregister('dupe.skill', TEST_META)
 
 function latestCall(agentId) {
   const agent = ai.findAgent(agentId)
@@ -85,13 +85,12 @@ const agent = ai.createAgent({
   name: 'Tool Runner',
   path: 'tools/root',
   connection: 'tool-test',
-  toolRefs: ['edit-record'],
 })
 
 let previewCtx = null
 let runCtx = null
 let applyCtx = null
-ai.tools.register('edit-record', {
+registerTool('edit-record', {
   title: 'Edit Record',
   description: 'Preview, run, and apply a record edit.',
   schema: {
@@ -124,26 +123,26 @@ const defaultToolAgent = ai.createAgent({
   connection: 'tool-test',
 })
 const defaultToolRequest = ai.makeRequest(defaultToolAgent, null, 'run_default_tools', 'user', 0)
-assert.deepEqual(defaultToolRequest.tools, [])
-assert.equal(defaultToolRequest.toolSpecs.length, 0)
+assert.deepEqual(defaultToolRequest.tools, ['skill.list', 'skill.activate'])
+assert.equal(defaultToolRequest.toolSpecs.length, 2)
 
-ai.tools.register('hidden-by-default', {
+registerTool('hidden-by-default', {
   exposeToModel: false,
   run: function () { return true },
 })
-ai.tools.register('currently-unavailable', {
+registerTool('currently-unavailable', {
   available: function () { return false },
   run: function () { return true },
 })
 let availableCtx = null
-ai.tools.register('ctx-visible', {
+registerTool('ctx-visible', {
   available: function (ctx) {
     availableCtx = ctx
     return typeof ctx.canRead === 'function' && ctx.canRead(defaultToolAgent.id, 'agent.full')
   },
   run: function () { return true },
 })
-ai.skills.register('filtered-tools', {
+registerSkill('filtered-tools', {
   title: 'Filtered Tools',
   systemPrompt: 'Use only the filtered tool surface.',
   tools: ['hidden-by-default', 'currently-unavailable', 'ctx-visible'],
@@ -162,29 +161,46 @@ assert.equal(filteredToolRequest.skillActivations[0].reason, 'configured')
 assert.equal(filteredToolRequest.skillActivations[0].owner, 'test:filtered')
 assert.equal(filteredToolRequest.skillActivations[0].source, 'test-suite')
 assert.equal(filteredToolRequest.skillActivations[0].promptChars > 0, true)
-assert.deepEqual(filteredToolRequest.skillActivations[0].toolRefs, ['hidden-by-default', 'currently-unavailable', 'ctx-visible'])
+assert.deepEqual(filteredToolRequest.skillActivations[0].tools, ['hidden-by-default', 'currently-unavailable', 'ctx-visible'])
 const filteredActivationTrace = ai.trace.list('run_filtered_tools').find(function (event) { return event.type === 'skill_activated' })
 assert.equal(filteredActivationTrace.entry, 'filtered-tools')
 assert.equal(filteredActivationTrace.meta.reason, 'configured')
 assert.equal(filteredActivationTrace.meta.owner, 'test:filtered')
 assert.equal(ai.trace.list('run_filtered_tools').find(function (event) { return event.type === 'request_built' }).meta.skillPromptChars > 0, true)
 assert.equal(availableCtx.actor, 'user')
-ai.context.register('tool-surface', {
+let explicitSkillDraft = ai.richPrompt.insertSkill(ai.richPrompt.empty(), 0, {
+  id: 'filtered-tools',
+  title: 'Filtered Tools',
+})
+explicitSkillDraft = ai.richPrompt.insertText(explicitSkillDraft, explicitSkillDraft.text.length, ' inspect this')
+const explicitSkillRequest = ai.makeRequest(ai.createAgent({
+  name: 'Explicit Skill Agent',
+  connection: 'tool-test',
+}), {
+  id: 'explicit-skill-message',
+  role: 'user',
+  content: ai.richPrompt.content(explicitSkillDraft),
+}, 'run_explicit_skill', 'user', 0)
+assert.equal(explicitSkillRequest.skillActivations[0].id, 'filtered-tools')
+assert.equal(explicitSkillRequest.skillActivations[0].reason, 'explicit')
+assert.deepEqual(explicitSkillRequest.tools, ['skill.list', 'skill.activate', 'hidden-by-default', 'ctx-visible'])
+registerContext('tool-surface', {
   capture: function () { return { title: 'Current surface', tools: ['ctx-visible'] } },
 })
 const contextToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Context Tool Agent',
   connection: 'tool-test',
 }), null, 'run_context_tools', 'user', 0)
-assert.deepEqual(contextToolRequest.tools, ['ctx-visible'])
-ai.context.unregister('tool-surface')
+assert.deepEqual(contextToolRequest.tools, ['skill.list', 'skill.activate'])
+ai.context.unregister('tool-surface', TEST_META)
+registerSkill('explicit-tools', { title: 'Explicit Tools', tools: ['hidden-by-default', 'currently-unavailable', 'edit-record'] })
 const explicitToolRequest = ai.makeRequest(ai.createAgent({
   name: 'Explicit Tool Agent',
   path: 'tools/explicit',
   connection: 'tool-test',
-  toolRefs: ['hidden-by-default', 'currently-unavailable', 'edit-record'],
+  skillRefs: ['explicit-tools'],
 }), null, 'run_explicit_tools', 'user', 0)
-assert.deepEqual(explicitToolRequest.tools, ['hidden-by-default', 'edit-record'])
+assert.deepEqual(explicitToolRequest.tools, ['skill.list', 'skill.activate', 'hidden-by-default', 'edit-record'])
 
 const proposed = ai.createToolCall(agent.id, {
   toolId: 'edit-record',
@@ -217,7 +233,7 @@ assert.equal(applied.status, 'applied')
 assert.deepEqual(applied.applyResult, { applied: true, id: 'sword', after: 12 })
 assert.equal(applyCtx.toolCall.id, proposed.id)
 
-ai.tools.register('semantic-fail', {
+registerTool('semantic-fail', {
   run: function () { return { patch: { type: 'gde.patch' } } },
   apply: function () {
     return {
@@ -236,7 +252,7 @@ assert.match(semanticApplied.error, /invalid patch/)
 assert.equal(semanticApplied.errorDetails.ok, false)
 assert.equal(semanticApplied.errorDetails.phase, 'apply')
 
-ai.tools.register('invalid-preview', {
+registerTool('invalid-preview', {
   preview: function () {
     return { ok: false, errors: [{ path: 'prop', message: 'unknown property' }] }
   },
@@ -245,9 +261,9 @@ ai.tools.register('invalid-preview', {
   },
 })
 assert.equal(ai.tools.get('edit-record'), ai.tools.get('edit-record'))
-ai.tools.register('case.extra', { run: function () { return 'extra' } })
+registerTool('case.extra', { run: function () { return 'extra' } }, { owner: 'test:case' })
 assert.deepEqual(ai.tools.list('case'), ['case.extra'])
-assert.deepEqual(ai.tools.unregisterPrefix('case'), ['case.extra'])
+assert.deepEqual(ai.tools.unregisterOwner('test:case'), ['case.extra'])
 assert.equal(ai.tools.get('case.extra'), undefined)
 const invalidPreviewCall = ai.createToolCall(agent.id, { toolId: 'invalid-preview' }, 'user')
 const invalidPreview = ai.previewToolCall(agent.id, invalidPreviewCall.id, 'user')
@@ -257,7 +273,7 @@ const invalidPreviewState = ai.getToolCallActionState(agent.id, invalidPreviewCa
 assert.equal(invalidPreviewState.canApply, false)
 assert.equal(invalidPreviewState.canPreview, false)
 
-ai.tools.register('run-semantic-fail', {
+registerTool('run-semantic-fail', {
   run: function () {
     return { ok: false, code: 'NO_WORKSPACE', message: 'No workspace is selected', hint: 'Open a workspace first.' }
   },
@@ -271,7 +287,7 @@ assert.equal(runSemanticFailed.result.ok, false)
 assert.equal(runSemanticFailed.errorDetails.code, 'NO_WORKSPACE')
 assert.match(runSemanticFailed.errorDetails.hint, /Open a workspace/)
 
-ai.tools.register('async-apply', {
+registerTool('async-apply', {
   run: function () { return { id: 'async' } },
   apply: function (result) {
     return Promise.resolve({ applied: true, id: result.id })
@@ -287,7 +303,7 @@ const asyncDone = await asyncApply.promise
 assert.equal(asyncDone.status, 'applied')
 assert.deepEqual(asyncDone.applyResult, { applied: true, id: 'async' })
 
-ai.tools.register('async-apply-fail', {
+registerTool('async-apply-fail', {
   run: function () { return { id: 'async-fail' } },
   apply: function () {
     return Promise.reject(new Error('async apply failed'))
@@ -340,7 +356,7 @@ const rejected = ai.createToolCall(agent.id, {
 assert.equal(ai.rejectToolCall(agent.id, rejected.id, 'not needed').status, 'rejected')
 assert.equal(latestCall(agent.id).error, 'not needed')
 
-ai.tools.register('explode', {
+registerTool('explode', {
   run: function () { throw new Error('boom') },
 })
 const failing = ai.createToolCall(agent.id, { toolId: 'explode' }, 'user')
@@ -382,17 +398,24 @@ assert.deepEqual(calls.some(function (call) {
 ai.setPermissionResolver(null)
 
 let loopRequests = []
-ai.tools.register('read-number', {
+registerTool('read-number', {
   title: 'Read Number',
   schema: { id: 'string' },
   run: function (args) {
     return { id: args.id, value: 42 }
   },
 })
+registerSkill('loop.explicit', {
+  title: 'Explicit Tool Loop',
+  rules: ['Keep this skill active for the whole model/tool turn.'],
+  tools: ['read-number'],
+})
 ai.registerTransport('tool-loop', {
   toolProtocol: 'native',
   send: function (connection, request) {
     loopRequests.push(request)
+    assert.equal(request.skillActivations.find(function (item) { return item.id === 'loop.explicit' }).reason, loopRequests.length === 1 ? 'explicit' : 'selected')
+    assert.equal(request.tools.includes('read-number'), true)
     if (loopRequests.length === 1) {
       return {
         role: 'assistant',
@@ -410,55 +433,72 @@ ai.registerConnection('tool-loop', { auth: { type: 'none' }, transport: { type: 
 const loopAgent = ai.createAgent({
   name: 'Loop Agent',
   connection: 'tool-loop',
-  toolRefs: ['read-number'],
 })
-const loopRun = ai.message.send(loopAgent.id, 'start', 'user')
+const loopRun = ai.message.send(loopAgent.id, {
+  content: 'start',
+  meta: { skillRefs: ['loop.explicit'] },
+})
 const loopReply = await loopRun.promise
 assert.equal(loopReply.content, 'Tool says 42')
 assert.equal(loopRequests.length, 2)
 assert.equal(ai.findAgent(loopAgent.id).messages.some(function (message) { return message.role === 'tool' }), true)
+ai.skills.unregister('loop.explicit', TEST_META)
 
-let autoSkillCalls = 0
-ai.skills.register('auto.once', {
-  title: 'Auto Once',
-  rules: ['Auto once rule'],
-  auto: function (ctx) {
-    autoSkillCalls += 1
-    return ctx.agent && ctx.agent.id === loopAgent.id
+registerSkill('dynamic.read', {
+  title: 'Dynamic Read',
+  description: 'Read a number after run-scoped activation.',
+  tools: ['read-number'],
+})
+const dynamicRequests = []
+ai.registerTransport('dynamic-skill', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    dynamicRequests.push(request)
+    if (dynamicRequests.length === 1) {
+      assert.deepEqual(request.tools, ['skill.list', 'skill.activate'])
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'skill.activate', args: { id: 'dynamic.read' } }] }
+    }
+    if (dynamicRequests.length === 2) {
+      assert.equal(request.tools.includes('read-number'), true)
+      assert.equal(request.skillActivations.find(function (item) { return item.id === 'dynamic.read' }).reason, 'selected')
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'read-number', args: { id: 'dynamic' } }] }
+    }
+    return { role: 'assistant', content: 'dynamic complete' }
   },
 })
-const autoSkillRequest = ai.makeRequest(loopAgent, null, 'run_auto_skill', 'user', 0)
-assert.deepEqual(autoSkillRequest.skills.filter(function (id) { return id === 'auto.once' }), ['auto.once'])
-assert.equal(autoSkillRequest.skillSpecs.some(function (skill) { return skill.id === 'auto.once' }), true)
-assert.equal(autoSkillRequest.skillActivations.find(function (item) { return item.id === 'auto.once' }).reason, 'auto')
-assert.match(autoSkillRequest.messages[0].content, /Auto once rule/)
-assert.equal(autoSkillCalls, 1)
-ai.skills.unregister('auto.once')
+ai.registerConnection('dynamic-skill', { auth: { type: 'none' }, transport: { type: 'dynamic-skill' }, configDefaults: {} })
+const dynamicAgent = ai.createAgent({ name: 'Dynamic Skill Agent', connection: 'dynamic-skill', permissionMode: 'full' })
+const dynamicRun = ai.message.send(dynamicAgent.id, 'discover and read', 'user')
+const dynamicReply = await dynamicRun.promise
+assert.equal(dynamicReply.content, 'dynamic complete')
+assert.equal(dynamicRequests.length, 3)
+ai.skills.unregister('dynamic.read', TEST_META)
 
-ai.skills.register('removed.skill', { title: 'Removed', rules: ['Never exposed'] })
+registerSkill('manual.once', {
+  title: 'Manual Once',
+  rules: ['Manual once rule'],
+})
+const inactiveSkillRequest = ai.makeRequest(loopAgent, null, 'run_inactive_skill', 'user', 0)
+assert.equal(inactiveSkillRequest.skills.includes('manual.once'), false)
+assert.equal(ai.skills.catalog({}, { query: 'manual' })[0].id, 'manual.once')
+ai.updateAgent(loopAgent.id, { skillRefs: ['manual.once'] })
+const configuredSkillRequest = ai.makeRequest(ai.findAgent(loopAgent.id), null, 'run_manual_skill', 'user', 0)
+assert.equal(configuredSkillRequest.skillActivations.find(function (item) { return item.id === 'manual.once' }).reason, 'configured')
+assert.match(configuredSkillRequest.messages[0].content, /Manual once rule/)
+ai.skills.unregister('manual.once', TEST_META)
+
+registerSkill('removed.skill', { title: 'Removed', rules: ['Never exposed'] })
 const staleSkillAgent = ai.createAgent({ name: 'Stale Skill Agent', connection: 'tool-test', skillRefs: ['removed.skill'] })
-ai.skills.unregister('removed.skill')
+ai.skills.unregister('removed.skill', TEST_META)
 const staleSkillRequest = ai.makeRequest(staleSkillAgent, null, 'run_stale_skill', 'user', 0)
 assert.deepEqual(staleSkillRequest.skills, [])
 assert.deepEqual(staleSkillRequest.skillActivations, [])
 
-ai.bundles.register('bundle.case', {
-  connections: [{ id: 'bundle.connection', auth: { type: 'none' }, transport: { type: 'mock' }, configDefaults: {} }],
-  skills: [{ id: 'bundle.skill', title: 'Bundle Skill' }],
-  tools: [{ id: 'bundle.tool', run: function () { return true } }],
-  contextProviders: [{ id: 'bundle.context', capture: function () { return 'ctx' } }],
-  agentTemplates: [{ id: 'bundle.agent', title: 'Bundle Agent' }],
-})
-assert.equal(ai.getConnection('bundle.connection').id, 'bundle.connection')
-assert.equal(ai.skills.get('bundle.skill').title, 'Bundle Skill')
-assert.equal(ai.tools.get('bundle.tool').run(), true)
-assert.equal(ai.context.get('bundle.context').capture(), 'ctx')
-assert.equal(ai.agentTemplates.get('bundle.agent').title, 'Bundle Agent')
-assert.equal(ai.bundles.unregister('bundle.case'), true)
-assert.equal(ai.getConnection('bundle.connection'), undefined)
-assert.equal(ai.skills.get('bundle.skill'), undefined)
-assert.equal(ai.tools.get('bundle.tool'), undefined)
-assert.equal(ai.context.get('bundle.context'), undefined)
-assert.equal(ai.agentTemplates.get('bundle.agent'), undefined)
+registerTool('owner.tool', { run: function () { return true } }, { owner: 'test:owner' })
+registerSkill('owner.skill', { title: 'Owner Skill' }, { owner: 'test:owner' })
+registerContext('owner.context', { capture: function () { return 'ctx' } }, { owner: 'test:owner' })
+assert.deepEqual(ai.tools.unregisterOwner('test:owner'), ['owner.tool'])
+assert.deepEqual(ai.skills.unregisterOwner('test:owner'), ['owner.skill'])
+assert.deepEqual(ai.context.unregisterOwner('test:owner'), ['owner.context'])
 
 console.log('ai tools tests ok')

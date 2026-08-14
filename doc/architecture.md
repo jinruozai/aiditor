@@ -146,19 +146,20 @@ The built-in dock menu is installed only when a host opts in with
 
 ## 3. Optional AI Host
 
-The public AI model has five concepts:
+The public AI model has six concepts:
 
 ```text
 Agent             conversation, memory, runtime state
-Tool              model-callable action
+Skill             discoverable focused capability
+Tool              Skill-owned executable action
 Context Reference stable pointer to readable bounded context
 Operation         previewable/applyable mutation
 ChangeSet         grouped review/apply container
 ```
 
-Internal runtime details may include skills, messages, queues, quests, inboxes,
-providers, streaming state, targets, attachments, rich prompt ranges, bundles,
-and templates. They are useful implementation pieces, but they should not become
+Internal runtime details may include messages, queues, quests, inboxes,
+providers, streaming state, targets, attachments, and rich prompt ranges.
+They are useful implementation pieces, but they should not become
 new public architecture concepts unless they escape the runtime boundary.
 
 AI should not contain domain-specific file formats or business rules. Domain

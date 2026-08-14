@@ -37,14 +37,17 @@
       const custom = renderToken(token, tokenChar)
       if (custom) return custom
     }
-    const el = ui.h('span', 'aiditor-richprompt-token', {
+    const kind = token.type || 'ref'
+    const el = ui.h('span', 'aiditor-richprompt-token aiditor-richprompt-token-' + kind, {
       contenteditable: 'false',
       role: 'button',
-      title: token.uri || token.refId || labelOf(token),
+      title: token.uri || token.refId || token.skillId || labelOf(token),
     })
     el.dataset.efToken = tokenChar
     el.dataset.efRefId = token.refId || ''
-    el.setAttribute('aria-label', 'Reference ' + labelOf(token))
+    el.dataset.efSkillId = token.skillId || ''
+    el.dataset.efTokenType = kind
+    el.setAttribute('aria-label', (kind === 'skill' ? 'Skill ' : 'Reference ') + labelOf(token))
     if (token.kind && String(token.kind).indexOf('image') >= 0 && token.meta && token.meta.dataUrl) {
       el.appendChild(ui.h('img', 'aiditor-richprompt-token-thumb', { src: token.meta.dataUrl, alt: '' }))
     }
@@ -458,6 +461,7 @@
     })
     editor.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && (composing || ev.isComposing)) return
+      if (!composing && !ev.isComposing && opts.onKeyDown && opts.onKeyDown(ev)) return
       if (ev.key === 'Enter' && singleLine.peek()) {
         ev.preventDefault()
         if (opts.onSubmit) opts.onSubmit(ev)
@@ -526,6 +530,13 @@
       setCaret(editor, r.start + Math.max(0, list.length * 2 - 1))
     }
     root.__aiditorRichPromptFocus = function () { editor.focus() }
+    root.__aiditorRichPromptApi = {
+      editor: editor,
+      draft: function () { return value.peek() },
+      selectionRange: function () { return selectionRange(editor, value.peek()) },
+      replaceRange: replaceRangeWithDraft,
+      focus: function () { editor.focus() },
+    }
     return root
 
     function insertDraftText(text) {
@@ -546,13 +557,23 @@
     function replaceSelectionWithDraft(fragment) {
       const d = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
       const r = selectionRange(editor, d)
-      const base = r.collapsed ? d : aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
+      replaceRangeWithDraft(r.start, r.end, fragment)
+    }
+
+    function replaceRangeWithDraft(start, end, fragment) {
+      const d = singleLine.peek() ? singleLineDraft(value.peek()) : value.peek()
+      const r = {
+        start: Math.max(0, Math.min(d.text.length, Math.min(start, end))),
+        end: Math.max(0, Math.min(d.text.length, Math.max(start, end))),
+      }
+      const base = aiditor.ai.richPrompt.deleteRange(d, r.start, r.end)
       const normalized = aiditor.ai.richPrompt.normalize(fragment)
       const f = singleLine.peek() ? singleLineDraft(normalized) : normalized
       const next = aiditor.ai.richPrompt.insertDraft(base, r.start, f)
       value.set(next)
       renderDraft(editor, next, opts.renderToken)
       setCaret(editor, r.start + f.text.length)
+      return next
     }
   }
 })(window.aiditor = window.aiditor || {})

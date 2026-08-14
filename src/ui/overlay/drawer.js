@@ -46,11 +46,17 @@
     const overlay = ui._overlay.open(panel, {
       modal:          true,
       outsideTarget:  back,
+      dismissOnOutside: true,
       role:           'dialog',
       ariaLabelledBy: titleId || undefined,
       ariaLabel:      titleId ? undefined : (o.ariaLabel || 'Drawer'),
-      onDismiss: function () {
+      onDismiss: function (cause) {
         panel.classList.remove('aiditor-ui-drawer-open')
+        if (cause === 'dispose') {
+          unmount()
+          o.onClose && o.onClose()
+          return
+        }
         // Slide-out transition uses --aiditor-dur-slow; unmount after it finishes.
         setTimeout(function () { ui.dispose(panel); unmount(); o.onClose && o.onClose() },
           ui.readNum('--aiditor-dur-slow', 240))

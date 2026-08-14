@@ -94,7 +94,6 @@
       memory: spec.memory || {},
       state: spec.state || {},
       skillRefs: spec.skillRefs ? spec.skillRefs.slice() : [],
-      toolRefs: spec.toolRefs ? spec.toolRefs.slice() : [],
       permissions: normalizePermissionList(spec.permissions),
       createdAt: spec.createdAt || now(),
       updatedAt: spec.updatedAt || now(),
@@ -684,7 +683,7 @@
 
   function snapshot() {
     const data = {
-      version: 2,
+      version: 3,
       agents: agentsSig.peek().map(function (agent) {
         const out = Object.assign({}, agent)
         delete out.path
@@ -771,7 +770,7 @@
 
   function restore(data) {
     const next = data || null
-    if (!next || next.version !== 2) return null
+    if (!next || next.version !== 3) return null
     suppressStoreVersion = true
     lastModelSelection = {
       connection: next.preferences && next.preferences.lastConnection || null,
@@ -789,7 +788,7 @@
 
   function restoreCheckpoint(data) {
     const next = data || null
-    if (!next || next.version !== 2) return null
+    if (!next || next.version !== 3) return null
     suppressStoreVersion = true
     lastModelSelection = {
       connection: next.preferences && next.preferences.lastConnection || null,

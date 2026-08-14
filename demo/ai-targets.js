@@ -3,6 +3,7 @@
   'use strict'
 
   const Demo = window.Demo = window.Demo || {}
+  const META = { owner: 'demo.ai-targets', layer: 'builtin' }
 
   function readSpec(spec) {
     if (spec && spec.signal) return spec.signal.peek()
@@ -65,7 +66,6 @@
       capabilities: Object.keys(props).map(function (prop) {
         return { op: 'demo.setProp', risk: 'edit', input: { componentId: entry.id, prop: prop } }
       }),
-      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -85,7 +85,6 @@
         options: optionsOf(spec),
       },
       capabilities: [{ op: 'demo.setProp', risk: 'edit' }],
-      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -209,7 +208,6 @@
         mode: themeMode(),
       },
       capabilities: [{ op: 'demo.setThemeToken', risk: 'edit' }, { op: 'demo.setThemeMode', risk: 'edit' }],
-      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -225,7 +223,6 @@
         options: themeModes(),
       },
       capabilities: [{ op: 'demo.setThemeMode', risk: 'edit' }],
-      tools: ['aiditor.readReference', 'aiditor.applyOperation'],
     }
   }
 
@@ -416,9 +413,6 @@
           ? { op: 'aiditor.addPanelToDock', risk: 'edit', purpose: 'Place a component into a runtime dock; pass path for newly written workspace files, or let the tool infer one unique matching JS file. Use aiditor.replacePanel when replacing an existing panelId.' }
           : null
       ].filter(Boolean),
-      tools: project
-        ? ['aiditor.readReference', 'aiditor.getCapabilities', 'workspace.fileSummary', 'workspace.searchFiles', 'workspace.readText', 'workspace.readTextRange', 'workspace.editText', 'workspace.patchText', 'workspace.writeText', 'code.map', 'code.outline', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.replacePanel', 'demo.project.readDescriptor', 'demo.project.readSource', 'demo.project.inspectPanel', 'demo.project.runCheck']
-        : ['aiditor.readReference', 'aiditor.getCapabilities'],
     }
   }
 
@@ -436,7 +430,6 @@
       generatedPanelGuidelines: target.meta.generatedPanelGuidelines,
       projectPanelPattern: target.meta.projectPanelPattern,
       capabilities: target.capabilities,
-      tools: target.tools,
     }
   }
 
@@ -485,7 +478,7 @@
     capabilities: function (ref) {
       return ref.capabilities || []
     },
-  })
+  }, META)
 
   aiditor.ai.references.register('editor', {
     read: function (ref) {
@@ -511,7 +504,7 @@
         ? [hostTarget()]
         : []
     },
-  })
+  }, META)
 
   aiditor.ai.operations.register('demo.setProp', {
     title: 'Set Demo Property',
@@ -528,7 +521,7 @@
     risk: 'edit',
     preview: previewSetProp,
     apply: applySetProp,
-  })
+  }, META)
 
   aiditor.ai.operations.register('demo.setThemeToken', {
     title: 'Set Demo Theme Token',
@@ -544,7 +537,7 @@
     risk: 'edit',
     preview: previewSetThemeToken,
     apply: applySetThemeToken,
-  })
+  }, META)
 
   aiditor.ai.operations.register('demo.setThemeMode', {
     title: 'Set Demo Theme Mode',
@@ -557,6 +550,6 @@
     risk: 'edit',
     preview: previewSetThemeMode,
     apply: applySetThemeMode,
-  })
+  }, META)
 
 })()

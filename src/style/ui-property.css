@@ -755,6 +755,9 @@
 .aiditor-inspector-search[hidden] {
   display: none;
 }
+.aiditor-inspector-before-form[hidden] {
+  display: none;
+}
 .aiditor-inspector-body {
   flex: 1 1 auto;
   min-height: 0;

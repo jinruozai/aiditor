@@ -89,10 +89,60 @@ selection. No mutation action is built in.
 `aiditor.ui.assetBrowser` is an alternate name for the same neutral primitive;
 it does not introduce an asset-specific contract.
 
+## Stable `aiditor.ui.tree` rows
+
+`node.id` is the identity of a tree node. It must be globally unique within
+the entire currently available projection, including collapsed nodes and
+children already present in the lazy-load cache. Supplying a duplicate id is a
+contract error; the tree reports `AiditorTreeDuplicateIdError` instead of
+silently binding two nodes to one row runtime.
+
+Visible and overscan rows reconcile by id. Replacing `items` with new node
+objects updates the retained default row shell in place. Reordering siblings
+or moving a node between parents moves the retained row DOM; unrelated rows
+are not rebuilt. The reconciliation keeps the largest already-ordered DOM
+subsequence, so moving the first sibling to the end performs one DOM move
+rather than moving every sibling before it.
+
+The stability boundary follows virtualization: nodes that remain inside the
+rendered visible/overscan window keep DOM and nested focus. Rows that are
+collapsed, filtered out, or scrolled outside that window may be disposed or
+recycled. Selection, expansion, logical focus, and the scroll offset remain
+id-based and do not depend on row DOM lifetime.
+
+DOM reconciliation runs outside reactive dependency tracking. The Tree
+bindings subscribe only to their explicit flattened projection and selection
+signals; signals owned by icons, actions, slots, or custom renderers cannot
+become accidental Tree dependencies or synchronously re-enter reconciliation.
+
+The rendering levels are:
+
+- The managed default row owns the arrow, icon, label, standard actions,
+  interaction policy, and ARIA metadata. Those framework parts update in
+  place. Custom slot content is replaced only inside its slot when the slot
+  returns a different element.
+- `renderRow(node, row, ctx)` remains a compatibility escape hatch. Because it
+  returns an opaque element and has no update contract, the tree may replace
+  that one row when its projection changes.
+- `renderTemplate()` remains the stable custom-row protocol for complex,
+  stateful row structures. It returns `{ root, update, reset?, dispose? }`.
+
+Tree DnD treats hover feedback as advisory. Pointer release performs a fresh
+hit test and recomputes source availability, the current parent chain,
+`dropZones`, geometric position, and `canDrop` before calling `onDrop`. A target
+that moved into a dragged source, disappeared, or became disallowed while the
+pointer was down cannot commit from a stale hover decision.
+
 ## Async `aiditor.ui.tree`
 
-Static `node.children` continues to work. Lazy nodes declare
-`hasChildren: true` and supply one loader for the tree:
+The caller owns child data whenever `node.children` is an array, including an
+empty array. That array is authoritative even when an older lazy snapshot
+exists or `hasChildren` is still true. Lazy loading is eligible only when
+`children` is not an array and `hasChildren: true`. Changing a lazy node into a
+leaf or a static node cancels its refresh transaction and removes its lazy
+cache before further invalidation can use it.
+
+Lazy nodes supply one loader for the tree:
 
 ```js
 const tree = aiditor.ui.tree({
@@ -106,7 +156,9 @@ const tree = aiditor.ui.tree({
 ```
 
 The tree stores loaded children in an internal cache keyed by node id and never
-mutates caller nodes. Each row context adds:
+mutates caller nodes. Cached children are a published snapshot; request state
+is tracked separately so a refresh never clears the snapshot first. Each row
+context adds:
 
 ```js
 ctx.row.loading
@@ -116,22 +168,44 @@ ctx.retry()
 ctx.invalidate()
 ```
 
-Expanding an unloaded lazy node starts one request. Collapsing, invalidating,
-removing the node, or disposing the tree aborts its request. A stale promise
-cannot overwrite a newer generation. Loading and error state belong to the
-node, while expansion, selection, focus, and scroll position remain unchanged.
+Expanding an unloaded lazy node starts one request. Collapsing that initial
+expansion load aborts it. Explicit invalidation and retry continue even if the
+row is subsequently collapsed, because they represent a requested consistency
+refresh. Removing a node or disposing the tree cancels any transaction that
+contains it. An older or cancelled transaction cannot publish late results.
+
+During refresh, the old child snapshot remains available and the parent is
+`loading`. Success replaces the complete snapshot once. Failure preserves the
+old snapshot and marks the parent `error`; retry never requires the caller to
+reconstruct old children.
 
 The imperative handle adds:
 
 ```js
-tree.__aiditorTree.invalidateChildren(nodeId) // omit id to clear all
+tree.__aiditorTree.invalidateChildren(nodeId)
+tree.__aiditorTree.invalidateChildren([oldParentId, newParentId])
+tree.__aiditorTree.invalidateChildren() // all cached lazy parents
 tree.__aiditorTree.retry(nodeId)
 tree.__aiditorTree.loadState(nodeId)
 ```
 
-Invalidating an expanded lazy node immediately reloads it. Search only visits
-currently available children; it never expands the network or file-system work
-set implicitly. `expandAll()` expands known nodes only for the same reason.
+One invalidation call defines one atomic refresh transaction. All selected
+parents are queried concurrently while every old snapshot remains published.
+Results are staged, then the candidate full projection is checked for duplicate
+node ids. The transaction publishes all child arrays with one reconciliation
+only when every query succeeds and the candidate projection is valid.
+
+If any query fails or the candidate contains a duplicate id, the whole
+transaction retains its old snapshots. Every member exposes an error and retry
+from any member retries the original group. This all-or-nothing value commit is
+required for cross-parent moves: publishing successful branches from a partial
+failure could otherwise make a node disappear or appear under both parents.
+Call unrelated parents in separate invalidations when independent success is
+desired.
+
+Search only visits currently available children; it never expands the network
+or file-system work set implicitly. `expandAll()` expands known nodes only for
+the same reason.
 
 Default rows expose `aria-busy` while loading and a retry affordance on error.
 Virtualized rows continue to provide explicit tree level and sibling position

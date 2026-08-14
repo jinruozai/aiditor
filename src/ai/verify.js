@@ -3,12 +3,13 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const OWNER = 'aiditor.ai.verify'
   let adapter = null
   let registered = false
 
   function configureVerify(next) {
-    if (registered && ai.tools && ai.tools.unregisterPrefix) {
-      ai.tools.unregisterPrefix('verify')
+    if (registered && ai.tools && ai.tools.unregisterOwner) {
+      ai.tools.unregisterOwner(OWNER)
       registered = false
     }
     adapter = next || null
@@ -44,7 +45,7 @@
       schema: schema || { type: 'object', properties: {} },
       permissions: ['tool.call'],
       run: function (args) { return callAdapter(method, args) },
-    }, { owner: 'aiditor.ai.verify', layer: 'builtin' })
+    }, { owner: OWNER, layer: 'builtin' })
     registered = true
   }
 

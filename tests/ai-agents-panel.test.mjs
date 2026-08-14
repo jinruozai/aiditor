@@ -157,7 +157,8 @@ ui.view = function (opts) {
   return el
 }
 ui.tooltip = function () {}
-ui.contextMenu = function () {}
+const contextMenus = []
+ui.contextMenu = function (anchor, items) { contextMenus.push({ anchor: anchor, items: items }) }
 ui.prompt = function () { return Promise.resolve(null) }
 
 vm.runInThisContext(readFileSync('src/ui/data/tree.js', 'utf8'), { filename: 'src/ui/data/tree.js' })
@@ -185,6 +186,12 @@ vm.runInThisContext(readFileSync('src/ai/panels/agents.js', 'utf8'), { filename:
 
 const root = components['ai-agents-list'].factory()
 const tree = root.querySelector('.aiditor-ai-agent-tree')
+assert.equal(tree.parentNode, root, 'tree owns the panel content surface without a clipping view wrapper')
+assert.equal(root.querySelector('.aiditor-ai-agent-tree-view'), null)
+const rootMenuEvent = tree.dispatch('contextmenu', { target: tree, clientX: 12, clientY: 18 })
+assert.equal(rootMenuEvent.defaultPrevented, true)
+assert.equal(contextMenus.length, 1, 'the tree surface still owns the empty-area context menu')
+assert.equal(contextMenus[0].items[0].label, 'New Agent')
 const rootRow = tree.__aiditorTree.getRowEl('agent:root')
 const childRow = tree.__aiditorTree.getRowEl('agent:child')
 const childDelete = childRow.querySelector('button')
@@ -240,5 +247,9 @@ const css = readFileSync('src/style/ui-ai.css', 'utf8')
 const actionRule = css.match(/\.aiditor-ai-agent-actions\s*\{([^}]*)\}/)
 assert.ok(actionRule)
 assert.doesNotMatch(actionRule[1], /position\s*:\s*absolute/)
+const treeRule = css.match(/\.aiditor-ai-agent-tree\s*\{([^}]*)\}/)
+assert.ok(treeRule)
+assert.match(treeRule[1], /flex\s*:\s*1 1 auto/)
+assert.match(treeRule[1], /border-radius\s*:\s*0/)
 
 console.log('AI agents panel tests ok')

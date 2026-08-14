@@ -99,7 +99,7 @@ Envelope:
   version: 1,
   savedAt: 0,
   state: {
-    version: 2,
+    version: 3,
     agents: [],
     attachments: [],
     preferences: {},
@@ -133,6 +133,7 @@ Restore order:
 ```text
 read bootstrap manifest synchronously
   -> load durable envelope asynchronously
+  -> validate and migrate the snapshot version
   -> restore complete transcript
   -> normalize interrupted runs/tool calls
   -> publish ready status
@@ -142,10 +143,18 @@ If local Store mutations occur while durable state is loading, restoration
 merges records by stable Agent/message id and keeps the newer in-memory record.
 This prevents hydration from discarding a message submitted during startup.
 
-An existing version-2 localStorage snapshot is read once as a migration source
-when no durable IndexedDB record exists. After the first successful durable
-save, localStorage is rewritten as a bootstrap-only manifest. Migration cannot
-recover rows that an older lossy snapshot already removed.
+Version migration belongs only to this persistence boundary. A valid version-2
+localStorage snapshot or durable envelope is normalized to version 3 before it
+reaches the Store: transcript records and preferences are retained, while the
+removed per-Agent `toolRefs` field is discarded. The normalized Store snapshot
+is immediately saved as a version-3 durable envelope and localStorage is
+rewritten as a bootstrap-only manifest.
+
+An invalid durable envelope is not passed into the Store and does not leave
+persistence permanently suspended. The failure is reported once, then the
+current valid in-memory/bootstrap state is saved over that one transcript key as
+a version-3 recovery envelope. The adapter database is never cleared, and the
+repaired record therefore does not emit the same startup error again.
 
 ## Context Compaction
 
@@ -174,6 +183,7 @@ Persistence failures use stable codes:
 
 ```text
 AI_PERSISTENCE_UNAVAILABLE
+AI_PERSISTENCE_INVALID_TRANSCRIPT
 AI_PERSISTENCE_LOAD_FAILED
 AI_PERSISTENCE_SAVE_FAILED
 AI_PERSISTENCE_REMOVE_FAILED
@@ -198,6 +208,10 @@ transcript compaction.
 - storage errors are structured and warning-coalesced;
 - clearing removes both durable state and the bootstrap manifest;
 - separate namespaces remain isolated.
+- valid version-2 transcripts migrate once and retain messages;
+- version-3 transcripts load without a rewrite;
+- invalid envelopes recover to one valid version-3 record and do not report
+  the same corruption again on the next startup.
 
 ## Non-Goals
 

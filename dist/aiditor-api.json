@@ -643,6 +643,116 @@
       "source": "src/ui/base/actionMenu.js"
     },
     {
+      "id": "aiditor.ui.createTextDocument",
+      "group": "ui",
+      "layer": "core-ui",
+      "kind": "js-api",
+      "signature": "aiditor.ui.createTextDocument(options)",
+      "summary": "Create the format-neutral load/save state used by file-backed text editors. Workspace lookup, CAS writes, dirty state, external-change detection, and watcher cleanup live here; parsing stays in the editor.",
+      "params": [
+        {
+          "type": "object",
+          "name": "options",
+          "description": "Text document options."
+        },
+        {
+          "type": "string",
+          "name": "options.workspaceId",
+          "description": "Id registered through aiditor.workspace.bind."
+        },
+        {
+          "type": "string",
+          "name": "options.path",
+          "description": "Workspace-relative file path."
+        },
+        {
+          "type": "Function",
+          "name": "options.decode",
+          "description": "Convert source text and file metadata into the editor model."
+        },
+        {
+          "type": "Function",
+          "name": "options.encode",
+          "description": "Convert the editor model into source text."
+        },
+        {
+          "type": "Function",
+          "name": "options.equals",
+          "description": "Optional model equality function; immutable models normally use identity."
+        }
+      ],
+      "returns": {
+        "type": "object",
+        "description": "Document controller with signals and load, reload, save, set, checkExternal, snapshot, restore, and dispose methods."
+      },
+      "examples": [],
+      "wrong": [],
+      "related": [
+        "aiditor.workspace.bind"
+      ],
+      "source": "src/ui/editor/textDocument.js"
+    },
+    {
+      "id": "aiditor.ui.dataGrid",
+      "group": "ui",
+      "layer": "core-ui",
+      "kind": "js-api",
+      "signature": "aiditor.ui.dataGrid(opts)",
+      "summary": "Render a controlled spreadsheet-style grid with virtualized rows, range selection, cell editing, TSV clipboard, fill, column resize, and row/column reorder. The grid owns no domain model or persistence.",
+      "params": [
+        {
+          "type": "object",
+          "name": "opts",
+          "description": "Grid options."
+        },
+        {
+          "type": "Signal<Array>",
+          "name": "opts.rows",
+          "description": "Controlled row collection."
+        },
+        {
+          "type": "Signal<Array>",
+          "name": "opts.columns",
+          "description": "Controlled column definitions with optional id, name, width, align, and color."
+        },
+        {
+          "type": "Signal<object>",
+          "name": "opts.selection",
+          "description": "Controlled selection with kind, anchor, and focus."
+        },
+        {
+          "type": "Function",
+          "name": "opts.getText",
+          "description": "Return display/edit text for a row and column."
+        },
+        {
+          "type": "Function",
+          "name": "opts.onEdit",
+          "description": "Commit one cell edit."
+        },
+        {
+          "type": "Function",
+          "name": "opts.onPaste",
+          "description": "Commit a rectangular string matrix."
+        },
+        {
+          "type": "Function",
+          "name": "opts.onFill",
+          "description": "Fill a target range from the source range."
+        }
+      ],
+      "returns": {
+        "type": "HTMLElement",
+        "description": "Grid root."
+      },
+      "examples": [],
+      "wrong": [],
+      "related": [
+        "aiditor.ui.list"
+      ],
+      "source": "src/ui/data/dataGrid.js"
+    },
+    {
       "id": "aiditor.ui.propertyForm",
       "group": "ui",
       "layer": "core-ui",
@@ -775,6 +885,37 @@
         "aiditor.ui.actionBar"
       ],
       "source": "src/ui/form/propertyList.js"
+    },
+    {
+      "id": "aiditor.workspace.bind",
+      "group": "workspace",
+      "layer": "core",
+      "kind": "js-api",
+      "signature": "aiditor.workspace.bind(id, adapter)",
+      "summary": "Bind a runtime workspace adapter to a JSON-safe id so PanelData stores identity rather than live adapter objects.",
+      "params": [
+        {
+          "type": "string",
+          "name": "id",
+          "description": "Stable host-owned workspace id."
+        },
+        {
+          "type": "object",
+          "name": "adapter",
+          "description": "Workspace adapter created by memory, fromHandle, fromBridge, or another contract-compatible host."
+        }
+      ],
+      "returns": {
+        "type": "Function",
+        "description": "Idempotent owner-safe unbind callback."
+      },
+      "examples": [],
+      "wrong": [],
+      "related": [
+        "aiditor.workspace.binding",
+        "aiditor.ui.createTextDocument"
+      ],
+      "source": "src/core/workspace.js"
     }
   ]
 }

@@ -24,11 +24,11 @@
 
     let overlay = null
     let unregister = null
-    function cleanup() {
+    function cleanup(cause) {
       if (unregister) { unregister(); unregister = null }
-      ui.dispose(el)
+      if (cause !== 'dispose') ui.dispose(el)
       unmount()
-      o.onDismiss && o.onDismiss()
+      o.onDismiss && o.onDismiss(cause)
     }
 
     overlay = ui._overlay.open(el, {

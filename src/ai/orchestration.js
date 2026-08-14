@@ -3,6 +3,7 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const META = { owner: 'aiditor.ai.orchestration', layer: 'builtin', source: 'builtin' }
 
   function clone(value) {
     return value == null ? value : (ai.serialize && ai.serialize.clone ? ai.serialize.clone(value) : structuredClone(value))
@@ -99,7 +100,6 @@
       outputSchema: args.outputSchema ? ai.schema.normalize(args.outputSchema, 'outputSchema') : null,
       contextRefs: clone(args.contextRefs || []),
       skillRefs: clone(args.skillRefs || []),
-      toolRefs: clone(args.toolRefs || []),
       permissionMode: inherited && inherited.permissionMode || 'full',
       permissions: clone(inherited && inherited.permissions || null),
     }
@@ -142,7 +142,6 @@
       recentQuests: (agent.quests || []).slice(-8).map(function (quest) { return questSummary(agent.id, quest) }),
       contextRefs: clone(agent.contextRefs || []),
       skillRefs: clone(agent.skillRefs || []),
-      toolRefs: clone(agent.toolRefs || []),
       permissions: clone(agent.permissions),
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
@@ -199,7 +198,7 @@
     return Object.assign({ applied: true }, agentSummary(agent, true))
   }
 
-  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs', 'skillRefs', 'toolRefs']
+  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs', 'skillRefs']
 
   function validateRegisteredRefs(ids, registry, label) {
     for (let i = 0; i < ids.length; i++) {
@@ -218,7 +217,6 @@
     if (hasOwn(patch, 'connection') && !ai.getConnection(patch.connection)) throw new Error('Unknown connection: ' + patch.connection)
     if (hasOwn(patch, 'outputSchema') && patch.outputSchema) patch.outputSchema = ai.schema.normalize(patch.outputSchema, 'outputSchema')
     if (patch.skillRefs) validateRegisteredRefs(patch.skillRefs, ai.skills, 'skill')
-    if (patch.toolRefs) validateRegisteredRefs(patch.toolRefs, ai.tools, 'tool')
     return patch
   }
 
@@ -245,7 +243,7 @@
     const target = args.agentId ? ai.findAgent(args.agentId) : null
     if (args.agentId) {
       if (!target) throw new Error('Agent not found')
-      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema', 'skillRefs', 'toolRefs']
+      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema', 'skillRefs']
       for (let i = 0; i < creationKeys.length; i++) {
         if (hasOwn(args, creationKeys[i])) throw new Error('Agent configuration is only valid when delegate creates a new agent')
       }
@@ -434,7 +432,7 @@
     },
     permissions: ['tool.call'],
     run: readAgent,
-  })
+  }, META)
 
   ai.tools.register('agent.create', {
     title: 'Create Agent',
@@ -450,13 +448,12 @@
         outputSchema: { type: 'object', description: 'JSON schema for the final assistant output.' },
         contextRefs: STRING_ARRAY_SCHEMA,
         skillRefs: STRING_ARRAY_SCHEMA,
-        toolRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
     preview: createAgentPreview,
     apply: createAgentApply,
-  })
+  }, META)
 
   ai.tools.register('agent.configure', {
     title: 'Configure Agent',
@@ -473,13 +470,12 @@
         outputSchema: { type: ['object', 'null'], description: 'JSON schema for the final assistant output, or null to clear it.' },
         contextRefs: STRING_ARRAY_SCHEMA,
         skillRefs: STRING_ARRAY_SCHEMA,
-        toolRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
     preview: configureAgentPreview,
     apply: configureAgentApply,
-  })
+  }, META)
 
   ai.tools.register('agent.delegate', {
     title: 'Delegate Agent Task',
@@ -496,7 +492,6 @@
         systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
         outputSchema: { type: 'object', description: 'JSON schema for the newly created agent final outputs.' },
         skillRefs: STRING_ARRAY_SCHEMA,
-        toolRefs: STRING_ARRAY_SCHEMA,
         content: { type: 'string' },
         contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },
@@ -507,7 +502,7 @@
     permissions: ['tool.call', 'tool.apply'],
     preview: delegateAgentPreview,
     apply: delegateAgentApply,
-  })
+  }, META)
 
   ai.tools.register('agent.reparent', {
     title: 'Reparent Agent',
@@ -524,7 +519,7 @@
     permissions: ['tool.call', 'tool.apply'],
     preview: reparentAgentPreview,
     apply: reparentAgentApply,
-  })
+  }, META)
 
   ai.tools.register('agent.delete', {
     title: 'Delete Agent',
@@ -533,7 +528,7 @@
     permissions: ['tool.call', 'tool.apply'],
     preview: deleteAgentPreview,
     apply: deleteAgentApply,
-  })
+  }, META)
 
   ai.tools.register('agent.send', {
     title: 'Send Agent Message',
@@ -552,7 +547,7 @@
     },
     permissions: ['tool.call'],
     run: sendAgent,
-  })
+  }, META)
 
   ai.tools.register('quest.read', {
     title: 'Read Quests',
@@ -569,7 +564,7 @@
     },
     permissions: ['tool.call'],
     run: readQuest,
-  })
+  }, META)
 
   ai.tools.register('quest.result', {
     title: 'Read Quest Result',
@@ -584,7 +579,7 @@
     },
     permissions: ['tool.call'],
     run: readQuestResult,
-  })
+  }, META)
 
   ai.tools.register('quest.cancel', {
     title: 'Cancel Quest',
@@ -599,7 +594,7 @@
     },
     permissions: ['tool.call'],
     run: cancelQuest,
-  })
+  }, META)
 
   ai.tools.register('message.read', {
     title: 'Read Message',
@@ -614,7 +609,7 @@
     },
     permissions: ['tool.call'],
     run: readMessage,
-  })
+  }, META)
 
   ai.tools.register('agent.stop', {
     title: 'Stop Agent',
@@ -622,40 +617,5 @@
     schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call'],
     run: stopAgent,
-  })
-
-  ai.skills.register('orchestration', {
-    id: 'orchestration',
-    title: 'Agent Orchestration',
-    version: '3.0.0',
-    description: 'Create, read, message, stop, delete, and reorganize aiditor.ai agents within permission boundaries.',
-    systemPrompt: 'Use agent.* and quest.* tools to coordinate aiditor.ai agents. Complete delegated tasks end-to-end when possible. Prefer agent.delegate for create/reuse + send. Delegation is parallel: continue useful local work, then use quest.result for completed inbox event batches.',
-    rules: [
-      'Agents are identified by id. Names are display labels and may repeat.',
-      'Omitting parentAgentId creates under the calling agent; user-created agents may be roots. Agents cannot escape their ownership subtree.',
-      'Use agent.delegate when the user asks an agent to do work; it is the stable one-step delegation workflow.',
-      'agent.delegate accepts systemPrompt, model, skillRefs, and toolRefs only when creating a new child. When agentId is present it only sends work to that existing agent.',
-      'Use agent.configure to change a persistent child profile. Agents cannot configure themselves, and changes affect future requests only.',
-      'If agent.create is used separately for delegated work, follow it with agent.send unless the user only asked to create an agent.',
-      'Use a task budget to tighten maxTurns, timeoutMs, or maxTokens when delegated work needs a smaller execution bound.',
-      'After agent.delegate or agent.send, do not immediately poll quest.result. Continue useful work or stop; child completions arrive later as inbox notifications.',
-      'When processing an inbox event batch, use quest.result for completed events in that batch and do not wait for pending sibling quests.',
-      'Use quest.cancel to cancel one known queued or running quest. agent.stop is an emergency stop for the target agent current run.',
-      'A response that delegates or sends work is an action turn; continue user-visible synthesis after the runtime delivers child completion events.',
-    ],
-    tools: [
-      'agent.read',
-      'agent.create',
-      'agent.configure',
-      'agent.delegate',
-      'agent.reparent',
-      'agent.delete',
-      'agent.send',
-      'quest.read',
-      'quest.result',
-      'quest.cancel',
-      'message.read',
-      'agent.stop',
-    ],
-  }, { owner: 'aiditor.skills', layer: 'builtin', source: 'builtin' })
+  }, META)
 })(window.aiditor = window.aiditor || {})

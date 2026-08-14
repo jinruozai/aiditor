@@ -63,16 +63,23 @@ class FakeEl {
 class FakeText { constructor(text) { this.nodeType = 3; this.textContent = String(text); this.parentNode = null } }
 
 global.HTMLElement = FakeEl
+let pointElement = null
 global.document = {
   activeElement: null,
   body: new FakeEl('body'),
   createElement(tag) { return new FakeEl(tag) },
   createTextNode(text) { return new FakeText(text) },
   createDocumentFragment() { return new FakeEl('fragment') },
+  elementFromPoint() { return pointElement },
 }
 global.window = { aiditor: {} }
 window.HTMLElement = FakeEl
+const windowEvents = {}
+window.addEventListener = function (type, fn) { if (!windowEvents[type]) windowEvents[type] = []; windowEvents[type].push(fn) }
+window.removeEventListener = function (type, fn) { const list = windowEvents[type] || []; const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1) }
+window.dispatch = function (type, event) { const list = (windowEvents[type] || []).slice(); for (let i = 0; i < list.length; i++) list[i](event) }
 global.requestAnimationFrame = function (fn) { fn(); return 1 }
+global.cancelAnimationFrame = function () {}
 global.DataTransferItem = function () {}
 DataTransferItem.prototype.webkitGetAsEntry = function () {}
 
@@ -83,11 +90,9 @@ for (const file of ['src/core/signal.js', 'src/core/log.js', 'src/ui/_internal/_
 const aiditor = window.aiditor
 const ui = aiditor.ui
 const flush = function () { return new Promise(function (resolve) { setImmediate(resolve) }) }
-ui.icon = function (opts) { return ui.h('span', 'aiditor-ui-icon', { text: opts && opts.name || '' }) }
-ui.iconButton = function (opts) { const el = ui.h('button', 'aiditor-ui-icon-btn', { type: 'button' }); if (opts && opts.onClick) el.addEventListener('click', opts.onClick); return el }
 ui.menu = function () { return { close() {} } }
 
-for (const file of ['src/ui/form/input.js', 'src/ui/form/searchInput.js', 'src/ui/_internal/_dnd.js', 'src/ui/data/tree.js', 'src/ui/data/fileBrowser.js']) {
+for (const file of ['src/ui/base/icon.js', 'src/ui/base/iconButton.js', 'src/ui/form/input.js', 'src/ui/form/searchInput.js', 'src/ui/_internal/_dnd.js', 'src/ui/data/tree.js', 'src/ui/data/tree-dnd.js', 'src/ui/data/fileBrowser.js']) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
 
@@ -114,29 +119,350 @@ assert.equal(tree.__aiditorTree.loadState('root'), 'loaded')
 assert.deepEqual(tree.__aiditorTree.getFlat().map(function (row) { return row.node.id }), ['root', 'child'])
 assert.deepEqual(treeSelected.peek(), ['root'])
 assert.equal(tree.scrollTop, 37)
+const retainedChild = tree.__aiditorTree.getRowEl('child')
 
-tree.__aiditorTree.invalidateChildren('root')
+const failedRefresh = tree.__aiditorTree.invalidateChildren('root')
 assert.equal(loads.length, 2)
+assert.deepEqual(tree.__aiditorTree.getFlat().map(function (row) { return row.node.id }), ['root', 'child'])
+assert.equal(tree.__aiditorTree.getRowEl('child'), retainedChild)
 loads[1].reject(new Error('read failed'))
-await flush()
+await failedRefresh; await flush()
 assert.equal(tree.__aiditorTree.loadState('root'), 'error')
 assert.equal(tree.__aiditorTree.getFlat()[0].error.message, 'read failed')
 assert.equal(tree.__aiditorTree.getRowEl('root').attributes['aria-label'], 'Root, loading failed')
+assert.equal(tree.__aiditorTree.getRowEl('child'), retainedChild)
 const retry = tree.__aiditorTree.retry('root')
 assert.equal(loads.length, 3)
 loads[2].resolve([{ id: 'child-2', label: 'Child 2' }])
 await retry; await flush()
 assert.equal(tree.__aiditorTree.getFlat()[1].node.id, 'child-2')
 
-tree.__aiditorTree.invalidateChildren('root')
+const explicitRefresh = tree.__aiditorTree.invalidateChildren('root')
 assert.equal(loads.length, 4)
 tree.__aiditorTree.toggle('root')
-assert.equal(loads[3].signal.aborted, true)
+assert.equal(loads[3].signal.aborted, false)
+loads[3].resolve([{ id: 'child-3', label: 'Child 3' }])
+await explicitRefresh; await flush()
 tree.__aiditorTree.toggle('root')
+assert.equal(loads.length, 4)
+assert.equal(tree.__aiditorTree.getFlat()[1].node.id, 'child-3')
+
+treeItems.set([{ id: 'fresh', label: 'Fresh', hasChildren: true }])
+expanded.set(new Set())
+tree.__aiditorTree.toggle('fresh')
 assert.equal(loads.length, 5)
-treeItems.set([])
+tree.__aiditorTree.toggle('fresh')
 assert.equal(loads[4].signal.aborted, true)
+tree.__aiditorTree.toggle('fresh')
+assert.equal(loads.length, 6)
+treeItems.set([])
+assert.equal(loads[5].signal.aborted, true)
 ui.dispose(tree)
+
+const ownershipItems = aiditor.signal([
+  { id: 'lazy-leaf', label: 'Lazy to leaf', hasChildren: true },
+  { id: 'lazy-empty', label: 'Lazy to empty static', hasChildren: true },
+])
+const ownershipLoads = []
+const ownershipTree = ui.tree({
+  items: ownershipItems,
+  expanded: aiditor.signal(new Set(['lazy-leaf', 'lazy-empty'])),
+  loadChildren(node, signal) {
+    return new Promise(function (resolve) {
+      ownershipLoads.push({ id: node.id, signal, resolve })
+    })
+  },
+})
+ownershipLoads.find(function (load) { return load.id === 'lazy-leaf' }).resolve([{ id: 'cached-leaf-child' }])
+ownershipLoads.find(function (load) { return load.id === 'lazy-empty' }).resolve([{ id: 'cached-empty-child' }])
+await flush(); await flush()
+assert.deepEqual(flatIds(ownershipTree), ['lazy-leaf', 'cached-leaf-child', 'lazy-empty', 'cached-empty-child'])
+const staleOwnershipRefresh = ownershipTree.__aiditorTree.invalidateChildren(['lazy-leaf', 'lazy-empty'])
+assert.equal(ownershipLoads.length, 4)
+ownershipItems.set([
+  { id: 'lazy-leaf', label: 'Now a leaf', hasChildren: false },
+  { id: 'lazy-empty', label: 'Now static empty', hasChildren: true, children: [] },
+])
+await staleOwnershipRefresh; await flush()
+assert.deepEqual(flatIds(ownershipTree), ['lazy-leaf', 'lazy-empty'])
+assert.equal(ownershipLoads[2].signal.aborted, true)
+assert.equal(ownershipLoads[3].signal.aborted, true)
+assert.equal(ownershipTree.__aiditorTree.loadState('lazy-leaf'), 'idle')
+assert.equal(ownershipTree.__aiditorTree.loadState('lazy-empty'), 'idle')
+await ownershipTree.__aiditorTree.invalidateChildren(['lazy-leaf', 'lazy-empty'])
+assert.equal(ownershipLoads.length, 4)
+ownershipItems.set([
+  { id: 'lazy-leaf', label: 'Still a leaf', hasChildren: false },
+  { id: 'lazy-empty', label: 'Lazy again', hasChildren: true },
+])
+assert.equal(ownershipLoads.length, 5)
+ownershipLoads[4].resolve([{ id: 'fresh-lazy-child' }])
+await flush()
+assert.deepEqual(flatIds(ownershipTree), ['lazy-leaf', 'lazy-empty', 'fresh-lazy-child'])
+ui.dispose(ownershipTree)
+
+const stableItems = aiditor.signal([
+  { id: 'a', label: 'A', icon: 'file-a' },
+  { id: 'b', label: 'B', icon: 'file-b' },
+  { id: 'c', label: 'C', icon: 'file-c' },
+])
+let stableActionBuilds = 0
+const stableActionMode = aiditor.signal('action')
+const stableTree = ui.tree({
+  items: stableItems,
+  selected: aiditor.signal(['a']),
+  actions(node) {
+    stableActionBuilds++
+    return [{ id: 'open', icon: stableActionMode() + '-' + node.label, title: 'Open ' + node.label, onClick() {} }]
+  },
+})
+assert.equal(stableActionBuilds, 3)
+stableTree.scrollTop = 41
+const rowA = stableTree.__aiditorTree.getRowEl('a')
+const rowB = stableTree.__aiditorTree.getRowEl('b')
+const rowC = stableTree.__aiditorTree.getRowEl('c')
+const labelA = rowA.querySelector('.aiditor-ui-tree-label')
+const actionA = rowA.querySelector('button')
+const nodeIconA = rowA.querySelector('.aiditor-ui-tree-leading').querySelector('.aiditor-ui-icon')
+const actionIconA = actionA.querySelector('.aiditor-ui-icon')
+assert.equal(nodeIconA.textContent, 'file-a')
+assert.equal(actionIconA.textContent, 'action-A')
+stableActionMode.set('alternate')
+assert.equal(stableActionBuilds, 3)
+assert.equal(actionIconA.textContent, 'action-A')
+stableActionMode.set('action')
+assert.equal(stableActionBuilds, 3)
+actionA.focus()
+stableItems.set([
+  { id: 'a', label: 'A updated', icon: 'file-a-updated' },
+  { id: 'b', label: 'B updated', icon: 'file-b' },
+  { id: 'c', label: 'C updated', icon: 'file-c' },
+])
+assert.equal(stableActionBuilds, 6)
+assert.equal(stableTree.__aiditorTree.getRowEl('a'), rowA)
+assert.equal(stableTree.__aiditorTree.getRowEl('b'), rowB)
+assert.equal(stableTree.__aiditorTree.getRowEl('c'), rowC)
+assert.equal(rowA.querySelector('.aiditor-ui-tree-label'), labelA)
+assert.equal(labelA.textContent, 'A updated')
+assert.equal(rowA.querySelector('button'), actionA)
+assert.equal(rowA.querySelector('.aiditor-ui-tree-leading').querySelector('.aiditor-ui-icon'), nodeIconA)
+assert.equal(actionA.querySelector('.aiditor-ui-icon'), actionIconA)
+assert.equal(nodeIconA.textContent, 'file-a-updated')
+assert.equal(actionIconA.textContent, 'action-A updated')
+assert.equal(document.activeElement, actionA)
+assert.equal(stableTree.scrollTop, 41)
+
+const stableWindow = rowA.parentNode
+const insertBefore = stableWindow.insertBefore.bind(stableWindow)
+let movedRows = 0
+stableWindow.insertBefore = function (child, before) {
+  if (child.parentNode === stableWindow) movedRows++
+  return insertBefore(child, before)
+}
+stableItems.set([
+  { id: 'b', label: 'B updated', icon: 'file-b' },
+  { id: 'c', label: 'C updated', icon: 'file-c' },
+  { id: 'a', label: 'A updated', icon: 'file-a-updated' },
+])
+assert.equal(stableActionBuilds, 9)
+assert.equal(movedRows, 1)
+assert.deepEqual(stableTree.__aiditorTree.getFlat().map(function (row) { return row.node.id }), ['b', 'c', 'a'])
+assert.equal(stableTree.__aiditorTree.getRowEl('a'), rowA)
+assert.equal(stableTree.__aiditorTree.getRowEl('b'), rowB)
+assert.equal(stableTree.__aiditorTree.getRowEl('c'), rowC)
+assert.equal(document.activeElement, actionA)
+assert.equal(stableTree.scrollTop, 41)
+ui.dispose(stableTree)
+
+const movedNode = { id: 'static-moving', label: 'Static moving' }
+const unrelatedNode = { id: 'unrelated', label: 'Unrelated' }
+const staticParents = aiditor.signal([
+  { id: 'parent-a', label: 'Parent A', children: [movedNode] },
+  { id: 'parent-b', label: 'Parent B', children: [] },
+  unrelatedNode,
+])
+const slotNodes = new Map()
+let unrelatedUpdates = 0
+const staticMoveTree = ui.tree({
+  items: staticParents,
+  expanded: aiditor.signal(new Set(['parent-a', 'parent-b'])),
+  trailingSlot(node) {
+    if (node.id === 'unrelated') unrelatedUpdates++
+    if (!slotNodes.has(node.id)) slotNodes.set(node.id, ui.h('span', '', { text: node.id }))
+    return slotNodes.get(node.id)
+  },
+})
+const staticMovingRow = staticMoveTree.__aiditorTree.getRowEl('static-moving')
+const unrelatedRow = staticMoveTree.__aiditorTree.getRowEl('unrelated')
+assert.equal(unrelatedUpdates, 1)
+staticParents.set([
+  { id: 'parent-a', label: 'Parent A', children: [] },
+  { id: 'parent-b', label: 'Parent B', children: [movedNode] },
+  unrelatedNode,
+])
+assert.equal(staticMoveTree.__aiditorTree.getRowEl('static-moving'), staticMovingRow)
+assert.equal(staticMoveTree.__aiditorTree.getRowEl('unrelated'), unrelatedRow)
+assert.equal(unrelatedUpdates, 1)
+ui.dispose(staticMoveTree)
+
+function flatIds(treeEl) {
+  return treeEl.__aiditorTree.getFlat().map(function (row) { return row.node.id })
+}
+function assertUniqueProjection(treeEl) {
+  const ids = flatIds(treeEl)
+  assert.equal(new Set(ids).size, ids.length)
+}
+
+const batchLoads = []
+const batchTree = ui.tree({
+  items: [
+    { id: 'x', label: 'X', hasChildren: true },
+    { id: 'y', label: 'Y', hasChildren: true },
+  ],
+  expanded: aiditor.signal(new Set(['x', 'y'])),
+  loadChildren(node, signal) {
+    return new Promise(function (resolve, reject) {
+      batchLoads.push({ id: node.id, signal, resolve, reject })
+    })
+  },
+})
+assert.equal(batchLoads.length, 2)
+batchLoads.find(function (load) { return load.id === 'x' }).resolve([{ id: 'moving', label: 'Moving' }])
+batchLoads.find(function (load) { return load.id === 'y' }).resolve([])
+await flush(); await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'moving', 'y'])
+const movingRow = batchTree.__aiditorTree.getRowEl('moving')
+
+const moveBatch = batchTree.__aiditorTree.invalidateChildren(['x', 'y'])
+assert.equal(batchLoads.length, 4)
+batchLoads[3].resolve([{ id: 'moving', label: 'Moving at Y' }])
+await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'moving', 'y'])
+assertUniqueProjection(batchTree)
+assert.equal(batchTree.__aiditorTree.getRowEl('moving'), movingRow)
+batchLoads[2].resolve([])
+await moveBatch; await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'y', 'moving'])
+assertUniqueProjection(batchTree)
+assert.equal(batchTree.__aiditorTree.getRowEl('moving'), movingRow)
+
+const failedBatch = batchTree.__aiditorTree.invalidateChildren(['x', 'y'])
+batchLoads[4].resolve([{ id: 'moving', label: 'Moving at X' }])
+await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'y', 'moving'])
+batchLoads[5].reject(new Error('Y refresh failed'))
+await failedBatch; await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'y', 'moving'])
+assert.equal(batchTree.__aiditorTree.loadState('x'), 'error')
+assert.equal(batchTree.__aiditorTree.loadState('y'), 'error')
+assert.equal(batchTree.__aiditorTree.getRowEl('moving'), movingRow)
+
+const retryBatch = batchTree.__aiditorTree.retry('x')
+assert.equal(batchLoads.length, 8)
+batchLoads[6].resolve([{ id: 'moving', label: 'Moving at X' }])
+batchLoads[7].resolve([])
+await retryBatch; await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'moving', 'y'])
+assert.equal(batchTree.__aiditorTree.getRowEl('moving'), movingRow)
+
+const duplicateBatch = batchTree.__aiditorTree.invalidateChildren(['x', 'y'])
+batchLoads[8].resolve([{ id: 'moving', label: 'Moving duplicate X' }])
+batchLoads[9].resolve([{ id: 'moving', label: 'Moving duplicate Y' }])
+await duplicateBatch; await flush()
+assert.deepEqual(flatIds(batchTree), ['x', 'moving', 'y'])
+assert.equal(batchTree.__aiditorTree.loadState('x'), 'error')
+assert.equal(batchTree.__aiditorTree.loadState('y'), 'error')
+assert.equal(batchTree.__aiditorTree.getFlat()[0].error.refreshCause.name, 'AiditorTreeDuplicateIdError')
+assert.equal(batchTree.__aiditorTree.getRowEl('moving'), movingRow)
+ui.dispose(batchTree)
+
+let dndLoad = null
+let dropped = 0
+const dndTree = ui.tree({
+  items: [{ id: 'dnd-root', label: 'DnD root', hasChildren: true }],
+  expanded: aiditor.signal(new Set(['dnd-root'])),
+  loadChildren(node, signal) {
+    return new Promise(function (resolve) { dndLoad = { node, signal, resolve } })
+  },
+  dnd: {
+    onDrop() { dropped++ },
+  },
+})
+dndLoad.resolve([{ id: 'dnd-child', label: 'DnD child' }])
+await flush()
+dndTree.getBoundingClientRect = function () { return { left: 0, top: -100, right: 200, bottom: 300, width: 200, height: 400 } }
+const dndRootRow = dndTree.__aiditorTree.getRowEl('dnd-root')
+const dndChildRow = dndTree.__aiditorTree.getRowEl('dnd-child')
+pointElement = dndRootRow
+dndTree.dispatch('pointerdown', { button: 0, clientX: 8, clientY: 12, target: dndRootRow })
+pointElement = dndChildRow
+window.dispatch('pointermove', { clientX: 40, clientY: 12 })
+window.dispatch('pointerup', { clientX: 40, clientY: 12 })
+assert.equal(dropped, 0)
+ui.dispose(dndTree)
+
+let policyAllowsDrop = true
+let policyChecks = 0
+let dropZoneChecks = 0
+let policyDrops = 0
+const policyTree = ui.tree({
+  items: [{ id: 'policy-source' }, { id: 'policy-target' }],
+  dnd: {
+    dropZones() { dropZoneChecks++; return ['inside'] },
+    canDrop() { policyChecks++; return policyAllowsDrop },
+    onDrop() { policyDrops++ },
+  },
+})
+policyTree.getBoundingClientRect = function () { return { left: 0, top: -100, right: 200, bottom: 300, width: 200, height: 400 } }
+const policySourceRow = policyTree.__aiditorTree.getRowEl('policy-source')
+const policyTargetRow = policyTree.__aiditorTree.getRowEl('policy-target')
+pointElement = policySourceRow
+policyTree.dispatch('pointerdown', { button: 0, clientX: 8, clientY: 12, target: policySourceRow })
+pointElement = policyTargetRow
+window.dispatch('pointermove', { clientX: 40, clientY: 12 })
+assert.equal(policyChecks, 1)
+assert.equal(dropZoneChecks, 1)
+policyAllowsDrop = false
+window.dispatch('pointerup', { clientX: 40, clientY: 12 })
+assert.equal(policyChecks, 2)
+assert.equal(dropZoneChecks, 2)
+assert.equal(policyDrops, 0)
+ui.dispose(policyTree)
+
+const movingTarget = { id: 'moving-target', label: 'Moving target' }
+const movingDndItems = aiditor.signal([
+  { id: 'moving-source', label: 'Moving source', children: [] },
+  movingTarget,
+])
+let movingPolicyChecks = 0
+let movingDrops = 0
+const movingDndTree = ui.tree({
+  items: movingDndItems,
+  expanded: aiditor.signal(new Set(['moving-source'])),
+  dnd: {
+    canDrop() { movingPolicyChecks++; return true },
+    onDrop() { movingDrops++ },
+  },
+})
+movingDndTree.getBoundingClientRect = function () { return { left: 0, top: -100, right: 200, bottom: 300, width: 200, height: 400 } }
+const movingSourceRow = movingDndTree.__aiditorTree.getRowEl('moving-source')
+const movingTargetRow = movingDndTree.__aiditorTree.getRowEl('moving-target')
+pointElement = movingSourceRow
+movingDndTree.dispatch('pointerdown', { button: 0, clientX: 8, clientY: 12, target: movingSourceRow })
+pointElement = movingTargetRow
+window.dispatch('pointermove', { clientX: 40, clientY: 12 })
+assert.equal(movingPolicyChecks, 1)
+movingDndItems.set([{
+  id: 'moving-source', label: 'Moving source', children: [movingTarget],
+}])
+assert.equal(movingDndTree.__aiditorTree.getRowEl('moving-target'), movingTargetRow)
+window.dispatch('pointerup', { clientX: 40, clientY: 12 })
+assert.equal(movingDrops, 0)
+ui.dispose(movingDndTree)
+
+assert.throws(function () {
+  ui.tree({ items: [{ id: 'duplicate' }, { id: 'duplicate' }] })
+}, /duplicate node\.id/)
 
 const syncErrorTree = ui.tree({
   items: [{ id: 'sync', label: 'Sync', hasChildren: true }],

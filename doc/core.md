@@ -176,9 +176,12 @@ aiditor.commands.menuMeta(id)
 Commands are named with dotted paths. Domain-specific commands should use domain
 prefixes.
 
-Menu contributions are data records. `label`, `icon`, `kbd`, `danger`,
-`disabled`, `when`, and `input` may be literal values or functions of the menu
-context. `childrenTarget` creates a nested menu by pointing at another target.
+Menu contributions are data records. `name`, `label`, `description`, `detail`,
+`argumentHint`, `icon`, `kbd`, `danger`, `disabled`, `when`, and `input` may be
+literal values or functions of the menu context. `childrenTarget` creates a
+nested menu by pointing at another target. `name` is the compact invocation
+name used by surfaces such as the AI composer slash picker; `label` remains the
+human display title.
 
 Commands are for humans and UI. Tools are for AI/model calls. If one action must
 serve both callers, expose it through both registries and keep the caller-facing

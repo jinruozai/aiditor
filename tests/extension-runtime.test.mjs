@@ -44,8 +44,11 @@ for (const file of [
   'src/ai/store.js',
   'src/ai/connection.js',
   'src/ai/schema.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
   'src/ai/workdir.js',
   'src/ai/reference.js',
   'src/extensions/manifest.js',
@@ -67,9 +70,13 @@ assert.equal(typeof ai.tools.get('aiditor.inspectDocks').run, 'function')
 assert.equal(typeof ai.tools.get('aiditor.installExtension').preview, 'function')
 assert.equal(typeof ai.tools.get('aiditor.addPanelToDock').preview, 'function')
 assert.equal(typeof ai.tools.get('aiditor.reloadPanel').preview, 'function')
+ai.skills.register('test.extension-runtime', {
+  title: 'Extension Runtime Test',
+  tools: ['aiditor.inspectDocks', 'aiditor.addPanelToDock'],
+}, { owner: 'test:extension-runtime' })
 const extensionAgent = ai.createAgent({
   name: 'Extension Agent',
-  toolRefs: ['aiditor.inspectDocks', 'aiditor.addPanelToDock'],
+  skillRefs: ['test.extension-runtime'],
 })
 const extensionRequest = ai.makeRequest(extensionAgent, null, 'run_extension_tools', 'user', 0)
 assert.equal(extensionRequest.tools.includes('aiditor.installExtension'), false)
@@ -380,7 +387,7 @@ assert.match(aiditor.extensions.preview({
 aiditor.registerComponent('conflict.panel', { factory: function () { return document.createElement('div') } }, { owner: 'host' })
 ai.tools.register('conflict.read', {}, { owner: 'host' })
 ai.skills.register('conflict.review', {}, { owner: 'host' })
-ai.context.register('conflict.context', {})
+ai.context.register('conflict.context', {}, { owner: 'host' })
 ai.references.register('conflict.data', {}, { owner: 'host' })
 ai.operations.register('conflict.setValue', {}, { owner: 'host' })
 aiditor.commands.register('conflict.refresh', {}, { owner: 'host' })
@@ -410,7 +417,7 @@ assert.equal(conflictPreview.errors.some(function (item) { return /Menu already 
 aiditor.unregisterComponent('conflict.panel', { owner: 'host' })
 ai.tools.unregister('conflict.read', { owner: 'host' })
 ai.skills.unregister('conflict.review', { owner: 'host' })
-ai.context.unregister('conflict.context')
+ai.context.unregister('conflict.context', { owner: 'host' })
 ai.references.unregister('conflict.data', { owner: 'host' })
 ai.operations.unregister('conflict.setValue', { owner: 'host' })
 aiditor.commands.unregister('conflict.refresh', { owner: 'host' })

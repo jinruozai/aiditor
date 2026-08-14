@@ -89,6 +89,8 @@
   <script src="./demo/ai-targets.js?v=12"></script>
   <script src="./demo/topbar.js?v=14"></script>
   <script src="./demo/project.js?v=12"></script>
+  <script src="./demo/csv-types.js?v=1"></script>
+  <script src="./demo/csv-sample.js?v=1"></script>
 
   <!-- Demo panel components. -->
   <script src="./demo/components/ui-gallery.js?v=11"></script>
@@ -101,6 +103,10 @@
     //
     // Layout: left navigation dock + combined AI chat dock.
     const { createDockLayout, dock, split, panel } = aiditor
+
+    aiditor.workspace.bind('demo.csv', aiditor.workspace.memory({
+      'data/test.csv': Demo.csvSample,
+    }))
     const isPopup = new URLSearchParams(window.location.search).has('aiditor-popup')
     document.body.classList.toggle('is-popup', isPopup)
     if (!isPopup && window.AIditorTopBar) {
@@ -150,6 +156,7 @@
           },
           panels: [
             panel({ component: 'ai-chat', title: 'Chat', icon: 'message-circle' }),
+            panel({ component: 'csv-editor', title: 'test.csv', icon: 'table', props: { workspaceId: 'demo.csv', path: 'data/test.csv', format: 'gamecsv' } }),
           ],
         }),
       ], [0.24, 0.76])

@@ -10,6 +10,41 @@
   const SEARCH_MAX_RESULTS = 50
   const SEARCH_MAX_PER_FILE = 20
   const SEARCH_MAX_DIAGNOSTICS = 100
+  const bindingsSig = aiditor.signal({})
+
+  /**
+   * @aiditorApi aiditor.workspace.bind
+   * @group workspace
+   * @layer core
+   * @kind js-api
+   * @signature aiditor.workspace.bind(id, adapter)
+   * @summary Bind a runtime workspace adapter to a JSON-safe id so PanelData stores identity rather than live adapter objects.
+   * @param {string} id - Stable host-owned workspace id.
+   * @param {object} adapter - Workspace adapter created by memory, fromHandle, fromBridge, or another contract-compatible host.
+   * @returns {Function} Idempotent owner-safe unbind callback.
+   * @related aiditor.workspace.binding,aiditor.ui.createTextDocument
+   */
+  function bind(id, adapter) {
+    id = String(id || 'default')
+    const current = Object.assign({}, bindingsSig.peek())
+    current[id] = adapter
+    bindingsSig.set(current)
+    return function () { unbind(id, adapter) }
+  }
+
+  function unbind(id, adapter) {
+    id = String(id || 'default')
+    const current = Object.assign({}, bindingsSig.peek())
+    if (adapter && current[id] !== adapter) return false
+    if (!Object.prototype.hasOwnProperty.call(current, id)) return false
+    delete current[id]
+    bindingsSig.set(current)
+    return true
+  }
+
+  function binding(id) {
+    return bindingsSig()[String(id || 'default')] || null
+  }
 
   function hashText(text) {
     text = String(text == null ? '' : text)
@@ -1531,6 +1566,10 @@
   workspace.saveDirectoryHandle = saveDirectoryHandle
   workspace.fromHandle = fromHandle
   workspace.fromBridge = fromBridge
+  workspace.bind = bind
+  workspace.unbind = unbind
+  workspace.binding = binding
+  workspace.bindings = bindingsSig
 
   aiditor.workspace = workspace
 })(window.aiditor = window.aiditor || {})

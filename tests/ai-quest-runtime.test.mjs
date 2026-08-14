@@ -18,8 +18,11 @@ for (const file of [
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
   'src/ai/schema.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
   'src/ai/orchestration.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
@@ -28,6 +31,14 @@ for (const file of [
 }
 
 const ai = window.aiditor.ai
+const TEST_META = { owner: 'test:quest-runtime' }
+let nextSkill = 1
+function registerTool(name, spec) { return ai.tools.register(name, spec, TEST_META) }
+function skillRefs(tools) {
+  const id = 'test.quest.' + nextSkill++
+  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
+  return [id]
+}
 const replies = []
 const requests = []
 
@@ -192,7 +203,7 @@ ai.registerTransport('delegate-parent', {
   },
 })
 ai.registerConnection('delegate-parent', { auth: { type: 'none' }, transport: { type: 'delegate-parent' }, configDefaults: {} })
-ai.updateAgent(parent.id, { connection: 'delegate-parent', toolRefs: ['agent.send'] })
+ai.updateAgent(parent.id, { connection: 'delegate-parent', skillRefs: skillRefs(['agent.send']) })
 const delegated = ai.message.send(parent.id, { content: 'delegate to child' })
 await delegated.promise
 assert.equal(ai.findAgent(child.id).quests.some(function (item) {
@@ -203,7 +214,7 @@ assert.notEqual(parentAfterDelegate.status, 'waiting_quest')
 await flush()
 
 let approvalRequests = 0
-ai.tools.register('approval-edit', {
+registerTool('approval-edit', {
   preview: function (args) { return { before: args.before, after: args.after } },
   apply: function (preview) { return { applied: true, preview: preview } },
 })
@@ -222,7 +233,7 @@ ai.registerTransport('approval-flow', {
   },
 })
 ai.registerConnection('approval-flow', { auth: { type: 'none' }, transport: { type: 'approval-flow' }, configDefaults: {} })
-const approvalAgent = ai.createAgent({ name: 'Approval', parentAgentId: parent.id, connection: 'approval-flow', permissionMode: 'auto', toolRefs: ['approval-edit'] })
+const approvalAgent = ai.createAgent({ name: 'Approval', parentAgentId: parent.id, connection: 'approval-flow', permissionMode: 'auto', skillRefs: skillRefs(['approval-edit']) })
 const approvalRun = ai.message.send(approvalAgent.id, { content: 'needs approval' })
 await approvalRun.promise
 assert.equal(ai.findAgent(approvalAgent.id).status, 'waiting_approval')
@@ -239,7 +250,7 @@ assert.equal(ai.findAgent(approvalAgent.id).messages.some(function (message) {
 }), true)
 
 let approvalRunRequests = 0
-ai.tools.register('approval-run-edit', {
+registerTool('approval-run-edit', {
   run: function (args) { return { before: args.before, after: args.after } },
   apply: function (preview) { return { applied: true, preview: preview } },
 })
@@ -258,7 +269,7 @@ ai.registerTransport('approval-run-flow', {
   },
 })
 ai.registerConnection('approval-run-flow', { auth: { type: 'none' }, transport: { type: 'approval-run-flow' }, configDefaults: {} })
-const approvalRunAgent = ai.createAgent({ name: 'Approval Run', parentAgentId: parent.id, connection: 'approval-run-flow', permissionMode: 'auto', toolRefs: ['approval-run-edit'] })
+const approvalRunAgent = ai.createAgent({ name: 'Approval Run', parentAgentId: parent.id, connection: 'approval-run-flow', permissionMode: 'auto', skillRefs: skillRefs(['approval-run-edit']) })
 const approvalRunFlow = ai.message.send(approvalRunAgent.id, { content: 'needs approval after run' })
 await approvalRunFlow.promise
 assert.equal(ai.findAgent(approvalRunAgent.id).status, 'waiting_approval')
@@ -276,7 +287,7 @@ assert.equal(ai.findAgent(approvalRunAgent.id).messages.some(function (message) 
 }), true)
 
 let fullAccessRequests = 0
-ai.tools.register('full-access-edit', {
+registerTool('full-access-edit', {
   preview: function (args) { return { before: args.before, after: args.after } },
   apply: function (preview) { return { applied: true, preview: preview } },
 })
@@ -295,7 +306,7 @@ ai.registerTransport('full-access-flow', {
   },
 })
 ai.registerConnection('full-access-flow', { auth: { type: 'none' }, transport: { type: 'full-access-flow' }, configDefaults: {} })
-const fullAccessAgent = ai.createAgent({ name: 'Full Access', parentAgentId: parent.id, connection: 'full-access-flow', permissionMode: 'full', toolRefs: ['full-access-edit'] })
+const fullAccessAgent = ai.createAgent({ name: 'Full Access', parentAgentId: parent.id, connection: 'full-access-flow', permissionMode: 'full', skillRefs: skillRefs(['full-access-edit']) })
 const fullAccessRun = ai.message.send(fullAccessAgent.id, { content: 'apply without asking' })
 await fullAccessRun.promise
 assert.equal(ai.findAgent(fullAccessAgent.id).status, 'idle')
@@ -309,7 +320,7 @@ assert.equal(ai.findAgent(fullAccessAgent.id).messages.some(function (message) {
 }), true)
 
 let cappedRequests = 0
-ai.tools.register('capped-read', {
+registerTool('capped-read', {
   run: function (args) { return { ok: true, id: args.id } },
 })
 ai.registerTransport('capped-tool-flow', {
@@ -329,7 +340,7 @@ ai.registerTransport('capped-tool-flow', {
 })
 ai.registerConnection('capped-tool-flow', { auth: { type: 'none' }, transport: { type: 'capped-tool-flow' }, configDefaults: {} })
 ai.configureRuntime({ limits: { maxTurns: 1 } })
-const cappedAgent = ai.createAgent({ name: 'Capped Tools', parentAgentId: parent.id, connection: 'capped-tool-flow', permissionMode: 'full', toolRefs: ['capped-read'] })
+const cappedAgent = ai.createAgent({ name: 'Capped Tools', parentAgentId: parent.id, connection: 'capped-tool-flow', permissionMode: 'full', skillRefs: skillRefs(['capped-read']) })
 const cappedRun = ai.message.send(cappedAgent.id, { content: 'run capped read' })
 await cappedRun.promise
 assert.equal(cappedRequests, 1)
@@ -349,7 +360,7 @@ assert.equal(ai.findAgent(cappedAgent.id).messages.some(function (message) {
 }), true)
 ai.configureRuntime({ limits: { maxTurns: 32 } })
 
-ai.tools.register('budget-read', {
+registerTool('budget-read', {
   run: function () { return { ok: true } },
 })
 ai.registerTransport('budget-turns', {
@@ -363,7 +374,7 @@ ai.registerTransport('budget-turns', {
   },
 })
 ai.registerConnection('budget-turns', { auth: { type: 'none' }, transport: { type: 'budget-turns' }, configDefaults: {} })
-const turnBudgetAgent = ai.createAgent({ name: 'Turn Budget', parentAgentId: parent.id, connection: 'budget-turns', permissionMode: 'full', toolRefs: ['budget-read'] })
+const turnBudgetAgent = ai.createAgent({ name: 'Turn Budget', parentAgentId: parent.id, connection: 'budget-turns', permissionMode: 'full', skillRefs: skillRefs(['budget-read']) })
 const turnBudgetSend = ai.agent.send(turnBudgetAgent.id, {
   fromAgentId: parent.id,
   content: 'bounded turn task',
@@ -389,7 +400,7 @@ ai.registerTransport('budget-tokens', {
   },
 })
 ai.registerConnection('budget-tokens', { auth: { type: 'none' }, transport: { type: 'budget-tokens' }, configDefaults: {} })
-const tokenBudgetAgent = ai.createAgent({ name: 'Token Budget', parentAgentId: parent.id, connection: 'budget-tokens', permissionMode: 'full', toolRefs: ['budget-read'] })
+const tokenBudgetAgent = ai.createAgent({ name: 'Token Budget', parentAgentId: parent.id, connection: 'budget-tokens', permissionMode: 'full', skillRefs: skillRefs(['budget-read']) })
 const tokenBudgetSend = ai.agent.send(tokenBudgetAgent.id, {
   fromAgentId: parent.id,
   content: 'bounded token task',
@@ -414,7 +425,7 @@ ai.registerTransport('budget-approval', {
   },
 })
 ai.registerConnection('budget-approval', { auth: { type: 'none' }, transport: { type: 'budget-approval' }, configDefaults: {} })
-const budgetApprovalAgent = ai.createAgent({ name: 'Budget Approval', parentAgentId: parent.id, connection: 'budget-approval', permissionMode: 'auto', toolRefs: ['approval-edit'] })
+const budgetApprovalAgent = ai.createAgent({ name: 'Budget Approval', parentAgentId: parent.id, connection: 'budget-approval', permissionMode: 'auto', skillRefs: skillRefs(['approval-edit']) })
 const budgetApprovalSend = ai.agent.send(budgetApprovalAgent.id, {
   fromAgentId: parent.id,
   content: 'bounded approval task',
@@ -570,7 +581,7 @@ ai.registerTransport('batch-parent', {
   },
 })
 ai.registerConnection('batch-parent', { auth: { type: 'none' }, transport: { type: 'batch-parent' }, configDefaults: {} })
-const batchParent = ai.createAgent({ name: 'Batch Parent', parentAgentId: parent.id, connection: 'batch-parent', toolRefs: ['agent.delegate', 'quest.result'] })
+const batchParent = ai.createAgent({ name: 'Batch Parent', parentAgentId: parent.id, connection: 'batch-parent', skillRefs: skillRefs(['agent.delegate', 'quest.result']) })
 const batchChildA = ai.createAgent({ name: 'Batch A', parentAgentId: batchParent.id, connection: 'batch-child' })
 const batchChildB = ai.createAgent({ name: 'Batch B', parentAgentId: batchParent.id, connection: 'batch-child' })
 const batchRun = ai.message.send(batchParent.id, { content: 'delegate two and do local work' })

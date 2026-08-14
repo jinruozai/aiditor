@@ -5,6 +5,7 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const runs = {}
   const waitingRuns = {}
+  const runSkillRefs = {}
   const budgetTimers = {}
   const runtimeConfig = {
     maxConcurrentAgents: 8,
@@ -1459,7 +1460,11 @@
   }
 
   function makeRequest(agent, input, runId, actor, turn) {
-    const request = ai.makeRequest(agent, input, runId, actor, turn)
+    const selected = runSkillRefs[runId] || []
+    const requestInput = selected.length
+      ? Object.assign({}, input || {}, { selectedSkillRefs: selected.slice() })
+      : input
+    const request = ai.makeRequest(agent, requestInput, runId, actor, turn)
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
     request.budget = quest && quest.budget || effectiveRunBudget()
     request.startedAt = quest && quest.startedAt || Date.now()
@@ -1527,6 +1532,7 @@
   function failRunningRequest(agentId, request, controller, key, err) {
     clearBudgetTimer(agentId)
     delete runs[key]
+    delete runSkillRefs[request.runId]
     const input = request.input
     const stopped = controller.signal.aborted
     if (input && input.id) ai.updateMessage(agentId, input.id, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now() })
@@ -1561,6 +1567,10 @@
     const input = request.input
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agentId, input.questId) : null
     request.startedAt = quest && quest.startedAt || request.startedAt || Date.now()
+    const transientSkills = (request.skillActivations || []).filter(function (item) {
+      return item.reason === 'explicit' || item.reason === 'selected'
+    }).map(function (item) { return item.id })
+    if (transientSkills.length) runSkillRefs[request.runId] = transientSkills
     runs[key] = {
       controller: controller,
       connection: runner,
@@ -1639,6 +1649,7 @@
     delete runs[key]
     const current = ai.findAgent(agentId)
     if (current && current.status === 'waiting_approval') return result
+    delete runSkillRefs[request.runId]
     clearBudgetTimer(agentId)
     completeMessageExecution(agentId, request, result)
     trace({
@@ -2091,6 +2102,7 @@
         else run.connection.abort(run.runId)
       }
       delete runs[agent.id]
+      delete runSkillRefs[run.runId]
     }
     if (waiting) {
       ai.setActiveRunState(agent.id, {
@@ -2104,6 +2116,7 @@
       stopQuestExecution(agent.id, input, stopReason, waiting.usage)
       trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       delete waitingRuns[agent.id]
+      delete runSkillRefs[waiting.runId]
     }
     ai.setAgentStatus(agent.id, status || 'idle')
     return true
@@ -2453,9 +2466,50 @@
     }
   }
 
+  function runRecord(runId) {
+    const agentIds = Object.keys(runs)
+    for (let i = 0; i < agentIds.length; i++) if (runs[agentIds[i]].runId === runId) return runs[agentIds[i]]
+    const waitingIds = Object.keys(waitingRuns)
+    for (let j = 0; j < waitingIds.length; j++) if (waitingRuns[waitingIds[j]].runId === runId) return waitingRuns[waitingIds[j]]
+    return null
+  }
+
+  function activateRunSkill(runId, skillId, ctx) {
+    const record = runRecord(runId)
+    if (!record) throw new Error('Skill activation requires a live run.')
+    const skill = ai.skills && ai.skills.get(skillId)
+    if (!skill || skill.modelInvocable === false) throw new Error('Skill is not model-invocable: ' + skillId)
+    const request = record.request || {}
+    const availability = ai.skills.availability(skillId, runSkillContext(runId, ctx))
+    if (!availability.available) {
+      return { outcome: 'unavailable', id: skillId, reason: availability.reason }
+    }
+    const active = (request.skills || []).indexOf(skillId) >= 0
+    const selected = runSkillRefs[runId] = runSkillRefs[runId] || []
+    if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId }
+    selected.push(skillId)
+    return { outcome: 'activated', id: skillId, continuation: true }
+  }
+
+  function runSkillContext(runId, ctx) {
+    const record = runRecord(runId)
+    const request = record && record.request || {}
+    return Object.assign({}, ctx || {}, {
+      ai: ai,
+      agent: request.agent,
+      actor: request.actor,
+      runId: runId,
+      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
+      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
+      runtimeContext: request.runtimeContext || [],
+    })
+  }
+
   ai.runAgent = runAgent
   ai.stopAgent = stopAgent
   ai.resumeAgent = resumeAgent
+  ai.activateRunSkill = activateRunSkill
+  ai._runSkillContext = runSkillContext
   ai.flushToolResults = flushToolResults
   ai.scheduleAgent = scheduleAgent
   ai.configureRuntime = function (config) {

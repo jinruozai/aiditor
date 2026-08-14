@@ -64,18 +64,22 @@ const JS_ORDER = [
   'ai/provider-auth.js',
   'ai/provider-transports.js',
   'ai/provider-connections.js',
-  'ai/registries.js',
-  'ai/context.js',
-  'ai/skills.js',
+  'ai/contribution-registry.js',
+  'ai/tool/registry.js',
+  'ai/context/registry.js',
+  'ai/skill/registry.js',
+  'ai/tool/runtime.js',
+  'ai/skill/runtime.js',
+  'ai/skill/builtins.js',
   'ai/workdir.js',
-  'ai/skill-packages.js',
+  'ai/skill/packages.js',
   'ai/code.js',
   'ai/git.js',
   'ai/verify.js',
   'ai/reference.js',
   'ai/api-docs.generated.js',
   'ai/api-reference.js',
-  'ai/skill-reference.js',
+  'ai/skill/reference.js',
 
   // Layer 2.6 - optional extension runtime
   'extensions/manifest.js',
@@ -174,6 +178,12 @@ const JS_ORDER = [
   'ui/editor/pathInput.js',
   'ui/editor/fileInput.js',
   'ui/editor/filePathInput.js',
+  'ui/editor/textDocument.js',
+  'ui/editor/csv/codec.js',
+  'ui/editor/csv/format.js',
+  'ui/editor/csv/format-csv.js',
+  'ui/editor/csv/format-gamecsv.js',
+  'ui/editor/csv/model.js',
 
   // Layer 9 - UI library: containers
   'ui/container/section.js',
@@ -197,6 +207,7 @@ const JS_ORDER = [
   'ui/data/tree.js',
   'ui/data/tree-dnd.js',
   'ui/data/table.js',
+  'ui/data/dataGrid.js',
   'ui/data/breadcrumbs.js',
   'ui/data/progressBar.js',
   'ui/data/fileBrowser.js',
@@ -216,6 +227,7 @@ const JS_ORDER = [
   'ai/message-renderers.js',
   'ai/panels/agents.js',
   'ai/panels/rich-prompt-input.js',
+  'ai/panels/composer-slash.js',
   'ai/panels/chat.js',
   'ai/panels/message-live-strip.js',
   'ai/panels/message-virtualizer.js',
@@ -229,6 +241,18 @@ const JS_ORDER = [
   'ui/panel/dock-tabs.js',
   'ui/panel/history.js',
   'ui/panel/log.js',
+  'ui/panel/csv-session.js',
+  'ui/panel/csv-commands.js',
+    'ui/panel/csv-inspector.js',
+    'ui/panel/csv-pan.js',
+    'ui/panel/csv-drag.js',
+  'ui/panel/csv-media.js',
+  'ui/panel/csv-reference.js',
+  'ui/panel/csv-enum.js',
+  'ui/panel/csv-range.js',
+  'ui/panel/csv-number.js',
+  'ui/panel/csv-cell.js',
+  'ui/panel/csv-editor.js',
 
   // Layer 13 - palette metadata for built-in ui.* components. Must come last.
   'ui/_internal/_register-builtins.js',
@@ -256,6 +280,8 @@ const CSS_ORDER = [
   'style/ui-container.css',
   'style/ui-timeline.css',
   'style/ui-data.css',
+  'style/ui-data-grid.css',
+  'style/ui-csv.css',
   'style/ui-overlay.css',
   'style/dock-tabs.css',
   'style/ui-ai.css',
@@ -303,7 +329,7 @@ function isEditorUiJs(rel) {
 }
 
 function isEditorCss(rel) {
-  return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css')
+  return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css' && rel !== 'style/ui-csv.css')
 }
 
 function isMiniCss(rel) {
@@ -330,6 +356,7 @@ const EDITOR_RUNTIME_JS_ORDER = [
   'core/bus.js',
   'core/i18n.js',
   'core/commands.js',
+  'core/workspace.js',
   'core/registry.js',
 ]
 

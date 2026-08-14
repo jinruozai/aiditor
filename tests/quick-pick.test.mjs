@@ -59,6 +59,7 @@ class FakeEl {
     if (name === 'class') this.classList.set(value)
     else this[name] = String(value)
   }
+  getAttribute(name) { return this.attributes[name] == null ? null : this.attributes[name] }
   removeAttribute(name) {
     delete this.attributes[name]
     if (name === 'class') this.classList.set('')
@@ -272,5 +273,33 @@ assert.equal(customRows[0].querySelector('.custom-content').textContent, 'Two+:k
 
 custom.close()
 assert.equal(custom.el.parentNode, null)
+
+const external = new FakeEl('div')
+document.body.appendChild(external)
+external.setAttribute('aria-autocomplete', 'both')
+external.focus()
+const controlledQuery = aiditor.signal('gam')
+const controlledSelected = []
+const controlled = ui.quickPick({
+  anchor,
+  items,
+  query: controlledQuery,
+  showSearch: false,
+  focus: false,
+  ariaTarget: external,
+  getKey: function (item) { return item.id },
+  getSearchText: function (item) { return [item.id, item.label] },
+  onSelect: function (item) { controlledSelected.push(item.id) },
+})
+const controlledRoot = controlled.el.querySelector('.aiditor-ui-quick-pick')
+assert.equal(controlledRoot.querySelector('input'), null)
+assert.equal(controlledRoot.querySelectorAll('.aiditor-ui-quick-pick-row').length, 1)
+assert.equal(document.activeElement, external)
+assert.equal(external.attributes['aria-expanded'], 'true')
+assert.equal(controlled.handleKeyDown(keyEvent('Enter')), true)
+assert.deepEqual(controlledSelected, ['gamma'])
+assert.equal(external.attributes['aria-expanded'], undefined)
+assert.equal(external.attributes['aria-autocomplete'], 'both')
+assert.equal(external.attributes['aria-haspopup'], undefined)
 
 console.log('quick pick tests ok')

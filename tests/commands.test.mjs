@@ -11,6 +11,8 @@ let ran = null
 
 aiditor.commands.register('case.refresh', {
   title: 'Refresh',
+  description: 'Refresh current state.',
+  argumentHint: '[scope]',
   icon: 'refresh-cw',
   run: function (input, ctx) {
     ran = { input, ctx }
@@ -37,6 +39,9 @@ const menu = aiditor.commands.menuItems('dock.panel.context')
 assert.equal(menu.length, 2)
 const refreshMenu = menu.find(function (item) { return item.id === 'case.refresh.menu' })
 assert.equal(refreshMenu.label, 'Refresh')
+assert.equal(refreshMenu.name, 'case.refresh')
+assert.equal(refreshMenu.description, 'Refresh current state.')
+assert.equal(refreshMenu.argumentHint, '[scope]')
 assert.equal(refreshMenu.icon, 'refresh-cw')
 
 const uiItem = aiditor.commands.menuUiItems('dock.panel.context').find(function (item) { return item.id === 'case.refresh.menu' })

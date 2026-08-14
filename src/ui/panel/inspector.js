@@ -49,8 +49,11 @@
     })
     search.classList.add('aiditor-inspector-search')
     search.hidden = true
+    const beforeForm = ui.h('div', 'aiditor-inspector-before-form')
+    beforeForm.hidden = true
     head.appendChild(titleLine)
     head.appendChild(search)
+    head.appendChild(beforeForm)
     const body = ui.h('div', 'aiditor-inspector-body')
     root.appendChild(head)
     root.appendChild(body)
@@ -103,6 +106,25 @@
       actionsSig.set(inspection.actions || [])
     }
 
+    function setBeforeForm(inspection, targets) {
+      ui.disposeChildren(beforeForm)
+      beforeForm.hidden = true
+      if (!inspection || typeof inspection.renderBeforeForm !== 'function') return
+      const element = aiditor.safeCall({ scope: 'inspector', action: 'renderBeforeForm', type: inspection.type }, function () {
+        return inspection.renderBeforeForm({
+          targets: targets,
+          primary: targets[0],
+          values: inspection.values || [],
+          panel: ctx.panel,
+          bus: ctx.bus,
+          refresh: refresh,
+        })
+      })
+      if (!(element instanceof HTMLElement)) return
+      beforeForm.appendChild(element)
+      beforeForm.hidden = false
+    }
+
     function setSubscription(inspection, targets) {
       const nextKey = inspection ? subscriptionKey(inspection, targets) : ''
       const nextSubscribe = inspection && typeof inspection.subscribe === 'function' ? inspection.subscribe : null
@@ -123,7 +145,7 @@
       }
     }
 
-    function callWrite(field, change, values) {
+    function callWrite(field, change, values, meta) {
       aiditor.safeCall({ scope: 'inspector', action: 'write', type: currentInspection.type, field: field }, function () {
         currentInspection.write(field, change, {
           targets: currentTargets,
@@ -135,6 +157,7 @@
           pathChange: aiditor.inspector.pathChange,
           valueForChange: aiditor.inspector.valueForChange,
           commands: aiditor.commands || null,
+          edit: meta && meta.edit || null,
         })
       })
     }
@@ -243,7 +266,7 @@
           },
           onChange: function (field, value, values, meta) {
             const change = meta && meta.change || aiditor.inspector.literalChange(field, value)
-            callWrite(field, change, values)
+            callWrite(field, change, values, meta)
           },
           ctx: function (field) {
             return { source: 'aiditor-inspector', field: field, targets: currentTargets, panel: ctx.panel }
@@ -310,6 +333,7 @@
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
+        setBeforeForm(null, targets)
         mountEmpty('Inspector', '', 'Select something to inspect.')
         return
       }
@@ -320,6 +344,7 @@
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
+        setBeforeForm(null, targets)
         mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
         return
       }
@@ -330,8 +355,13 @@
       subtitle.textContent = subtitleOf(targets, inspection)
       setHeaderActions(inspection, targets)
       setSubscription(inspection, targets)
-      if (inspection.render) mountCustom(inspection, targets)
-      else mountForm(inspection, targets)
+      if (inspection.render) {
+        setBeforeForm(null, targets)
+        mountCustom(inspection, targets)
+      } else {
+        setBeforeForm(inspection, targets)
+        mountForm(inspection, targets)
+      }
     }
 
     ctx.onCleanup(function () {
@@ -343,6 +373,7 @@
       fieldMessageController = null
       currentSubKey = ''
       currentSubscribe = null
+      setBeforeForm(null, [])
       clearBody()
     })
     ctx.onCleanup(aiditor.effect(refresh))

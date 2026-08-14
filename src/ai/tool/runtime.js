@@ -1,4 +1,4 @@
-// aiditor.ai tool-call lifecycle and run context.
+// AI Host Tool-call lifecycle and run context.
 ;(function (aiditor) {
   'use strict'
 
@@ -133,6 +133,7 @@
       agent: found.agent,
       message: found.message,
       toolCall: found.toolCall,
+      runId: found.message && found.message.meta && found.message.meta.runId || null,
       canRead: function (scope) { return ai.canRead(actor || found.toolCall.actor || 'user', found.agent.id, scope || 'agent.full') },
       canApply: function () { return ai.canUseTool(actor || found.toolCall.actor || 'user', found.agent.id, found.toolCall.toolId, 'apply') },
     }

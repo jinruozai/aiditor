@@ -11,32 +11,37 @@
   ui.quickPick = function (opts) {
     const o = opts || {}
     const id = 'aiditor-quick-pick-' + (nextId++)
-    const query = aiditor.signal('')
+    const query = ui.asSig(o.query != null ? o.query : '')
     const itemsSig = ui.asSig(o.items || [])
     const selectedSig = ui.asSig(o.selectedKey != null ? o.selectedKey : null)
-    const root = ui.h('div', 'aiditor-ui-quick-pick')
-    const input = ui.searchInput({
+    const root = ui.h('div', 'aiditor-ui-quick-pick' + (o.className ? ' ' + o.className : ''))
+    const input = o.showSearch === false ? null : ui.searchInput({
       value: query,
       placeholder: o.placeholder || 'Search...',
-      onChange: function (v) {
-        query.set(v)
-        render('query')
-      },
     })
     const list = ui.h('div', 'aiditor-ui-quick-pick-list', {
       id: id + '-list',
       role: 'listbox',
     })
-    input.classList.add('aiditor-ui-quick-pick-input')
-    root.appendChild(input)
+    if (input) {
+      input.classList.add('aiditor-ui-quick-pick-input')
+      root.appendChild(input)
+    }
     root.appendChild(list)
 
-    const inputEl = input.querySelector('input')
+    const inputEl = input && input.querySelector('input')
+    const ariaTarget = o.ariaTarget || inputEl
+    const ariaNames = ['aria-expanded', 'aria-controls', 'aria-autocomplete', 'aria-activedescendant', 'aria-haspopup']
+    const ariaBefore = {}
     if (inputEl) {
       inputEl.setAttribute('role', 'combobox')
-      inputEl.setAttribute('aria-expanded', 'true')
-      inputEl.setAttribute('aria-controls', id + '-list')
-      inputEl.setAttribute('aria-autocomplete', 'list')
+    }
+    if (ariaTarget) {
+      for (let i = 0; i < ariaNames.length; i++) ariaBefore[ariaNames[i]] = ariaTarget.getAttribute(ariaNames[i])
+      ariaTarget.setAttribute('aria-expanded', 'true')
+      ariaTarget.setAttribute('aria-controls', id + '-list')
+      ariaTarget.setAttribute('aria-autocomplete', 'list')
+      ariaTarget.setAttribute('aria-haspopup', 'listbox')
     }
 
     const rows = new Map()
@@ -63,9 +68,17 @@
 
     function cleanupAnchor() {
       closed = true
+      if (ariaTarget) {
+        for (let i = 0; i < ariaNames.length; i++) {
+          const name = ariaNames[i]
+          if (ariaBefore[name] == null) ariaTarget.removeAttribute(name)
+          else ariaTarget.setAttribute(name, ariaBefore[name])
+        }
+      }
       if (tempAnchor && tempAnchor.parentNode) tempAnchor.parentNode.removeChild(tempAnchor)
       tempAnchor = null
       pop = null
+      if (typeof o.onDismiss === 'function') o.onDismiss()
     }
 
     function source(action, key) {
@@ -187,7 +200,7 @@
       ui.collect(el, aiditor.effect(function () {
         const v = state.active()
         el.classList.toggle('aiditor-ui-quick-pick-row-active', v)
-        if (v && inputEl) inputEl.setAttribute('aria-activedescendant', state.id)
+        if (v && ariaTarget) ariaTarget.setAttribute('aria-activedescendant', state.id)
       }))
       ui.collect(el, aiditor.effect(function () {
         const v = state.selected()
@@ -308,9 +321,9 @@
         if (isActive) activeId = state.id
         state.selected.set(String(selectedSig.peek()) === state.key)
       })
-      if (inputEl) {
-        if (activeId) inputEl.setAttribute('aria-activedescendant', activeId)
-        else inputEl.removeAttribute('aria-activedescendant')
+      if (ariaTarget) {
+        if (activeId) ariaTarget.setAttribute('aria-activedescendant', activeId)
+        else ariaTarget.removeAttribute('aria-activedescendant')
       }
       const state = rows.get(activeKey)
       if (state && !state.disabled.peek() && state.el.scrollIntoView) state.el.scrollIntoView({ block: 'nearest' })
@@ -391,27 +404,31 @@
       paintState()
     }
 
-    input.addEventListener('keydown', function (ev) {
+    function handleKeyDown(ev) {
       if (ev.key === 'ArrowDown') {
         ev.preventDefault()
         chooseActive('next')
-        return
+        return true
       }
       if (ev.key === 'ArrowUp') {
         ev.preventDefault()
         chooseActive('prev')
-        return
+        return true
       }
-      if (ev.key === 'Enter') {
+      if (ev.key === 'Enter' || (o.acceptTab && ev.key === 'Tab')) {
         ev.preventDefault()
         if (activeKey != null) choose(activeKey)
-        return
+        return true
       }
       if (ev.key === 'Escape') {
         ev.preventDefault()
         close()
+        return true
       }
-    })
+      return false
+    }
+
+    if (input) input.addEventListener('keydown', handleKeyDown)
 
     ui.collect(root, function () {
       rows.forEach(function (state) { ui.dispose(state.el) })
@@ -420,6 +437,7 @@
     })
     ui.bind(root, itemsSig, function () { render('items') })
     ui.bind(root, selectedSig, paintState)
+    ui.bind(root, query, function () { render('query') })
 
     const r = anchor.getBoundingClientRect()
     root.style.width = (o.width || Math.max(260, Math.min(460, r.width || 320))) + 'px'
@@ -433,7 +451,7 @@
       role: 'dialog',
       onDismiss: cleanupAnchor,
     })
-    setTimeout(function () {
+    if (o.focus !== false) setTimeout(function () {
       if (inputEl) {
         inputEl.focus()
         inputEl.select()
@@ -442,6 +460,8 @@
     return {
       el: pop.el,
       close: close,
+      handleKeyDown: handleKeyDown,
+      query: query,
     }
   }
 })(window.aiditor = window.aiditor || {})

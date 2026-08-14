@@ -324,7 +324,7 @@
   }
 
   function registerTools() {
-    const owner = 'aiditor.ai.workdir'
+    const owner = 'aiditor.ai.workspace'
     ai.tools.register('workspace.listFiles', {
       title: 'List Workspace Files',
       description: 'List files under the current AI workspace.',

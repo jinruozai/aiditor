@@ -47,11 +47,12 @@
     const overlay = ui._overlay.open(box, {
       modal:          true,
       outsideTarget:  back,   // click on backdrop (outside box) → close
+      dismissOnOutside: true,
       role:           'dialog',
       ariaLabelledBy: titleId || undefined,
       ariaLabel:      titleId ? undefined : (o.ariaLabel || 'Dialog'),
-      onDismiss: function () {
-        ui.dispose(box)
+      onDismiss: function (cause) {
+        if (cause !== 'dispose') ui.dispose(box)
         unmount()
         o.onClose && o.onClose()
       },

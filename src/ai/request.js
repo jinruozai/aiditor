@@ -59,25 +59,20 @@
     })
   }
 
-  function addToolRefs(value, refs, seen) {
-    const tools = value && value.tools || []
-    for (let i = 0; i < tools.length; i++) addUnique(refs, seen, tools[i])
-    const nested = value && value.refs || []
-    for (let j = 0; j < nested.length; j++) addToolRefs(nested[j], refs, seen)
-  }
-
-  function resolveToolRefs(agent, ctx, skillSpecs, runtimeContext) {
+  function resolveToolRefs(ctx, skillSpecs) {
     const refs = []
     const seen = {}
-    const direct = agent.toolRefs || []
-    for (let i = 0; i < direct.length; i++) addUnique(refs, seen, direct[i])
-    for (let j = 0; j < (skillSpecs || []).length; j++) addToolRefs(skillSpecs[j], refs, seen)
-    for (let k = 0; k < (runtimeContext || []).length; k++) addToolRefs(runtimeContext[k] && runtimeContext[k].value, refs, seen)
+    const controls = ai.skillControlTools || []
+    for (let i = 0; i < controls.length; i++) addUnique(refs, seen, controls[i])
+    for (let j = 0; j < (skillSpecs || []).length; j++) {
+      const tools = skillSpecs[j].tools || []
+      for (let k = 0; k < tools.length; k++) addUnique(refs, seen, tools[k])
+    }
     return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, true) : refs
   }
 
-  function resolveTools(agent, ctx, toolRefs) {
-    const refs = toolRefs || resolveToolRefs(agent, ctx, [], [])
+  function resolveTools(ctx, toolIds) {
+    const refs = toolIds || resolveToolRefs(ctx, [])
     const out = []
     const seen = {}
     function append(spec) {
@@ -127,10 +122,12 @@
     return lines
   }
 
-  function addSkillActivation(list, seen, id, reason) {
+  function addSkillActivation(list, seen, id, reason, ctx) {
     if (!id || seen[id]) return
     const skill = ai.skills && ai.skills.get ? ai.skills.get(id) : null
     if (!skill) return
+    const availability = ai.skills.availability ? ai.skills.availability(id, ctx || {}) : { available: true }
+    if (!availability.available) return
     seen[id] = true
     const meta = ai.skills.meta ? ai.skills.meta(id) : {}
     list.push({
@@ -142,32 +139,32 @@
       source: meta.source || null,
       hash: meta.hash || null,
       promptChars: skillPromptLines(skill).join('\n').length,
-      toolRefs: (skill.tools || []).slice(),
+      tools: (skill.tools || []).slice(),
     })
+  }
+
+  function explicitSkillRefs(input) {
+    const out = []
+    const seen = {}
+    const direct = input && (input.skillRefs || input.meta && input.meta.skillRefs) || []
+    for (let i = 0; i < direct.length; i++) addUnique(out, seen, direct[i])
+    const content = input && input.content
+    if (content && content.type === 'rich-prompt' && ai.richPrompt && ai.richPrompt.skills) {
+      const selected = ai.richPrompt.skills(content)
+      for (let j = 0; j < selected.length; j++) addUnique(out, seen, selected[j])
+    }
+    return out
   }
 
   function resolveSkillActivations(agent, input, ctx) {
     const activations = []
     const seen = {}
+    const explicit = explicitSkillRefs(input)
+    for (let e = 0; e < explicit.length; e++) addSkillActivation(activations, seen, explicit[e], 'explicit', ctx)
     const configured = agent.skillRefs || []
-    for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured')
-    const needsRuntimeAuthoring = uiAuthoringIntent(input)
-    if (ai.skills && ai.skills.get && needsRuntimeAuthoring) {
-      addSkillActivation(activations, seen, 'aiditor.runtime-authoring', 'runtime')
-    }
-    if (ai.skills && ai.skills.list && ai.skills.get) {
-      const names = ai.skills.list()
-      for (let j = 0; j < names.length; j++) {
-        const id = names[j]
-        if (seen[id]) continue
-        const skill = ai.skills.get(id)
-        if (!skill || typeof skill.auto !== 'function') continue
-        const matched = aiditor.safeCall
-          ? aiditor.safeCall({ scope: 'ai.skill', skill: id, phase: 'auto' }, function () { return skill.auto(ctx || {}) })
-          : skill.auto(ctx || {})
-        if (matched) addSkillActivation(activations, seen, id, 'auto')
-      }
-    }
+    for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured', ctx)
+    const selected = input && input.selectedSkillRefs || []
+    for (let j = 0; j < selected.length; j++) addSkillActivation(activations, seen, selected[j], 'selected', ctx)
     return activations
   }
 
@@ -181,7 +178,7 @@
         source: activation.source,
         hash: activation.hash,
         promptChars: activation.promptChars,
-        toolRefs: activation.toolRefs.slice(),
+        tools: activation.tools.slice(),
       }
     })
   }
@@ -202,7 +199,7 @@
   function compactContextRef(ref) {
     if (!ref || typeof ref !== 'object') return ref
     const out = {}
-    const keys = ['resolver', 'uri', 'kind', 'title', 'summary', 'meta', 'capabilities', 'tools']
+    const keys = ['resolver', 'uri', 'kind', 'title', 'summary', 'meta', 'capabilities']
     for (let i = 0; i < keys.length; i++) {
       if (ref[keys[i]] != null) out[keys[i]] = ref[keys[i]]
     }
@@ -319,11 +316,11 @@
     return i < 0 ? String(name || '') : String(name).slice(0, i)
   }
 
-  function toolPrefixSummary(toolRefs) {
+  function toolPrefixSummary(toolIds) {
     const seen = {}
     const out = []
-    for (let i = 0; i < (toolRefs || []).length; i++) {
-      const prefix = toolPrefix(toolRefs[i])
+    for (let i = 0; i < (toolIds || []).length; i++) {
+      const prefix = toolPrefix(toolIds[i])
       if (!prefix || seen[prefix]) continue
       seen[prefix] = true
       out.push(prefix)
@@ -367,14 +364,6 @@
     if (content == null) return ''
     if (typeof content === 'string') return content
     try { return ai.serialize && ai.serialize.stringify ? ai.serialize.stringify(content) : JSON.stringify(content) } catch (_) { return String(content) }
-  }
-
-  function uiAuthoringIntent(input) {
-    const text = messageText(input && (input.content != null ? input.content : input.text)).toLowerCase()
-    if (!text) return false
-    const normalizedAction = /(create|make|build|write|add|modify|change|design|generate|implement|put|mount|\u5199|\u505a|\u521b\u5efa|\u65b0\u5efa|\u8bbe\u8ba1|\u751f\u6210|\u6dfb\u52a0|\u653e\u5230|\u653e\u5728|\u6302\u5230|\u4fee\u6539|\u5b9e\u73b0|\u6784\u5efa)/.test(text)
-    const normalizedTarget = /(ui|panel|dock|interface|screen|view|component|\u754c\u9762|\u9762\u677f|\u4e3b\s*dock|\u7ec4\u4ef6|\u89c6\u56fe|\u7a97\u53e3)/.test(text)
-    return normalizedAction && normalizedTarget
   }
 
   function estimateTokens(text) {
@@ -586,22 +575,18 @@
   }
 
   function skillCatalogMessage(requestCtx) {
+    if (!ai.skills || !ai.skills.catalog) return null
     const active = requestCtx && requestCtx.skillRefs || []
-    if (active.indexOf('orchestration') < 0 || !ai.skills || !ai.skills.list) return null
-    const ids = ai.skills.list()
-    const items = []
-    for (let i = 0; i < ids.length; i++) {
-      const skill = ai.skills.get(ids[i])
-      if (!skill || ids[i] === 'aiditor.authoring') continue
-      items.push({ id: ids[i], title: skill.title || ids[i], description: skill.description || '' })
-    }
+    const items = ai.skills.catalog(requestCtx || {}, { limit: 50 }).map(function (item) {
+      return Object.assign({}, item, { active: active.indexOf(item.id) >= 0 })
+    })
     if (!items.length) return null
     return contextCardMessage(
       'skills',
       'skill-catalog',
       75,
-      'Available skill profiles for newly delegated agents. Pass only the skill ids needed by the child. Full skill instructions and tools load only when active.\n' + compactJson(items, 3600),
-      4000
+      'Available Skills for this runtime. Active Skills provide the current instructions and Tools. When a required capability is inactive, call skill.activate with its id; the next continuation will expose it. Unavailable Skills state the missing host capability.\n' + compactJson(items, 6000),
+      7000
     )
   }
 
@@ -617,9 +602,6 @@
       'CURRENT_AGENT_NAME: ' + (agent.name || ''),
       'CURRENT_PARENT_AGENT_ID: ' + (agent.parentAgentId || ''),
     ]
-    if (requestCtx && requestCtx.uiAuthoringBlocked) {
-      lines.push('CURRENT_REQUEST_BLOCKED: Workspace-backed UI authoring requires the user to open or select a workspace.')
-    }
     if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
     if (!requestCtx || !(requestCtx.modelToolIds || []).length) {
       lines.push('AVAILABLE_TOOLS: none. Report that the required capability is unavailable instead of imitating a tool call.')
@@ -662,11 +644,11 @@
     }
   }
 
-  function workspaceContextMessage(requestCtx, toolRefs) {
+  function workspaceContextMessage(requestCtx, toolIds) {
     const meta = requestCtx && requestCtx.workspaceMeta
     if (!meta) return null
     const tools = {}
-    for (let i = 0; i < (toolRefs || []).length; i++) tools[toolRefs[i]] = true
+    for (let i = 0; i < (toolIds || []).length; i++) tools[toolIds[i]] = true
     if (!Object.keys(tools).some(function (id) { return id.indexOf('workspace.') === 0 || id.indexOf('code.') === 0 || id.indexOf('verify.') === 0 })) return null
     const flow = [
       tools['workspace.fileSummary'] || tools['code.map'] ? '1. Inspect structure with workspace.fileSummary or code.map.' : null,
@@ -685,11 +667,11 @@
     ].join('\n'), 2400)
   }
 
-  function taskStateContextMessage(agent, input, requestCtx, toolRefs) {
-    const prefixes = toolPrefixSummary(toolRefs || [])
+  function taskStateContextMessage(agent, input, requestCtx, toolIds) {
+    const prefixes = toolPrefixSummary(toolIds || [])
     const queue = agent.queue || []
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
-    if (!quest && !(requestCtx && requestCtx.turn) && !queue.length && !(requestCtx && requestCtx.uiAuthoringBlocked)) return null
+    if (!quest && !(requestCtx && requestCtx.turn) && !queue.length) return null
     return contextCardMessage('task', 'task', 70, [
       'Current task state.',
       'permissionMode: ' + (agent.permissionMode || 'default'),
@@ -701,9 +683,8 @@
         return { id: step.id, title: step.title, status: step.status, kind: step.kind }
       }), 2000) : '',
       'queuedMessages: ' + queue.length,
-      'visibleToolCount: ' + (toolRefs || []).length,
+      'visibleToolCount: ' + (toolIds || []).length,
       'visibleToolPrefixes: ' + prefixes.join(', '),
-      requestCtx && requestCtx.uiAuthoringBlocked ? 'blocked: workspace-backed UI authoring is unavailable until the user opens or selects a workspace.' : '',
     ].filter(Boolean).join('\n'), 1800)
   }
 
@@ -717,11 +698,11 @@
     return out
   }
 
-  function prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolRefs) {
+  function prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolIds) {
     const out = [runtimeGuideMessage(agent, requestCtx)]
     const output = outputSchemaMessage(requestCtx)
-    const workspace = workspaceContextMessage(requestCtx, toolRefs)
-    const task = taskStateContextMessage(agent, input, requestCtx, requestCtx && requestCtx.modelToolIds || toolRefs)
+    const workspace = workspaceContextMessage(requestCtx, toolIds)
+    const task = taskStateContextMessage(agent, input, requestCtx, requestCtx && requestCtx.modelToolIds || toolIds)
     const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
@@ -740,12 +721,12 @@
     return out
   }
 
-  function requestMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolRefs) {
+  function requestMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolIds) {
     const baseMessages = ai.compaction && ai.compaction.requestMessages ? ai.compaction.requestMessages(agent, input) : (agent.messages || [])
     const messages = baseMessages.filter(function (message) {
       return message.status !== 'queued' || (input && message.id === input.id)
     })
-    const prefix = prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolRefs)
+    const prefix = prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolIds)
     return prefix.concat(budgetMessages(agent, prefix, messages, input))
   }
 
@@ -761,8 +742,6 @@
       workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
       turn: turn || 0,
     }
-    baseCtx.uiAuthoringIntent = uiAuthoringIntent(input)
-    baseCtx.uiAuthoringBlocked = !baseCtx.workspace && uiAuthoringIntent(input)
     baseCtx.tools = ai.tools
     baseCtx.skills = ai.skills
     baseCtx.signal = null
@@ -775,20 +754,12 @@
     const contextRefs = effectiveContextRefs(agent, input)
     const resolvedAttachments = allowedAttachments ? resolveAttachments(contextRefs, baseCtx) : []
     const attachmentRefs = allowedAttachments ? describeAttachments(contextRefs, baseCtx) : []
-    const skillActivationRecords = resolveSkillActivations(agent, input, baseCtx)
-    const skillRefs = skillActivationRecords.map(function (activation) { return activation.id })
-    const skillSpecs = resolveSkillSpecs(skillActivationRecords)
-    const skillActivations = activationDetails(skillActivationRecords)
     const connectionName = agent.connection || ai.defaultConnection || 'mock'
     const connectionCapabilities = ai.connectionCapabilities ? ai.connectionCapabilities(connectionName) : {}
     const connectionConfig = ai.getConnectionConfig ? ai.getConnectionConfig(connectionName) : {}
     const stream = !!connectionCapabilities.stream && connectionConfig.stream !== false
-    baseCtx.skillRefs = skillRefs
-    baseCtx.skillSpecs = skillSpecs
-    baseCtx.skillActivations = skillActivations
     baseCtx.connectionCapabilities = connectionCapabilities
     baseCtx.outputSchema = agent.outputSchema || null
-    const initialTools = connectionCapabilities.toolCalling ? resolveToolRefs(agent, baseCtx, skillSpecs, []) : []
     const requestShell = {
       runId: runId,
       agent: agent,
@@ -796,15 +767,20 @@
       input: input || null,
       target: agent,
       event: input && input.event ? input.event : null,
-      tools: initialTools,
-      toolSpecs: resolveTools(agent, baseCtx, initialTools),
     }
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
-    const tools = connectionCapabilities.toolCalling ? resolveToolRefs(agent, baseCtx, skillSpecs, baseCtx.runtimeContext) : []
-    baseCtx.toolRefs = tools
+    const skillActivationRecords = resolveSkillActivations(agent, input, baseCtx)
+    const skillRefs = skillActivationRecords.map(function (activation) { return activation.id })
+    const skillSpecs = resolveSkillSpecs(skillActivationRecords)
+    const skillActivations = activationDetails(skillActivationRecords)
+    baseCtx.skillRefs = skillRefs
+    baseCtx.skillSpecs = skillSpecs
+    baseCtx.skillActivations = skillActivations
+    const tools = connectionCapabilities.toolCalling ? resolveToolRefs(baseCtx, skillSpecs) : []
+    baseCtx.toolIds = tools
     const toolSpecs = ai.toolArguments && ai.toolArguments.prepareSpecs
-      ? ai.toolArguments.prepareSpecs(resolveTools(agent, baseCtx, tools), connectionCapabilities)
-      : resolveTools(agent, baseCtx, tools)
+      ? ai.toolArguments.prepareSpecs(resolveTools(baseCtx, tools), connectionCapabilities)
+      : resolveTools(baseCtx, tools)
     baseCtx.modelToolIds = toolSpecs.map(function (tool) { return tool.id })
     const messages = requestMessages(agent, input, attachmentRefs, resolvedAttachments, baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
@@ -839,7 +815,7 @@
           messageCount: messages.length,
           toolCount: toolSpecs.length,
           gatewayCount: tools.length,
-          toolRefs: tools.slice(),
+          toolIds: tools.slice(),
           skillRefs: skillRefs.slice(),
           skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
           toolProtocol: connectionCapabilities.toolProtocol || 'none',

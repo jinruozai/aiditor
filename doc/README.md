@@ -120,10 +120,10 @@ standalone alternatives and must not be combined with Kernel/Core/Full.
    model-facing behavior by registering tools, context references, or
    operations. There is no per-module AI path.
 
-4. AI exposes five action/context concepts.
-   Agent, Tool, Context Reference, Operation, and ChangeSet are the model
-   developers need for work. Skills are behavior profiles. Targets,
-   attachments, rich prompt ranges, quests, inboxes, bundles, and templates are
+4. AI exposes six action/context concepts.
+   Agent, Skill, Tool, Context Reference, Operation, and ChangeSet are the model
+   developers need for work. Skill is the capability-selection surface; Tool is
+   its executable protocol. Targets, attachments, rich prompt ranges, quests, and inboxes are
    runtime or UX details.
 
 5. The framework has no built-in project model.

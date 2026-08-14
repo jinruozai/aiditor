@@ -229,6 +229,11 @@
   --aiditor-panel-toolbar-h: 28px;
   --aiditor-panel-toolbar-py: 2px;
   --aiditor-tab-h:        28px;
+  --aiditor-data-grid-row-h: 26px;
+  --aiditor-data-grid-header-h: 28px;
+  --aiditor-data-grid-row-number-w: 48px;
+  --aiditor-data-grid-column-w: 140px;
+  --aiditor-data-grid-column-min-w: 56px;
   --aiditor-control-px:   8px;       /* default horizontal padding inside controls */
   --aiditor-app-bar-bg: var(--aiditor-bg-0);
   --aiditor-app-bar-fg: var(--aiditor-fg-1);

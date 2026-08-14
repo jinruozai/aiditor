@@ -84,7 +84,7 @@ function isEditorUiJs(rel) {
 }
 
 function isEditorCss(rel) {
-  return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css')
+  return isThemeCss(rel) || (rel.indexOf('style/ui-') === 0 && rel !== 'style/ui-ai.css' && rel !== 'style/ui-settings.css' && rel !== 'style/ui-csv.css')
 }
 
 function isMiniCss(rel) {
@@ -153,7 +153,7 @@ if (/\/\* ---- style\/ui-/.test(kernelCss.text)) errors.push('kernel CSS contain
 if (/\/\* ---- (dock|tree|ai|extensions|ui)\//.test(themeJs.text)) errors.push('theme bundle contains non-theme runtime source files')
 if (/\/\* ---- style\/(dock|component|ui-)/.test(themeCss.text)) errors.push('theme CSS contains component layer styles')
 if (/\/\* ---- (dock|tree|ai|extensions|ui\/panel)\//.test(editorJs.text)) errors.push('editor bundle contains editor shell, panel, AI, or extension source files')
-if (/\/\* ---- core\/(workspace|shortcuts|history|settings|context)\.js/.test(editorJs.text)) errors.push('editor bundle contains editor-shell core services')
+if (/\/\* ---- core\/(shortcuts|history|settings|context)\.js/.test(editorJs.text)) errors.push('editor bundle contains editor-shell core services')
 if (/\/\* ---- style\/(dock|dock-tabs|component|ui-ai|ui-settings)\.css/.test(editorCss.text)) errors.push('editor CSS contains dock, component host, AI, or settings panel styles')
 if (/\/\* ---- (dock|tree|ai|extensions|ui\/panel|ui\/editor|ui\/data)\//.test(miniJs.text)) errors.push('mini bundle contains editor-oriented source files')
 if (/\/\* ---- ui\/(inspector|_internal\/_render-tree|_internal\/_dnd|_internal\/_register-builtins)\.js/.test(miniJs.text)) errors.push('mini bundle contains inspector, data-transfer, or palette runtime')

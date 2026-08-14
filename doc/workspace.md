@@ -35,7 +35,16 @@ aiditor.workspace.saveDirectoryHandle(key, handle)
 aiditor.workspace.fromHandle(handle)
 aiditor.workspace.fromBridge(root)
 aiditor.workspace.memory(files)
+aiditor.workspace.bind(id, adapter)
+aiditor.workspace.binding(id)
+aiditor.workspace.unbind(id)
 ```
+
+`bind` is a runtime indirection for file-backed panels. PanelData stores the
+JSON-safe `workspaceId`; the live adapter remains in the workspace module and
+is resolved only when IO runs. The returned disposer removes the binding only
+if it still points at the same adapter, so replacing a host binding cannot be
+undone by an older owner cleanup.
 
 `restoreDirectory(key, options)` restores a remembered File System Access
 directory handle. It never calls `showDirectoryPicker` and never exposes the raw

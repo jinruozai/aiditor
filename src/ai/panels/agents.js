@@ -146,7 +146,7 @@
   }
 
   function createAgent(parentAgentId) {
-    aiditor.ai.createAgent({ parentAgentId: parentAgentId || null, skillRefs: ['orchestration'] })
+      aiditor.ai.createAgent({ parentAgentId: parentAgentId || null, skillRefs: ['aiditor.agent-orchestration'] })
   }
 
   function renameNode(node) {
@@ -300,9 +300,8 @@
       },
     })
     tree.classList.add('aiditor-ai-agent-tree')
-    const treeView = ui.view({ children: tree, scroll: 'hidden', className: 'aiditor-ai-agent-tree-view' })
-    treeView.addEventListener('contextmenu', openRootMenu)
-    root.appendChild(treeView)
+    tree.addEventListener('contextmenu', openRootMenu)
+    root.appendChild(tree)
 
     function syncTree() {
       const agents = readList(aiditor.ai.agents)

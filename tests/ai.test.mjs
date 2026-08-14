@@ -16,8 +16,8 @@ vm.runInThisContext(readFileSync('src/ai/provider-auth.js', 'utf8'), { filename:
 vm.runInThisContext(readFileSync('src/ai/provider-transports.js', 'utf8'), { filename: 'ai/provider-transports.js' })
 vm.runInThisContext(readFileSync('src/ai/provider-connections.js', 'utf8'), { filename: 'ai/provider-connections.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
-vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
-vm.runInThisContext(readFileSync('src/ai/context.js', 'utf8'), { filename: 'ai/context.js' })
+for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
 vm.runInThisContext(readFileSync('src/ai/change-set.js', 'utf8'), { filename: 'ai/change-set.js' })
 vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
@@ -195,7 +195,7 @@ function assertReferenceProviderContract(agentId) {
       resolveCtxSeen = ctx
       return { uri: ref.uri, text: 'resolved:' + ref.uri }
     },
-  })
+  }, { owner: 'test:ai' })
 
   const temp = ai.addAttachment({ resolver: 'case', uri: 'case://selection/temp', title: 'Temp' })
   ai.updateAgent(agentId, { contextRefs: [temp.id] })
@@ -309,34 +309,23 @@ function assertRegistryContracts(agentId) {
     preview: function (args) { return { kind: 'diff', args: args } },
     run: function (args) { return { ok: true, args: args } },
     apply: function (result) { return { applied: result.ok } },
-  })
-  ai.skills.register('review', { id: 'review', title: 'Review', tools: ['diff-preview'] })
-  ai.agentTemplates.register('goal-reviewer', {
-    id: 'goal-reviewer',
-    defaults: { connection: 'mock', model: 'fast' },
-    skills: ['review'],
-  })
+  }, { owner: 'test:registry' })
+  ai.skills.register('review', { id: 'review', title: 'Review', tools: ['diff-preview'] }, { owner: 'test:registry' })
   ai.context.register('selection', {
     capture: function () { return { text: 'selected' } },
-  })
-  ai.bundles.register('registry-test', {
-    activate: function (ctx) {
-      ctx.ai.skills.register('plugin-skill', { id: 'plugin-skill', title: 'Plugin Skill' })
-    },
-  })
+  }, { owner: 'test:registry' })
+  ai.skills.register('plugin-skill', { id: 'plugin-skill', title: 'Plugin Skill' }, { owner: 'test:plugin' })
 
   assert.equal(ai.tools.list().includes('diff-preview'), true)
   assert.equal(ai.tools.get('diff-preview').preview({ id: 1 }).kind, 'diff')
   assert.equal(ai.tools.get('diff-preview').apply({ ok: true }).applied, true)
   assert.equal(ai.skills.get('review').title, 'Review')
   assert.equal(ai.skills.get('plugin-skill').title, 'Plugin Skill')
-  assert.equal(ai.agentTemplates.get('goal-reviewer').defaults.model, 'fast')
   assert.equal(ai.context.get('selection').capture().text, 'selected')
-  assert.equal(ai.bundles.get('registry-test') != null, true)
+  assert.equal(ai.skills.meta('plugin-skill').owner, 'test:plugin')
 
   ai.updateAgent(agentId, {
     skillRefs: ['review'],
-    toolRefs: ['diff-preview'],
     state: {
       projectRule: {
         maxRows: 3,

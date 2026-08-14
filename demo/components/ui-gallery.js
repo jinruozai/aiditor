@@ -114,7 +114,6 @@
         category: item.category,
         source: item.source,
       },
-      tools: ['aiditor.readReference'],
     }
   }
 

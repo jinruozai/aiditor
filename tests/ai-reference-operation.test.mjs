@@ -12,12 +12,23 @@ vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'a
 vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
 vm.runInThisContext(readFileSync('src/ai/connection.js', 'utf8'), { filename: 'ai/connection.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
-vm.runInThisContext(readFileSync('src/ai/registries.js', 'utf8'), { filename: 'ai/registries.js' })
-vm.runInThisContext(readFileSync('src/ai/context.js', 'utf8'), { filename: 'ai/context.js' })
+for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
+vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
 vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
 
 const ai = window.aiditor.ai
+const TEST_META = { owner: 'test:reference-operation' }
+let nextSkill = 1
+function skillRefs(tools) {
+  const id = 'test.operation.' + nextSkill++
+  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
+  return [id]
+}
+function registerReference(name, spec, meta) { return ai.references.register(name, spec, meta || TEST_META) }
+function registerOperation(name, spec, meta) { return ai.operations.register(name, spec, meta || TEST_META) }
+assert.throws(function () { ai.references.register('owner.missing', {}) }, /owner is required/)
+assert.throws(function () { ai.operations.register('owner.missing', {}) }, /owner is required/)
 ai.registerTransport('reference-test', { toolProtocol: 'native' })
 ai.registerConnection('reference-test', { auth: { type: 'none' }, transport: { type: 'reference-test' }, configDefaults: {} })
 ai.setActiveConnection('reference-test')
@@ -26,7 +37,7 @@ let previewCalls = 0
 let unavailableOperationEnabled = false
 const tx = []
 
-ai.references.register('case', {
+registerReference('case', {
   read: function (ref) {
     return { uri: ref.uri, value }
   },
@@ -43,17 +54,17 @@ ai.references.register('case', {
     return [{ uri: 'case://item/one', kind: 'case.item', title: 'One' }]
   },
 })
-ai.references.register('case.extra', {})
+registerReference('case.extra', {}, { owner: 'test:reference-extra' })
 assert.deepEqual(ai.references.list('case.extra'), ['case.extra'])
-assert.deepEqual(ai.references.unregisterPrefix('case.extra'), ['case.extra'])
+assert.deepEqual(ai.references.unregisterOwner('test:reference-extra'), ['case.extra'])
 assert.equal(ai.references.get('case.extra'), null)
-ai.references.register('case.replace', { read: function () { return 'one' } })
+registerReference('case.replace', { read: function () { return 'one' } })
 assert.throws(function () {
-  ai.references.register('case.replace', { read: function () { return 'hidden overwrite' } })
+  registerReference('case.replace', { read: function () { return 'hidden overwrite' } })
 }, /duplicate name "case.replace"/)
-ai.references.register('case.replace', { read: function () { return 'two' } }, { replace: true })
+registerReference('case.replace', { read: function () { return 'two' } }, { owner: 'test:reference-operation', replace: true })
 assert.equal(ai.references.get('case.replace').read(), 'two')
-ai.references.unregister('case.replace')
+ai.references.unregister('case.replace', TEST_META)
 
 ai.transactions.configure({
   run(label, fn, meta) {
@@ -62,7 +73,7 @@ ai.transactions.configure({
   },
 })
 
-ai.operations.register('case.setValue', {
+registerOperation('case.setValue', {
   title: 'Set Value',
   exposeToModel: true,
   inputSchema: {
@@ -86,11 +97,11 @@ ai.operations.register('case.setValue', {
     return { applied: true, value }
   },
 })
-ai.operations.register('case.hidden', {
+registerOperation('case.hidden', {
   inputSchema: { type: 'object', properties: {} },
   preview: function () { return { ok: true } },
 })
-ai.operations.register('case.unavailable', {
+registerOperation('case.unavailable', {
   exposeToModel: true,
   inputSchema: { type: 'object', properties: {} },
   available: function () { return unavailableOperationEnabled },
@@ -98,29 +109,29 @@ ai.operations.register('case.unavailable', {
   apply: function () { return { applied: true } },
 })
 assert.throws(function () {
-  ai.operations.register('case.legacySchema', { schema: { type: 'object' } })
+  registerOperation('case.legacySchema', { schema: { type: 'object' } })
 }, /use inputSchema instead of schema/)
 assert.throws(function () {
-  ai.operations.register('case.missingSchema', { exposeToModel: true })
+  registerOperation('case.missingSchema', { exposeToModel: true })
 }, /model-visible operation requires inputSchema/)
 assert.throws(function () {
-  ai.operations.register('case.missingApply', {
+  registerOperation('case.missingApply', {
     exposeToModel: true,
     inputSchema: { type: 'object', properties: {} },
     preview: function () { return { ok: true } },
   })
 }, /model-visible operation requires apply/)
-ai.operations.register('case.extra', {})
+registerOperation('case.extra', {}, { owner: 'test:operation-extra' })
 assert.deepEqual(ai.operations.list('case.extra'), ['case.extra'])
-assert.deepEqual(ai.operations.unregisterPrefix('case.extra'), ['case.extra'])
+assert.deepEqual(ai.operations.unregisterOwner('test:operation-extra'), ['case.extra'])
 assert.equal(ai.operations.get('case.extra'), null)
-ai.operations.register('case.replace', { preview: function () { return 'one' } })
+registerOperation('case.replace', { preview: function () { return 'one' } })
 assert.throws(function () {
-  ai.operations.register('case.replace', { preview: function () { return 'hidden overwrite' } })
+  registerOperation('case.replace', { preview: function () { return 'hidden overwrite' } })
 }, /duplicate name "case.replace"/)
-ai.operations.register('case.replace', { preview: function () { return 'two' } }, { replace: true })
+registerOperation('case.replace', { preview: function () { return 'two' } }, { owner: 'test:reference-operation', replace: true })
 assert.equal(ai.operations.get('case.replace').preview(), 'two')
-ai.operations.unregister('case.replace')
+ai.operations.unregister('case.replace', TEST_META)
 
 const ref = ai.references.normalize('case://item/one')
 assert.equal(ref.resolver, 'case')
@@ -154,7 +165,7 @@ assert.equal(defaultRequest.tools.includes('aiditor.previewOperation'), false)
 assert.equal(defaultRequest.tools.includes('aiditor.applyOperation'), false)
 const explicitRequest = ai.makeRequest(ai.createAgent({
   name: 'Explicit Operation Agent',
-  toolRefs: ['aiditor.previewOperation', 'aiditor.applyOperation'],
+  skillRefs: skillRefs(['aiditor.previewOperation', 'aiditor.applyOperation']),
 }), null, 'inspect_explicit', 'user', 0)
 assert.deepEqual(explicitRequest.tools, ['aiditor.previewOperation', 'aiditor.applyOperation'])
 const operationToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'case.setValue' })
@@ -169,7 +180,7 @@ const pointSchema = {
   required: ['x', 'y'],
   properties: { x: { type: 'number' }, y: { type: 'number' } },
 }
-ai.operations.register('case.sharedSchema', {
+registerOperation('case.sharedSchema', {
   exposeToModel: true,
   inputSchema: {
     type: 'object',
@@ -183,19 +194,19 @@ ai.operations.register('case.sharedSchema', {
 })
 const sharedSchemaRequest = ai.makeRequest(ai.createAgent({
   name: 'Shared Schema Agent',
-  toolRefs: ['aiditor.applyOperation'],
+  skillRefs: skillRefs(['aiditor.applyOperation']),
 }), null, 'inspect_shared_schema', 'user', 0)
 const sharedSchemaSpec = sharedSchemaRequest.toolSpecs.find(function (tool) {
   return tool.id === 'case.sharedSchema'
 })
 assert.deepEqual(sharedSchemaSpec.schema.properties.first.items.required, ['x', 'y'])
 assert.deepEqual(sharedSchemaSpec.schema.properties.second.items.required, ['x', 'y'])
-ai.operations.unregister('case.sharedSchema')
+ai.operations.unregister('case.sharedSchema', TEST_META)
 
 unavailableOperationEnabled = true
 const requestWithAvailableOperation = ai.makeRequest(ai.createAgent({
   name: 'Available Operation Agent',
-  toolRefs: ['aiditor.applyOperation'],
+  skillRefs: skillRefs(['aiditor.applyOperation']),
 }), null, 'inspect_available', 'user', 0)
 assert.deepEqual(
   requestWithAvailableOperation.toolSpecs.map(function (tool) { return tool.route.args.op }),
@@ -206,14 +217,14 @@ unavailableOperationEnabled = false
 ai.tools.register('case.setValue', {
   schema: { type: 'object', properties: {} },
   run: function () { return null },
-})
+}, TEST_META)
 assert.throws(function () {
   ai.makeRequest(ai.createAgent({
     name: 'Conflicting Operation Agent',
-    toolRefs: ['case.setValue', 'aiditor.applyOperation'],
+    skillRefs: skillRefs(['case.setValue', 'aiditor.applyOperation']),
   }), null, 'inspect_conflict', 'user', 0)
 }, /Model Tool id conflict: case\.setValue/)
-ai.tools.unregister('case.setValue')
+ai.tools.unregister('case.setValue', TEST_META)
 
 const previewGateway = ai.tools.get('aiditor.previewOperation')
 const unknownOperation = previewGateway.run({ op: 'case.missing', input: {} }, { actor: 'user', agent: agent })

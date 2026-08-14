@@ -61,4 +61,17 @@ assert.equal(content.type, 'rich-prompt')
 assert.equal(content.renderedText, rich.toModelText(draft))
 assert.deepEqual(rich.fromContent(content), draft)
 
+let skillDraft = rich.insertSkill(rich.empty(), 0, {
+  id: 'review.code',
+  title: 'Code Review',
+})
+skillDraft = rich.insertText(skillDraft, skillDraft.text.length, ' inspect this change')
+assert.deepEqual(rich.skills(skillDraft), ['review.code'])
+assert.deepEqual(rich.refs(skillDraft), [])
+assert.equal(rich.toPlainText(skillDraft), '/review.code inspect this change')
+assert.equal(rich.toModelText(skillDraft), '[Skill: Code Review] inspect this change')
+assert.equal(rich.isEmpty(rich.insertSkill(rich.empty(), 0, { id: 'review.code' })), false)
+const copiedSkill = rich.insertDraft(rich.empty(), 0, skillDraft)
+assert.deepEqual(rich.skills(copiedSkill), ['review.code'])
+
 console.log('ai rich prompt tests ok')

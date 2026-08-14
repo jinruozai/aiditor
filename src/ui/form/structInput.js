@@ -105,7 +105,8 @@
 
       const writeSlot = function (nv, meta) {
         const cur = value.peek() || {}
-        if (cur[f.key] === nv) return
+        const editPhase = meta && meta.edit && meta.edit.phase
+        if (cur[f.key] === nv && editPhase !== 'commit' && editPhase !== 'cancel') return
         const next = Object.assign({}, cur, { [f.key]: nv })
         if (onChange) onChange(next, f.key, nv, meta)
         else value.set(next)

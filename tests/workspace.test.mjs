@@ -5,6 +5,7 @@ import vm from 'node:vm'
 global.window = { aiditor: {} }
 
 for (const file of [
+  'src/core/signal.js',
   'src/core/workspace.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })

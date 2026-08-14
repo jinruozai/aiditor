@@ -135,6 +135,7 @@
     return ui.colorInput({
       value:     a.sig,
       onChange:  a.write,
+      onCommit:  function (value, meta) { a.write(value, meta) },
       valueKind: agv.valueKind || (a.fieldDef.base_type === 'int' ? 'int' : 'hex'),
       valueScale: agv.valueScale,
     })
@@ -167,6 +168,10 @@
       kind:        fileKind,
       accept:      accept,
       placeholder: agv.placeholder || agv.suffix || '',
+      resolveSrc:  a.ctx && a.ctx.resolveFileSrc,
+      exists:      a.ctx && a.ctx.filePathExists,
+      onBrowse:    a.ctx && a.ctx.onBrowseFile,
+      onFile:      a.ctx && a.ctx.onFile,
       actions: function (inputCtx) {
         const fn = a.ctx && a.ctx.filePathActions
         if (typeof fn === 'function') return fn(filePathActionCtx(a, inputCtx, fileKind, accept))

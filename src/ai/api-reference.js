@@ -52,7 +52,6 @@
         related: entry.related || [],
         source: entry.source,
       },
-      tools: ['aiditor.readReference'],
     }
   }
 
@@ -64,7 +63,6 @@
       title: 'AIditor API Index',
       summary: 'Generated list of documented AIditor APIs.',
       meta: { count: entries().length },
-      tools: ['aiditor.readReference'],
     }
   }
 
@@ -165,5 +163,5 @@
     read: read,
     schema: schema,
     capabilities: capabilities,
-  }, { owner: 'aiditor.api', layer: 'builtin' })
+  }, { owner: 'aiditor.ai.api', layer: 'builtin' })
 })(window.aiditor = window.aiditor || {})

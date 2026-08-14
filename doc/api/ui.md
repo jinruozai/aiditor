@@ -47,6 +47,54 @@ Related: `aiditor.ui.actionBar`, `aiditor.ui.menu`
 
 Source: `src/ui/base/actionMenu.js`
 
+## `aiditor.ui.createTextDocument`
+
+Create the format-neutral load/save state used by file-backed text editors. Workspace lookup, CAS writes, dirty state, external-change detection, and watcher cleanup live here; parsing stays in the editor.
+
+```js
+aiditor.ui.createTextDocument(options)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `options` | `object` | Text document options. |
+| `options.workspaceId` | `string` | Id registered through aiditor.workspace.bind. |
+| `options.path` | `string` | Workspace-relative file path. |
+| `options.decode` | `Function` | Convert source text and file metadata into the editor model. |
+| `options.encode` | `Function` | Convert the editor model into source text. |
+| `options.equals` | `Function` | Optional model equality function; immutable models normally use identity. |
+
+Returns: `object` Document controller with signals and load, reload, save, set, checkExternal, snapshot, restore, and dispose methods.
+
+Related: `aiditor.workspace.bind`
+
+Source: `src/ui/editor/textDocument.js`
+
+## `aiditor.ui.dataGrid`
+
+Render a controlled spreadsheet-style grid with virtualized rows, range selection, cell editing, TSV clipboard, fill, column resize, and row/column reorder. The grid owns no domain model or persistence.
+
+```js
+aiditor.ui.dataGrid(opts)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `opts` | `object` | Grid options. |
+| `opts.rows` | `Signal<Array>` | Controlled row collection. |
+| `opts.columns` | `Signal<Array>` | Controlled column definitions with optional id, name, width, align, and color. |
+| `opts.selection` | `Signal<object>` | Controlled selection with kind, anchor, and focus. |
+| `opts.getText` | `Function` | Return display/edit text for a row and column. |
+| `opts.onEdit` | `Function` | Commit one cell edit. |
+| `opts.onPaste` | `Function` | Commit a rectangular string matrix. |
+| `opts.onFill` | `Function` | Fill a target range from the source range. |
+
+Returns: `HTMLElement` Grid root.
+
+Related: `aiditor.ui.list`
+
+Source: `src/ui/data/dataGrid.js`
+
 ## `aiditor.ui.propertyForm`
 
 Render a schema-driven property editor for one target or a multi-target batch edit. Multi-target reads use the first target value; writes fan out only through enabled fields.

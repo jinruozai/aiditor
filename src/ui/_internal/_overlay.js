@@ -45,10 +45,10 @@
 //                          // modal/drawer backdrops).
 //     focusTrap?,          // default: true if modal, false otherwise.
 //     role?, ariaLabel?, ariaLabelledBy?, ariaModal?,
-//     onDismiss,           // fired when the overlay is closed by this
-//                          // controller (outside click, ESC, or
-//                          // handle.close()). Components use it to run
-//                          // their own cleanup + animations.
+//     onDismiss,           // fired with the close cause when the overlay is
+//                          // closed by this controller (outside click, ESC,
+//                          // handle.close(), or ui.dispose(el)). Components
+//                          // use it to run their own cleanup + animations.
 //   })
 //
 //   handle.close()         Close and pop off the stack. Idempotent.
@@ -68,11 +68,23 @@
   // the stack
   // Each frame: { el, opts, prevFocus, onAnyDown, onKey, zBase }
   const stack = []
+  const modalDepthState = aiditor.signal(0)
+  const modalDepth = function () { return modalDepthState() }
+  modalDepth.peek = function () { return modalDepthState.peek() }
+  ui.modalDepth = modalDepth
+
   let globalBound = false
   let lastPointerDownAt = 0
 
   function topFrame() { return stack.length ? stack[stack.length - 1] : null }
   function hasModalFrame() { return stack.some(function (f) { return f.opts.modal }) }
+  function publishModalDepth() {
+    let depth = 0
+    for (let i = 0; i < stack.length; i++) {
+      if (stack[i].opts.modal) depth++
+    }
+    modalDepthState.set(depth)
+  }
 
   function onGlobalKey(e) {
     if (e.key !== 'Escape') return
@@ -170,7 +182,10 @@
     // Pop it (and any above it, though overlays dismissed via ESC/outside
     // should always be topmost by construction).
     const idx = stack.indexOf(frame)
-    if (idx >= 0) stack.splice(idx, 1)
+    if (idx >= 0) {
+      stack.splice(idx, 1)
+      publishModalDepth()
+    }
     if (frame.uninstallTrap) frame.uninstallTrap()
     // Restore focus for modal-class overlays.
     if (frame.opts.focusTrap && frame.prevFocus && typeof frame.prevFocus.focus === 'function') {
@@ -220,7 +235,12 @@
       frame.armed = false
       setTimeout(function () { frame.armed = true }, 0)
 
+      // An overlay frame cannot outlive its component root. This keeps the
+      // stack authoritative when a host disposes the root directly instead
+      // of going through the imperative close handle.
+      ui.collect(el, function () { dismiss(frame, 'dispose') })
       stack.push(frame)
+      publishModalDepth()
       bindGlobals()
 
       if (frame.opts.focusTrap) installFocusTrap(frame)

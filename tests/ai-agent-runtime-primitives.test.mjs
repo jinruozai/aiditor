@@ -21,8 +21,11 @@ for (const file of [
   'src/ai/provider-transports.js',
   'src/ai/provider-connections.js',
   'src/ai/schema.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
   'src/ai/orchestration.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
@@ -31,6 +34,13 @@ for (const file of [
 }
 
 const ai = window.aiditor.ai
+const TEST_META = { owner: 'test:agent-primitives' }
+let nextSkill = 1
+function skillRefs(tools) {
+  const id = 'test.primitives.' + nextSkill++
+  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
+  return [id]
+}
 const replies = []
 
 async function flush(count = 1) {
@@ -47,12 +57,12 @@ ai.registerConnection('agent-primitives', { auth: { type: 'none' }, transport: {
 
 ai.context.register('selection.test', function () {
   return { selection: ['node-a'], summary: 'current selection' }
-})
+}, TEST_META)
 
 const agent = ai.createAgent({
   name: 'Root Agent',
   connection: 'agent-primitives',
-  toolRefs: ['trace-edit'],
+  skillRefs: skillRefs(['trace-edit']),
 })
 const child = ai.createAgent({
   name: 'Child Agent',
@@ -88,7 +98,7 @@ ai.tools.register('trace-edit', {
   preview: function (args) { return { before: args.before, after: args.after } },
   apply: function (preview) { return { applied: true, preview: preview } },
   capabilities: { write: true, idempotent: false },
-})
+}, TEST_META)
 assert.equal(ai.tools.capabilities('trace-edit').apply, true)
 assert.equal(ai.tools.capabilities('trace-edit').write, true)
 assert.equal(ai.tools.capabilities('trace-edit').risk, 'write')
@@ -122,7 +132,7 @@ assert.equal(events.some(function (event) { return event.type === 'run_completed
 const protocolAgent = ai.createAgent({
   name: 'Protocol Agent',
   connection: 'agent-primitives',
-  toolRefs: ['agent.create'],
+  skillRefs: skillRefs(['agent.create']),
   select: false,
 })
 replies.push({
@@ -157,7 +167,7 @@ ai.registerConnection('no-tools', { auth: { type: 'none' }, transport: { type: '
 const noToolAgent = ai.createAgent({
   name: 'No Tool Agent',
   connection: 'no-tools',
-  toolRefs: ['trace-edit'],
+  skillRefs: skillRefs(['trace-edit']),
   select: false,
 })
 const noToolRequest = ai.makeRequest(noToolAgent, null, 'no_tool_request', noToolAgent.id, 0)

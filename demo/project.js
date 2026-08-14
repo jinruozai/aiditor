@@ -1315,10 +1315,11 @@
     if (!aiditor.ai || !aiditor.ai.skills || !aiditor.ai.skills.register) return
     aiditor.ai.skills.register('demo.project.authoring', {
       title: 'Demo Project Authoring',
+      description: 'Develop and operate the currently open AIditor demo project.',
       systemPrompt: 'Use the current demo project runtime as the host-specific AIditor authoring environment. Keep UI code file-backed and add registered components to inspected docks by name.',
-      auto: function (ctx) {
-        return !!(ctx && ctx.uiAuthoringIntent && (workspaceAvailable() || projectAvailable()))
-      },
+      available: function () { return workspaceAvailable() || projectAvailable() },
+      unavailableReason: 'Open a demo project or workspace first.',
+      tools: ['demo.project.openWorkspace', 'demo.project.readDescriptor', 'demo.project.searchFiles', 'demo.project.readFile', 'demo.project.readFileRange', 'demo.project.readSource', 'demo.project.writeFile', 'demo.project.createFile', 'demo.project.patchFile', 'demo.project.deleteFile', 'demo.project.addPanel', 'demo.project.mountPanel', 'demo.project.updateDescriptor', 'demo.project.reload', 'demo.project.inspectPanel', 'demo.project.runCheck', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
       rules: [
         'A demo project is a workspace folder with aiditor.project.json, optional aiditor.layout.json, and plain .js entry files.',
         'Demo project component files register with Demo.project.component(componentId, spec). Use this instead of aiditor.registerComponent inside demo project entry files.',
@@ -1330,7 +1331,7 @@
         'Do not manually create aiditor.project.json or aiditor.layout.json unless the user explicitly asks to edit project metadata or layout files.',
         'Do not guess dock names such as main/editor and do not hand-write layout JSON to place a panel.',
       ],
-    })
+    }, { owner: 'project:demo', layer: 'project', source: 'demo/project.js' })
   }
 
   Demo.project = {

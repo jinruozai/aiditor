@@ -165,6 +165,7 @@ window.URL = global.URL
 for (const file of [
   'src/core/signal.js',
   'src/ui/_internal/_signal.js',
+  'src/ui/_internal/_drag.js',
   'src/ui/_internal/_edit-session.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
@@ -223,7 +224,6 @@ ui.segmented = function (opts) {
   })
   return el
 }
-ui.attachDrag = function () { return function () {} }
 ui.popover = function (opts) {
   document.body.appendChild(opts.content)
   return {
@@ -1386,6 +1386,75 @@ function contextmenu(el, target, extra) {
   const channels = document.body.querySelectorAll('.aiditor-ui-color-channel')
   assert.equal(channels.length, 4)
   assert.equal(channels.filter(function (channel) { return !!channel.querySelector('.aiditor-ui-num') }).length, 4)
+}
+
+{
+  const value = aiditor.signal('#112233')
+  const changes = []
+  const commits = []
+  const cancels = []
+  const el = ui.colorInput({
+    value: value,
+    onChange: function (next, meta) {
+      changes.push({ value: next, meta: meta })
+      value.set(next)
+    },
+    onCommit: function (next, meta) { commits.push({ value: next, meta: meta }) },
+    onCancel: function (initial, meta) { cancels.push({ value: initial, meta: meta }) },
+  })
+  el.querySelector('.aiditor-ui-color-swatch').click()
+  const pickers = document.body.querySelectorAll('.aiditor-ui-color-picker')
+  const picker = pickers[pickers.length - 1]
+  assert.ok(picker)
+  assert.equal(el.querySelector('.aiditor-ui-color-picker'), null, 'picker must live in the portal, outside colorInput')
+  const sv = picker.querySelector('.aiditor-ui-color-sv')
+  sv.getBoundingClientRect = function () { return { left: 0, top: 0, width: 100, height: 100 } }
+
+  sv.dispatch('pointerdown', { button: 0, pointerId: 7, clientX: 20, clientY: 20, preventDefault: function () {} })
+  sv.dispatch('pointermove', { pointerId: 7, clientX: 80, clientY: 40 })
+  sv.dispatch('pointerup', { pointerId: 7, clientX: 80, clientY: 40 })
+  assert.equal(commits.length, 1)
+  assert.equal(commits[0].value, value.peek())
+  assert.equal(commits[0].meta.edit.phase, 'commit')
+  assert.equal(commits[0].meta.edit.source, 'picker.sv')
+  assert.equal(changes.filter(function (item) { return item.meta.edit.phase === 'update' }).length, 2)
+
+  const beforeCancel = value.peek()
+  sv.dispatch('pointerdown', { button: 0, pointerId: 8, clientX: 10, clientY: 10, preventDefault: function () {} })
+  sv.dispatch('pointermove', { pointerId: 8, clientX: 90, clientY: 90 })
+  sv.dispatch('pointercancel', { pointerId: 8, clientX: 90, clientY: 90 })
+  assert.equal(value.peek(), beforeCancel)
+  assert.equal(commits.length, 1, 'cancelled gesture must not commit')
+  assert.equal(cancels.length, 1)
+  assert.equal(cancels[0].value, beforeCancel)
+  assert.equal(cancels[0].meta.edit.phase, 'cancel')
+  assert.equal(changes[changes.length - 1].meta.edit.phase, 'cancel')
+  ui.dispose(el)
+}
+
+{
+  const targets = aiditor.signal([{ color: '#224466' }])
+  const phases = []
+  const form = ui.propertyForm({
+    targets: targets,
+    schema: { color: { type: 'color' } },
+    onChange: function (field, next, _targets, meta) {
+      phases.push({ field: field, phase: meta.edit.phase, value: next })
+      targets.set([{ color: next }])
+    },
+  })
+  form.querySelector('.aiditor-ui-color-swatch').click()
+  const pickers = document.body.querySelectorAll('.aiditor-ui-color-picker')
+  const picker = pickers[pickers.length - 1]
+  const sv = picker.querySelector('.aiditor-ui-color-sv')
+  sv.getBoundingClientRect = function () { return { left: 0, top: 0, width: 100, height: 100 } }
+  sv.dispatch('pointerdown', { button: 0, pointerId: 9, clientX: 25, clientY: 25, preventDefault: function () {} })
+  sv.dispatch('pointermove', { pointerId: 9, clientX: 75, clientY: 50 })
+  sv.dispatch('pointerup', { pointerId: 9, clientX: 75, clientY: 50 })
+  assert.deepEqual(phases.map(function (entry) { return entry.phase }), ['update', 'update', 'commit'])
+  assert.equal(phases[2].field, 'color')
+  assert.equal(phases[2].value, targets.peek()[0].color)
+  ui.dispose(form)
 }
 
 {

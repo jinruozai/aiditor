@@ -120,7 +120,7 @@ function loadRuntime(storage, location) {
     version: 1,
     savedAt: 1,
     state: {
-      version: 2,
+      version: 3,
       agents: [{
         id: 'agent-race',
         name: 'Race',
@@ -171,8 +171,92 @@ function loadRuntime(storage, location) {
 
 {
   const storage = localStorage()
+  const records = new Map([['migrate-v2.ai', {
+    version: 1,
+    savedAt: 10,
+    state: {
+      version: 2,
+      agents: [{
+        id: 'agent-v2',
+        name: 'Version Two',
+        toolRefs: ['legacy.direct-tool'],
+        skillRefs: ['aiditor.workspace-authoring'],
+        messages: [{ id: 'message-v2', role: 'user', content: 'preserve this transcript' }],
+      }],
+      attachments: [],
+      preferences: { lastConnection: 'saved', lastModel: 'saved-model' },
+      activeAgentId: 'agent-v2',
+    },
+  }]])
+  const adapter = memoryAdapter(records)
+  const ai = loadRuntime(storage).ai
+  ai.configurePersistence({ key: 'migrate-v2.ai', adapter: adapter })
+  await ai.persistence.ready()
+
+  const restored = ai.findAgent('agent-v2')
+  assert.equal(restored.messages[0].content, 'preserve this transcript')
+  assert.deepEqual(restored.skillRefs, ['aiditor.workspace-authoring'])
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'toolRefs'), false)
+  const migrated = records.get('migrate-v2.ai')
+  assert.equal(migrated.state.version, 3)
+  assert.equal(migrated.reason, 'migration')
+  assert.equal(Object.prototype.hasOwnProperty.call(migrated.state.agents[0], 'toolRefs'), false)
+}
+
+{
+  const storage = localStorage()
+  const records = new Map([['load-v3.ai', {
+    version: 1,
+    savedAt: 20,
+    state: {
+      version: 3,
+      agents: [{ id: 'agent-v3', name: 'Version Three', messages: [{ id: 'message-v3', role: 'assistant', content: 'already current' }] }],
+      attachments: [],
+      preferences: {},
+      activeAgentId: 'agent-v3',
+    },
+  }]])
+  const ai = loadRuntime(storage).ai
+  ai.configurePersistence({ key: 'load-v3.ai', adapter: memoryAdapter(records) })
+  await ai.persistence.ready()
+  assert.equal(ai.findAgent('agent-v3').messages[0].content, 'already current')
+  assert.equal(records.get('load-v3.ai').savedAt, 20, 'current envelopes must not be rewritten during load')
+}
+
+{
+  const storage = localStorage()
+  const records = new Map([['corrupt.ai', {
+    version: 1,
+    savedAt: 30,
+    state: { version: 3, agents: 'broken', attachments: [] },
+  }]])
+  const adapter = memoryAdapter(records)
+  let runtime = loadRuntime(storage)
+  let ai = runtime.ai
+  ai.configurePersistence({ key: 'corrupt.ai', adapter: adapter })
+  await ai.persistence.ready()
+  assert.equal(ai.persistence.status.peek().state, 'ready')
+  assert.equal(records.get('corrupt.ai').state.version, 3)
+  assert.deepEqual(records.get('corrupt.ai').state.agents, [])
+  assert.equal(records.get('corrupt.ai').reason, 'recovery')
+  assert.equal(window.aiditor.log().filter(function (entry) {
+    return entry.error && entry.error.code === 'AI_PERSISTENCE_INVALID_TRANSCRIPT'
+  }).length, 1)
+
+  runtime = loadRuntime(storage)
+  ai = runtime.ai
+  ai.configurePersistence({ key: 'corrupt.ai', adapter: adapter })
+  await ai.persistence.ready()
+  assert.equal(ai.persistence.status.peek().state, 'ready')
+  assert.equal(window.aiditor.log().filter(function (entry) {
+    return entry.error && entry.error.code === 'AI_PERSISTENCE_INVALID_TRANSCRIPT'
+  }).length, 0, 'recovered storage must not report the same corruption on every startup')
+}
+
+{
+  const storage = localStorage()
   storage.setItem('legacy.ai', JSON.stringify({
-    version: 2,
+    version: 3,
     agents: [{ id: 'legacy-agent', name: 'Legacy', messages: [{ id: 'legacy-message', role: 'user', content: 'keep me' }] }],
     attachments: [],
     activeAgentId: 'legacy-agent',

@@ -156,6 +156,7 @@ const selectionValue = {
   color: '#ffffff',
 }
 let inspectorFieldCtx = null
+const inspectorWrites = []
 const fieldMessages = aiditor.signal({ name: [{ kind: 'info', message: 'Current display name.' }] })
 
 aiditor.inspector.registerProvider('case.light', {
@@ -164,6 +165,7 @@ aiditor.inspector.registerProvider('case.light', {
       title: 'Meta',
       subtitle: 'fill_light',
       actions: [{ id: 'add', icon: 'plus', label: 'Add' }],
+      renderBeforeForm: function () { return ui.h('div', 'case-before-form', { text: 'Rules' }) },
       groups: {
         transform: { label: 'Transform', actions: [{ id: 'transform-menu', icon: 'more-vertical', label: 'Transform actions' }] },
       },
@@ -184,7 +186,7 @@ aiditor.inspector.registerProvider('case.light', {
         color: { type: 'color', label: 'Color', group: 'render', desc: 'Tint color' },
       },
       values: [selectionValue],
-      write() {},
+      write: function (field, change, writeCtx) { inspectorWrites.push({ field: field, change: change, ctx: writeCtx }) },
     }
   },
 })
@@ -221,12 +223,24 @@ assert.equal(actions.querySelectorAll('.aiditor-ui-icon-btn').length, 1)
 
 const search = root.querySelector('.aiditor-inspector-search')
 assert.equal(search.hidden, false)
+const beforeForm = root.querySelector('.aiditor-inspector-before-form')
+assert.equal(beforeForm.hidden, false)
+assert.equal(beforeForm.children[0].className, 'case-before-form')
+assert.equal(beforeForm.parentNode, search.parentNode)
+assert.equal(beforeForm.parentNode.children.indexOf(beforeForm), beforeForm.parentNode.children.indexOf(search) + 1)
 assert.deepEqual(Object.keys(formOptions.schema.peek()), ['name', 'position', 'rotation', 'color'])
 assert.equal(formOptions.groups.peek().transform.label, 'Transform')
 assert.equal(formOptions.groups.peek().transform.actions.length, 1)
 assert.equal(formOptions.fieldMessages.peek().name[0].message, 'Current display name.')
 fieldMessages.set({ color: [{ kind: 'warning', message: 'Check tint.' }] })
 assert.equal(formOptions.fieldMessages.peek().color[0].kind, 'warning')
+formOptions.onChange('color', '#336699', [selectionValue], {
+  change: aiditor.inspector.literalChange('color', '#336699'),
+  edit: { phase: 'commit', source: 'picker.sv', initialValue: '#ffffff', value: '#336699' },
+})
+assert.equal(inspectorWrites.length, 1)
+assert.equal(inspectorWrites[0].ctx.edit.phase, 'commit')
+assert.equal(inspectorWrites[0].ctx.edit.source, 'picker.sv')
 const groupActionCtx = formOptions.groupActionCtx({ groupId: 'render', label: 'Render', fields: ['color'], targets: [selectionValue], ctx: null })
 assert.equal(groupActionCtx.source, 'inspector')
 assert.equal(groupActionCtx.targets[0].id, 'fill_light')
@@ -273,6 +287,8 @@ assert.equal(formOptions.searchQuery.peek(), '')
 
 aiditor.inspector.select({ type: 'case.custom', id: 'custom' })
 assert.equal(search.hidden, true)
+assert.equal(beforeForm.hidden, true)
+assert.equal(beforeForm.children.length, 0)
 
 let asyncSignal = null
 let resolveAsyncMessages = null

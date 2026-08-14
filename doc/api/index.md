@@ -7,3 +7,4 @@ Generated from structured API comments in `src/`.
 - [inspector](./inspector.md)
 - [runtime](./runtime.md)
 - [ui](./ui.md)
+- [workspace](./workspace.md)

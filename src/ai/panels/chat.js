@@ -344,15 +344,30 @@
     ui.collect(root, function () { window.removeEventListener('aiditor-ai-add-to-chat', onAddToChat) })
 
     const editorWrap = ui.h('div', 'aiditor-ai-chat-input-wrap')
+    let slashMenu = null
     const editor = ui.richPromptInput({
       value: draft,
       placeholder: 'Message current agent...',
       disabled: controlDisabled,
       singleLine: compact,
       onSubmit: sendClick,
+      onKeyDown: function (ev) { return slashMenu ? slashMenu.handleKeyDown(ev) : false },
     })
     editor.classList.add('aiditor-ai-chat-input')
     editorWrap.appendChild(editor)
+    slashMenu = aiditor.ai.composerSlash.install({
+      input: editor,
+      value: draft,
+      context: function () {
+        const agent = activeAgent()
+        return {
+          agent: agent,
+          agentId: agent && agent.id || null,
+          componentContext: ctx,
+        }
+      },
+    })
+    ui.collect(root, slashMenu.dispose)
 
     const actions = ui.h('div', 'aiditor-ai-chat-actions')
     const leftActions = ui.h('div', 'aiditor-ai-chat-actions-left')
@@ -538,6 +553,7 @@
       }
       if (aiditor.ai.richPrompt.isEmpty(currentDraft)) return
       const refs = aiditor.ai.richPrompt.refs(currentDraft)
+      const skillRefs = aiditor.ai.richPrompt.skills(currentDraft)
       const content = aiditor.ai.richPrompt.content(currentDraft)
       aiditor.ai.updateAgent(agent.id, {
         connection: connection.peek(),
@@ -549,6 +565,7 @@
         model: model.peek() || defaultModel(connection.peek()),
         permissionMode: permissionMode.peek(),
         attachmentRefs: refs,
+        skillRefs: skillRefs,
         renderedText: content.renderedText,
       }
       if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel({ connection: meta.connection, model: meta.model })

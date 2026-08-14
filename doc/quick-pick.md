@@ -18,7 +18,7 @@ text with suggestions.
 Quick Pick owns:
 
 - anchored popover placement;
-- search input state;
+- query filtering and, by default, its own search input;
 - local filtering of the provided item collection;
 - active row, hover row, keyboard navigation, and `scrollIntoView`;
 - optional group headers;
@@ -62,6 +62,13 @@ aiditor.ui.quickPick({
   selectedKey,   // optional string | Signal<string|null>, visual only
   onSelect,      // (item, ctx) => void | Promise<void>
 
+  query,         // optional string | Signal<string>, defaults to internal state
+  showSearch,    // optional boolean, false for an external query editor
+  focus,         // optional boolean, false preserves external editor focus
+  ariaTarget,    // optional external query element for combobox/listbox ARIA
+  acceptTab,     // optional boolean, Tab chooses the active row
+  onDismiss,     // optional () => void
+
   placeholder,
   emptyText,
   width,
@@ -77,8 +84,16 @@ The call returns a small overlay handle:
 {
   el,       // popover root element
   close,    // close without choosing
+  handleKeyDown, // route keys from an external query editor
+  query,    // the effective query signal
 }
 ```
+
+The controlled form (`query` plus `showSearch: false`) lets a component reuse
+Quick Pick while its own editor remains the query surface. The caller routes
+that editor's keydown events through `handleKeyDown`; Quick Pick still owns the
+active row, filtering, selection, listbox ARIA, and dismissal. This is used by
+the AI composer slash surface and is not a separate picker implementation.
 
 All item callbacks receive the original item. The framework never clones,
 normalizes, or interprets item data beyond the values returned by the accessor
@@ -145,7 +160,8 @@ consistent across dock panels, Inspectors, settings, and host pickers.
 
 ## Interaction
 
-The search input receives focus when the picker opens.
+The built-in search input receives focus when the picker opens. With
+`focus: false`, focus stays in the caller-owned query editor.
 
 Keyboard behavior:
 
@@ -153,6 +169,7 @@ Keyboard behavior:
 ArrowDown  move active row to the next enabled row
 ArrowUp    move active row to the previous enabled row
 Enter      choose active row when it is enabled
+Tab        choose active row when acceptTab is true
 Escape     close without choosing
 ```
 
@@ -218,6 +235,10 @@ Quick Pick follows the editable combobox plus listbox shape:
 - selectable rows expose `role="option"` and `aria-selected`;
 - disabled rows expose `aria-disabled="true"`;
 - group headers are labels, not options.
+
+In controlled mode, `ariaTarget` receives the expanded/controls/active-option
+relationship for the lifetime of the picker. Its prior ARIA values are restored
+on dismissal because the external editor remains caller-owned.
 
 The visual active row and selected row must remain distinct. Active means the row
 under keyboard or pointer focus. Selected means the optional `selectedKey`

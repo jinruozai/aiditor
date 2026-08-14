@@ -13,7 +13,8 @@
 //
 // Contract with tree.js:
 //   ui._treeDnd.attach(rootEl, itemsSig, expandedSig, flatSig, dndOpts, treeCtx)
-// where treeCtx exposes the virtualizer row cache + multi-select bridge.
+// where treeCtx exposes the live available-projection index + selection
+// bridge. Pointer sessions retain ids and resolve current nodes at use time.
 // Tree.js imports no DnD code directly — this file self-registers on load.
 ;(function (aiditor) {
   'use strict'
@@ -63,18 +64,6 @@
     return null
   }
 
-  // Walk nodes to check if `descendantId` is (transitively) under `rootNode`.
-  // Used to prevent cycles — user can't drop a parent into its own subtree.
-  function containsDescendant(rootNode, targetId) {
-    if (!rootNode.children || !rootNode.children.length) return false
-    for (let i = 0; i < rootNode.children.length; i++) {
-      const c = rootNode.children[i]
-      if (c.id === targetId) return true
-      if (containsDescendant(c, targetId)) return true
-    }
-    return false
-  }
-
   function defaultGhost(nodes) {
     const el = ui.h('div', 'aiditor-ui-tree-ghost')
     const first = nodes[0]
@@ -96,6 +85,24 @@
       const dropZonesFn   = typeof dnd.dropZones === 'function' ? dnd.dropZones : null
       const autoExpandDelay = dnd.autoExpandDelay != null ? dnd.autoExpandDelay : 500
 
+      function rowFromElement(rowEl) {
+        const entry = rowEl && rowEl.__aiditorTreeEntry
+        return entry ? entry.row : null
+      }
+
+      function currentProjectionEntry(id) {
+        return treeCtx.projection.peek().index.get(id) || null
+      }
+
+      function isDescendant(sourceId, targetId) {
+        let current = currentProjectionEntry(targetId)
+        while (current && current.parentId != null) {
+          if (current.parentId === sourceId) return true
+          current = currentProjectionEntry(current.parentId)
+        }
+        return false
+      }
+
       // Delegated pointerdown on the whole tree. Per-row listeners exist too
       // (for click/dblclick), but the drag session captures globally at
       // pointerdown to stay active even when the cursor leaves the tree bounds.
@@ -103,11 +110,9 @@
         if (ev.button !== 0) return
         const rowEl = nearestRow(rootEl, ev.clientX, ev.clientY)
         if (!rowEl) return
-        const id = rowEl.dataset.treeNodeId
-        if (!id) return
-        const flat = flatSig.peek()
-        const row = flat.find(function (r) { return String(r.node.id) === String(id) })
+        const row = rowFromElement(rowEl)
         if (!row) return
+        const flat = flatSig.peek()
         if (!canDrag(row.node, row)) return
 
         // Determine source set — multi-select aware. If the dragged row is
@@ -130,7 +135,7 @@
           if (!armed) {
             if (Math.abs(e.clientX - startX) < th && Math.abs(e.clientY - startY) < th) return
             armed = true
-            session = startSession(e, dragNodes, row)
+            session = startSession(e, dragNodes)
           }
           if (session) updateSession(session, e)
         }
@@ -163,7 +168,7 @@
         return p
       }
 
-      function startSession(ev, dragNodes, initialRow) {
+      function startSession(ev, dragNodes) {
         const portal = makePortal()
         const ghost = renderPreview(dragNodes)
         ghost.classList.add('aiditor-ui-tree-ghost-wrap')
@@ -184,7 +189,7 @@
 
         const session = {
           portal: portal, ghost: ghost, indicator: indicator,
-          dragNodes: dragNodes, dragData: dragData,
+          dragData: dragData,
           sourceIds: sourceIds,
           hover: null,             // { row, rowEl, position, allowed }
           autoExpandId: null, autoExpandTimer: 0,
@@ -201,7 +206,6 @@
         // via a global CSS [data-dragging-id] match on re-render. Simpler:
         // brute-force toggle classes on cached rows only, and accept that
         // a row scrolling back in mid-drag won't be dimmed (edge case).
-        treeCtx && treeCtx._rowCache && null  // reserved for a future pass
         const cache = rootEl.__aiditorTree && rootEl.__aiditorTree._rowCache
         if (!cache) return
         cache.forEach(function (entry) {
@@ -224,31 +228,44 @@
         return hasKids ? ['before', 'inside', 'after'] : ['before', 'inside', 'after']
       }
 
+      function decideDrop(session, ev) {
+        if (!ev) return null
+        const rowEl = nearestRow(rootEl, ev.clientX, ev.clientY)
+        if (!rowEl) return null
+        const row = rowFromElement(rowEl)
+        if (!row) return null
+        const target = currentProjectionEntry(row.node.id)
+        if (!target) return null
+
+        let blocked = false
+        session.sourceIds.forEach(function (sourceId) {
+          if (!currentProjectionEntry(sourceId) || target.node.id === sourceId || isDescendant(sourceId, target.node.id)) blocked = true
+        })
+        const zones = blocked ? [] : zonesFor(target.node, row)
+        const position = zones.length ? classifyPosition(rowEl, ev.clientX, ev.clientY, zones) : null
+        let allowed = !blocked && !!position
+        if (allowed) allowed = !!canDrop(target.node, position, session.dragData)
+        return {
+          targetId: target.node.id,
+          target: target.node,
+          row: row,
+          rowEl: rowEl,
+          position: position,
+          allowed: allowed,
+        }
+      }
+
       function updateSession(session, ev) {
         positionGhost(session, ev)
-        const rowEl = nearestRow(rootEl, ev.clientX, ev.clientY)
-        if (!rowEl) { hideIndicator(session); session.hover = null; scheduleAutoScroll(session, ev); return }
-        const id = rowEl.dataset.treeNodeId
-        const flat = flatSig.peek()
-        const row = flat.find(function (r) { return String(r.node.id) === String(id) })
-        if (!row) { hideIndicator(session); session.hover = null; return }
-
-        // Cycle guard — silently reject targets that are the dragged node
-        // itself or any of its descendants.
-        let blockedByCycle = false
-        for (let i = 0; i < session.dragNodes.length; i++) {
-          const dn = session.dragNodes[i]
-          if (row.node.id === dn.id || containsDescendant(dn, row.node.id)) { blockedByCycle = true; break }
+        session.hover = decideDrop(session, ev)
+        if (!session.hover) {
+          hideIndicator(session)
+          scheduleAutoExpand(session, null, null)
+          scheduleAutoScroll(session, ev)
+          return
         }
-
-        const zones = blockedByCycle ? [] : zonesFor(row.node, row)
-        const position = zones.length ? classifyPosition(rowEl, ev.clientX, ev.clientY, zones) : null
-        let allowed = !blockedByCycle && !!position
-        if (allowed) allowed = !!canDrop(row.node, position, session.dragData)
-
-        session.hover = { row: row, rowEl: rowEl, position: position, allowed: allowed }
         paintIndicator(session)
-        scheduleAutoExpand(session, row, position)
+        scheduleAutoExpand(session, session.hover.row, session.hover.position)
         scheduleAutoScroll(session, ev)
       }
 
@@ -285,7 +302,7 @@
         if (!autoExpandDelay) return
         // Only auto-expand when hovering 'inside' a collapsed container —
         // the user's intent ("I want to dive deeper") is clear only then.
-        const wantId = (position === 'inside' && !row.expanded) ? row.node.id : null
+        const wantId = (row && position === 'inside' && !row.expanded) ? row.node.id : null
         if (wantId === session.autoExpandId) return
         if (session.autoExpandTimer) { clearTimeout(session.autoExpandTimer); session.autoExpandTimer = 0 }
         session.autoExpandId = wantId
@@ -318,15 +335,16 @@
 
       function finishSession(session, ev, cancelled) {
         // Commit (or not), then unconditionally clean up to avoid leaks.
-        if (!cancelled && session.hover && session.hover.allowed) {
-          if (session.hover.position === 'inside') {
+        const decision = cancelled ? null : decideDrop(session, ev)
+        if (decision && decision.allowed) {
+          if (decision.position === 'inside') {
             const cur = expandedSig.peek()
             const next = new Set(cur)
-            next.add(session.hover.row.node.id)
+            next.add(decision.targetId)
             expandedSig.set(next)
           }
           try {
-            dnd.onDrop(session.hover.row.node, session.hover.position, session.dragData)
+            dnd.onDrop(decision.target, decision.position, session.dragData)
           } catch (e) {
             console.error('[ui.tree] onDrop threw', e)
           }

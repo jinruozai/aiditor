@@ -80,6 +80,16 @@
     }
   }
 
+  function tokenFromSkill(skill) {
+    return {
+      type: 'skill',
+      skillId: skill.id || skill.skillId || '',
+      label: skill.title || skill.label || skill.id || skill.skillId || 'Skill',
+      title: skill.title || skill.label || '',
+      meta: skill.meta || {},
+    }
+  }
+
   function insertRef(draft, index, ref) {
     const d = normalize(draft)
     const token = allocateToken(d)
@@ -87,6 +97,19 @@
     const at = clampIndex(d.text, index)
     const tokens = Object.assign({}, d.tokens)
     tokens[token] = tokenFromReference(ref || {})
+    return normalize({
+      text: d.text.slice(0, at) + token + d.text.slice(at),
+      tokens: tokens,
+    })
+  }
+
+  function insertSkill(draft, index, skill) {
+    const d = normalize(draft)
+    const token = allocateToken(d)
+    if (!token) return d
+    const at = clampIndex(d.text, index)
+    const tokens = Object.assign({}, d.tokens)
+    tokens[token] = tokenFromSkill(skill || {})
     return normalize({
       text: d.text.slice(0, at) + token + d.text.slice(at),
       tokens: tokens,
@@ -162,9 +185,22 @@
     for (let i = 0; i < d.text.length; i++) {
       const ch = d.text[i]
       const token = d.tokens[ch]
-      if (!token || !token.refId || seen[token.refId]) continue
+      if (!token || token.type === 'skill' || !token.refId || seen[token.refId]) continue
       seen[token.refId] = true
       out.push(token.refId)
+    }
+    return out
+  }
+
+  function skills(draft) {
+    const d = normalize(draft)
+    const out = []
+    const seen = {}
+    for (let i = 0; i < d.text.length; i++) {
+      const token = d.tokens[d.text[i]]
+      if (!token || token.type !== 'skill' || !token.skillId || seen[token.skillId]) continue
+      seen[token.skillId] = true
+      out.push(token.skillId)
     }
     return out
   }
@@ -180,7 +216,9 @@
     for (let i = 0; i < d.text.length; i++) {
       const ch = d.text[i]
       const token = d.tokens[ch]
-      out += token ? '[' + (token.label || token.refId || 'Reference') + ']' : ch
+      if (!token) out += ch
+      else if (token.type === 'skill') out += '/' + (token.skillId || token.label || 'skill')
+      else out += '[' + (token.label || token.refId || 'Reference') + ']'
     }
     return out
   }
@@ -195,9 +233,13 @@
         out += ch
         continue
       }
-      const label = String(token.label || token.refId || 'Reference').replace(/\]/g, '\\]')
-      const id = String(token.refId || '').replace(/\)/g, '')
-      out += '[' + label + '](ref:' + id + ')'
+      if (token.type === 'skill') {
+        out += '[Skill: ' + String(token.label || token.skillId || 'Skill').replace(/\]/g, '\\]') + ']'
+      } else {
+        const label = String(token.label || token.refId || 'Reference').replace(/\]/g, '\\]')
+        const id = String(token.refId || '').replace(/\)/g, '')
+        out += '[' + label + '](ref:' + id + ')'
+      }
     }
     return out
   }
@@ -227,11 +269,13 @@
     allocateToken: allocateToken,
     insertText: insertText,
     insertRef: insertRef,
+    insertSkill: insertSkill,
     insertRefs: insertRefs,
     insertDraft: insertDraft,
     deleteRange: deleteRange,
     slice: slice,
     refs: refs,
+    skills: skills,
     visibleLength: visibleLength,
     toPlainText: toPlainText,
     toModelText: toModelText,

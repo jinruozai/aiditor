@@ -3,6 +3,7 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const TOOL_META = { owner: 'aiditor.ai.reference', layer: 'builtin', source: 'builtin' }
   const referenceProviders = {}
   const referenceProviderMeta = {}
   const operations = {}
@@ -43,7 +44,6 @@
       meta: clone(ref.meta || {}),
       schema: clone(ref.schema || null),
       capabilities: clone(ref.capabilities || []),
-      tools: clone(ref.tools || []),
     }
   }
 
@@ -74,11 +74,11 @@
     return fn.apply(provider, args.concat([withRefContext(ctx)]))
   }
 
-  function normalizeMeta(meta) {
+  function normalizeMeta(kind, meta) {
     if (aiditor.runtime && aiditor.runtime.registrationMeta) meta = aiditor.runtime.registrationMeta(meta)
     meta = meta || {}
-    const out = {}
-    if (meta.owner != null) out.owner = String(meta.owner)
+    if (meta.owner == null || String(meta.owner) === '') throw new Error(kind + '.register: owner is required')
+    const out = { owner: String(meta.owner) }
     if (meta.layer != null) out.layer = String(meta.layer)
     return out
   }
@@ -95,9 +95,12 @@
   }
 
   function registerReferenceProvider(name, provider, meta) {
+    const normalizedMeta = normalizeMeta('ai.references', meta)
     assertFree('ai.references', referenceProviders, name, meta)
+    if (referenceProviders[name] && referenceProviderMeta[name].owner !== normalizedMeta.owner)
+      throw new Error('ai.references.register: owner mismatch for "' + name + '"')
     referenceProviders[name] = Object.assign({ id: name }, provider || {})
-    referenceProviderMeta[name] = normalizeMeta(meta)
+    referenceProviderMeta[name] = normalizedMeta
     return referenceProviders[name]
   }
 
@@ -107,8 +110,9 @@
 
   function unregisterReferenceProvider(name, meta) {
     if (!referenceProviders[name]) return false
+    const normalizedMeta = normalizeMeta('ai.references', meta)
     const existing = referenceProviderMeta[name] || {}
-    if (meta && meta.owner != null && existing.owner !== meta.owner)
+    if (existing.owner !== normalizedMeta.owner)
       throw new Error('unregisterReferenceProvider: owner mismatch for "' + name + '"')
     delete referenceProviders[name]
     delete referenceProviderMeta[name]
@@ -119,18 +123,6 @@
     const removed = []
     keys(referenceProviderMeta).forEach(function (name) {
       if (referenceProviderMeta[name].owner === owner) {
-        delete referenceProviders[name]
-        delete referenceProviderMeta[name]
-        removed.push(name)
-      }
-    })
-    return removed
-  }
-
-  function unregisterReferenceProviderPrefix(prefix) {
-    const removed = []
-    keys(referenceProviders).forEach(function (name) {
-      if (matchesPrefix(name, prefix)) {
         delete referenceProviders[name]
         delete referenceProviderMeta[name]
         removed.push(name)
@@ -200,7 +192,10 @@
   }
 
   function registerOperation(name, spec, meta) {
+    const normalizedMeta = normalizeMeta('ai.operations', meta)
     assertFree('ai.operations', operations, name, meta)
+    if (operations[name] && operationMeta[name].owner !== normalizedMeta.owner)
+      throw new Error('ai.operations.register: owner mismatch for "' + name + '"')
     const normalized = Object.assign({ id: name }, spec || {})
     if (normalized.schema != null)
       throw new Error('ai.operations.register: use inputSchema instead of schema for "' + name + '"')
@@ -213,7 +208,7 @@
     if (normalized.exposeToModel === true && typeof normalized.apply !== 'function')
       throw new Error('ai.operations.register: model-visible operation requires apply for "' + name + '"')
     operations[name] = normalized
-    operationMeta[name] = normalizeMeta(meta)
+    operationMeta[name] = normalizedMeta
     return operations[name]
   }
 
@@ -223,8 +218,9 @@
 
   function unregisterOperation(name, meta) {
     if (!operations[name]) return false
+    const normalizedMeta = normalizeMeta('ai.operations', meta)
     const existing = operationMeta[name] || {}
-    if (meta && meta.owner != null && existing.owner !== meta.owner)
+    if (existing.owner !== normalizedMeta.owner)
       throw new Error('unregisterOperation: owner mismatch for "' + name + '"')
     delete operations[name]
     delete operationMeta[name]
@@ -235,18 +231,6 @@
     const removed = []
     keys(operationMeta).forEach(function (name) {
       if (operationMeta[name].owner === owner) {
-        delete operations[name]
-        delete operationMeta[name]
-        removed.push(name)
-      }
-    })
-    return removed
-  }
-
-  function unregisterOperationPrefix(prefix) {
-    const removed = []
-    keys(operations).forEach(function (name) {
-      if (matchesPrefix(name, prefix)) {
         delete operations[name]
         delete operationMeta[name]
         removed.push(name)
@@ -484,7 +468,7 @@
       run: function (args, ctx) {
         return readReference(args, args, ctx)
       },
-    })
+    }, TOOL_META)
     ai.tools.register('aiditor.searchReferences', {
       title: 'Search Editor References',
       description: 'Search host-provided editor references by query and optional kind.',
@@ -499,7 +483,7 @@
       run: function (args, ctx) {
         return searchReferences(args || {}, ctx)
       },
-    })
+    }, TOOL_META)
     ai.tools.register('aiditor.getSelection', {
       title: 'Get Editor Selection',
       description: 'Return current host editor selection as references.',
@@ -507,7 +491,7 @@
       run: function (args, ctx) {
         return selectedReferences(ctx)
       },
-    })
+    }, TOOL_META)
     ai.tools.register('aiditor.getCapabilities', {
       title: 'Get Reference Capabilities',
       description: 'Return schemas and operations available for a reference.',
@@ -527,7 +511,7 @@
           capabilities: referenceCapabilities(ref, ctx),
         }
       },
-    })
+    }, TOOL_META)
     ai.tools.register('aiditor.previewOperation', {
       title: 'Preview Editor Operation',
       description: 'Preview a registered editor operation. Never apply invalid previews; repair input from returned validation errors.',
@@ -545,7 +529,7 @@
         }
         return previewOperation(args, null, ctx)
       },
-    })
+    }, TOOL_META)
     ai.tools.register('aiditor.applyOperation', {
       title: 'Apply Editor Operation',
       description: 'Preview and apply a registered editor operation through the host transaction bridge.',
@@ -583,14 +567,13 @@
         }
         return applyOperation(preview, ctx)
       },
-    })
+    }, TOOL_META)
   }
 
   ai.references = {
     register: registerReferenceProvider,
     unregister: unregisterReferenceProvider,
     unregisterOwner: unregisterReferenceProviderOwner,
-    unregisterPrefix: unregisterReferenceProviderPrefix,
     get: getReferenceProvider,
     list: function (filter) {
       const names = keys(referenceProviders)
@@ -618,7 +601,6 @@
     register: registerOperation,
     unregister: unregisterOperation,
     unregisterOwner: unregisterOperationOwner,
-    unregisterPrefix: unregisterOperationPrefix,
     get: getOperation,
     list: function (filter) {
       const names = keys(operations)

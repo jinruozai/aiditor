@@ -4,7 +4,7 @@
 
   const ai = aiditor.ai = aiditor.ai || {}
   const BASE_KEY = 'aiditor.ai'
-  const SNAPSHOT_VERSION = 2
+  const SNAPSHOT_VERSION = 3
   const ENVELOPE_VERSION = 1
   const BOOTSTRAP_VERSION = 1
   const statusSig = aiditor.signal({ state: 'loading', key: null, savedAt: null, restoredAt: null, error: null })
@@ -150,9 +150,10 @@
       if (value && value.kind === 'aiditor.ai.bootstrap' && value.version === BOOTSTRAP_VERSION) {
         return bootstrapState(value)
       }
-      if (value && value.version === SNAPSHOT_VERSION) {
-        legacySnapshot = value
-        return value
+      const migrated = migrateSnapshot(value)
+      if (migrated) {
+        legacySnapshot = migrated.state
+        return migrated.state
       }
       return null
     } catch (cause) {
@@ -231,9 +232,72 @@
     }
   }
 
-  function validEnvelope(envelope) {
-    const state = envelope && (envelope.state || envelope)
-    return state && state.version === SNAPSHOT_VERSION ? state : null
+  function optionalArray(value, key) {
+    return value[key] == null || Array.isArray(value[key])
+  }
+
+  function validMessage(message) {
+    return !!message && typeof message === 'object' &&
+      optionalArray(message, 'contextRefs') &&
+      optionalArray(message, 'attachments') &&
+      optionalArray(message, 'toolCalls')
+  }
+
+  function validAgent(agent) {
+    if (!agent || typeof agent !== 'object' || typeof agent.id !== 'string' || !agent.id) return false
+    const arrays = ['messages', 'compactions', 'queue', 'inbox', 'quests', 'contextRefs', 'skillRefs', 'toolRefs']
+    for (let i = 0; i < arrays.length; i++) {
+      if (!optionalArray(agent, arrays[i])) return false
+    }
+    const messages = agent.messages || []
+    for (let i = 0; i < messages.length; i++) {
+      if (!validMessage(messages[i])) return false
+    }
+    return !agent.permissions || typeof agent.permissions === 'object' && optionalArray(agent.permissions, 'paths')
+  }
+
+  function validSnapshot(state) {
+    if (!state || typeof state !== 'object') return false
+    if (state.version !== 2 && state.version !== SNAPSHOT_VERSION) return false
+    if (!Array.isArray(state.agents) || !Array.isArray(state.attachments)) return false
+    if (state.preferences != null && typeof state.preferences !== 'object') return false
+    if (state.activeAgentId != null && typeof state.activeAgentId !== 'string') return false
+    for (let i = 0; i < state.agents.length; i++) {
+      if (!validAgent(state.agents[i])) return false
+    }
+    return true
+  }
+
+  function migrateSnapshot(state) {
+    if (!validSnapshot(state)) return null
+    if (state.version === SNAPSHOT_VERSION) return { state: state, migrated: false }
+    const next = Object.assign({}, state, {
+      version: SNAPSHOT_VERSION,
+      agents: state.agents.map(function (agent) {
+        const migrated = Object.assign({}, agent)
+        delete migrated.toolRefs
+        return migrated
+      }),
+    })
+    return { state: next, migrated: true }
+  }
+
+  function decodeEnvelope(envelope) {
+    if (!envelope) return { state: null, migrated: false, invalid: false }
+    const migrated = migrateSnapshot(envelope.state || envelope)
+    return migrated
+      ? { state: migrated.state, migrated: migrated.migrated, invalid: false }
+      : { state: null, migrated: false, invalid: true }
+  }
+
+  function recoverInvalidTranscript(cause) {
+    const err = persistenceError('AI_PERSISTENCE_INVALID_TRANSCRIPT', 'load', 'AI transcript envelope is invalid', cause)
+    reportOnce('invalid', err)
+    loaded = true
+    suspended = false
+    const recovered = ai.snapshot()
+    writeBootstrap(recovered)
+    return persistNow('recovery').then(function () { return recovered })
   }
 
   function loadDurable() {
@@ -260,17 +324,23 @@
       return adapter.load(key)
     }).then(function (envelope) {
       if (token !== generation) return null
-      const durable = validEnvelope(envelope)
-      if (envelope && !durable) throw persistenceError('AI_PERSISTENCE_LOAD_FAILED', 'load', 'AI transcript envelope is invalid')
+      const decoded = decodeEnvelope(envelope)
+      const durable = decoded.state
+      if (decoded.invalid) return recoverInvalidTranscript()
       const changedDuringLoad = ai.storeVersion.peek() !== startRevision
       if (durable) {
         const current = ai.snapshot()
         const next = !changedDuringLoad
           ? durable
           : mergeSnapshots(durable, current, baseline)
+        let restoreFailure = null
         restoring = true
-        ai.restore(next)
+        try { ai.restore(next) } catch (cause) { restoreFailure = cause }
         restoring = false
+        if (restoreFailure) {
+          ai.restore(current)
+          return recoverInvalidTranscript(restoreFailure)
+        }
       }
       loaded = true
       suspended = false
@@ -278,6 +348,7 @@
       setStatus({ state: 'ready', savedAt: envelope && envelope.savedAt || null, restoredAt: restoredAt, error: null })
       const state = ai.snapshot()
       writeBootstrap(state)
+      if (decoded.migrated) return persistNow('migration').then(function () { return state })
       if (!durable && legacySnapshot) return persistNow('migration').then(function () { return state })
       if (changedDuringLoad && durable) scheduleSave()
       return state

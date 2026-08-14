@@ -1,0 +1,326 @@
+/* Built-in CSV panel. File/session/model concerns stay in JavaScript owners. */
+.aiditor-csv-editor {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--aiditor-view-bg);
+}
+.aiditor-csv-toolbar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 var(--aiditor-panel-toolbar-h);
+  min-width: 0;
+  gap: var(--aiditor-space-1);
+  padding: var(--aiditor-panel-toolbar-py) var(--aiditor-space-1);
+  box-sizing: border-box;
+  color: var(--aiditor-toolbar-fg);
+  background: var(--aiditor-toolbar-bg);
+  border-bottom: var(--aiditor-toolbar-border-w) solid var(--aiditor-toolbar-border);
+}
+.aiditor-csv-toolbar .aiditor-ui-divider-v { height: 16px; margin: 0 var(--aiditor-space-1); }
+.aiditor-csv-toolbar-spacer { flex: 1 1 auto; min-width: var(--aiditor-space-2); }
+.aiditor-csv-status {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--aiditor-fg-3);
+  font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aiditor-csv-status[data-state="error"] { color: var(--aiditor-error); }
+.aiditor-csv-status[data-state="warning"] { color: var(--aiditor-warn); }
+.aiditor-csv-formula {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 var(--aiditor-size-h-md);
+  min-width: 0;
+  background: var(--aiditor-bg-1);
+  border-bottom: var(--aiditor-border-w) solid var(--aiditor-border-strong);
+}
+.aiditor-csv-address {
+  display: flex;
+  align-items: center;
+  flex: 0 0 calc(var(--aiditor-data-grid-row-number-w) + var(--aiditor-data-grid-column-min-w));
+  box-sizing: border-box;
+  padding: 0 var(--aiditor-space-2);
+  overflow: hidden;
+  color: var(--aiditor-fg-2);
+  border-right: var(--aiditor-border-w) solid var(--aiditor-border);
+  font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aiditor-csv-formula-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 var(--aiditor-space-2);
+  color: var(--aiditor-fg-1);
+  background: var(--aiditor-bg-2);
+  border: 0;
+  outline: none;
+  font: var(--aiditor-fs-sm) var(--aiditor-font-mono);
+}
+.aiditor-csv-formula-input:focus { box-shadow: inset 0 0 0 var(--aiditor-border-w-focus) var(--aiditor-focus-ring); }
+.aiditor-csv-editor > .aiditor-ui-data-grid { flex: 1 1 auto; }
+.aiditor-csv-editor > .aiditor-ui-data-grid.aiditor-csv-panning,
+.aiditor-csv-editor > .aiditor-ui-data-grid.aiditor-csv-panning * { cursor: grabbing !important; }
+
+.aiditor-csv-cell-value,
+.aiditor-csv-rich-cell {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aiditor-csv-rich-cell { gap: var(--aiditor-space-1); }
+.aiditor-csv-rich-cell > * { min-width: 0; }
+.aiditor-csv-inline-control {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.aiditor-csv-rich-cell .aiditor-ui-input,
+.aiditor-csv-rich-cell .aiditor-ui-num,
+.aiditor-csv-rich-cell .aiditor-ui-select,
+.aiditor-csv-rich-cell .aiditor-ui-color-input,
+.aiditor-csv-rich-cell .aiditor-ui-file-path-input {
+  height: calc(var(--aiditor-data-grid-row-h) - 2 * var(--aiditor-border-w));
+  min-height: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.aiditor-csv-rich-cell .aiditor-ui-input:hover,
+.aiditor-csv-rich-cell .aiditor-ui-num:hover,
+.aiditor-csv-rich-cell .aiditor-ui-select:hover,
+.aiditor-csv-rich-cell .aiditor-ui-color-input:hover,
+.aiditor-csv-rich-cell .aiditor-ui-file-path-input:hover,
+.aiditor-csv-rich-cell :focus-within {
+  border-color: var(--aiditor-border-strong);
+  background: var(--aiditor-bg-2);
+}
+.aiditor-csv-rich-cell .aiditor-ui-slider { min-width: 52px; }
+
+.aiditor-csv-number,
+.aiditor-csv-range,
+.aiditor-csv-reference,
+.aiditor-csv-enum {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+.aiditor-csv-number > * { width: 100%; min-width: 0; }
+.aiditor-csv-range { gap: var(--aiditor-space-1); }
+.aiditor-csv-range > .aiditor-ui-slider { flex: 1 1 auto; }
+.aiditor-csv-range-value {
+  flex: 0 1 auto;
+  min-width: calc(var(--aiditor-size-h-md) + var(--aiditor-space-2));
+  overflow: hidden;
+  color: var(--aiditor-fg-2);
+  font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.aiditor-csv-enum { border-color: transparent; background: transparent; box-shadow: none; }
+.aiditor-csv-enum .aiditor-ui-select-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.aiditor-csv-enum-menu .aiditor-ui-menu-item { gap: var(--aiditor-space-2); }
+.aiditor-csv-enum-swatch {
+  flex: 0 0 var(--aiditor-size-icon-sm);
+  width: var(--aiditor-size-icon-sm);
+  height: var(--aiditor-size-icon-sm);
+  border-radius: var(--aiditor-r-pill);
+  box-shadow: inset 0 0 0 var(--aiditor-border-w) var(--aiditor-border-strong);
+}
+
+.aiditor-csv-composite {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  gap: var(--aiditor-space-1);
+  overflow: hidden;
+}
+.aiditor-csv-composite-item {
+  display: flex;
+  align-items: center;
+  flex: 1 1 var(--aiditor-size-h-sm);
+  min-width: var(--aiditor-size-h-sm);
+  height: 100%;
+  overflow: hidden;
+  border-right: var(--aiditor-border-w) solid var(--aiditor-border);
+}
+.aiditor-csv-composite-item:last-child { border-right: 0; }
+.aiditor-csv-composite-more {
+  flex: 0 0 auto;
+  padding: 0 var(--aiditor-space-1);
+  color: var(--aiditor-fg-3);
+  font: var(--aiditor-fs-xs) var(--aiditor-font-mono);
+}
+
+.aiditor-csv-cell-media {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  gap: var(--aiditor-space-1);
+}
+.aiditor-csv-image-preview {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 calc(var(--aiditor-data-grid-row-h) - var(--aiditor-space-1));
+  width: calc(var(--aiditor-data-grid-row-h) - var(--aiditor-space-1));
+  height: calc(var(--aiditor-data-grid-row-h) - var(--aiditor-space-1));
+  overflow: hidden;
+  color: var(--aiditor-fg-3);
+  border-radius: var(--aiditor-r-1);
+  background: var(--aiditor-bg-2);
+  cursor: grab;
+}
+.aiditor-csv-cell-thumbnail {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.aiditor-csv-image-preview[data-state="ready"] .aiditor-csv-cell-thumbnail { display: block; }
+.aiditor-csv-image-preview[data-state="ready"] .aiditor-csv-image-placeholder { display: none; }
+.aiditor-csv-image-preview[data-state="empty"] .aiditor-csv-image-placeholder { display: none; }
+.aiditor-csv-image-preview[data-state="empty"]::before {
+  content: '≡';
+  opacity: .65;
+  font-weight: 700;
+}
+.aiditor-csv-image-preview[data-state="missing"] { color: var(--aiditor-error); background: var(--aiditor-error-bg); }
+.aiditor-csv-image-preview[data-state="missing"]::after {
+  position: absolute;
+  width: 70%;
+  border-top: var(--aiditor-border-w-focus) solid currentColor;
+  content: '';
+  transform: rotate(-45deg);
+}
+.aiditor-csv-cell-media-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aiditor-csv-audio-play {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--aiditor-size-h-sm);
+  width: var(--aiditor-size-h-sm);
+  height: var(--aiditor-size-h-sm);
+  padding: 0;
+  color: var(--aiditor-accent);
+  background: var(--aiditor-bg-1);
+  border: var(--aiditor-border-w) solid var(--aiditor-accent);
+  border-radius: var(--aiditor-r-pill);
+  cursor: pointer;
+}
+.aiditor-csv-audio-play:disabled { color: var(--aiditor-fg-disabled); border-color: var(--aiditor-border); cursor: default; }
+.aiditor-csv-audio-play-icon {
+  width: var(--aiditor-size-icon-sm);
+  height: var(--aiditor-size-icon-sm);
+}
+.aiditor-csv-audio-play-icon::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: currentColor;
+  clip-path: polygon(28% 14%, 86% 50%, 28% 86%);
+  content: '';
+}
+.aiditor-csv-cell-media[data-state="playing"] .aiditor-csv-audio-play { color: var(--aiditor-accent-fg); background: var(--aiditor-accent); }
+.aiditor-csv-cell-media[data-state="playing"] .aiditor-csv-audio-play-icon::before {
+  clip-path: polygon(22% 16%, 42% 16%, 42% 84%, 22% 84%, 22% 16%, 58% 16%, 78% 16%, 78% 84%, 58% 84%, 58% 16%);
+}
+.aiditor-csv-cell-media[data-state="loading"] .aiditor-csv-audio-play-icon {
+  border: var(--aiditor-border-w-focus) solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--aiditor-r-pill);
+  animation: aiditor-csv-spin .8s linear infinite;
+}
+.aiditor-csv-cell-media[data-state="loading"] .aiditor-csv-audio-play-icon::before { display: none; }
+.aiditor-csv-cell-media[data-state="missing"] { color: var(--aiditor-error); }
+.aiditor-csv-cell-media[data-state="missing"] .aiditor-csv-audio-play { color: var(--aiditor-error); border-color: var(--aiditor-error); background: var(--aiditor-error-bg); }
+.aiditor-csv-audio-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--aiditor-space-1);
+}
+.aiditor-csv-audio-track {
+  display: block;
+  width: 100%;
+  height: var(--aiditor-border-w-focus);
+  overflow: hidden;
+  background: var(--aiditor-border);
+  border-radius: var(--aiditor-r-pill);
+}
+.aiditor-csv-audio-progress { display: block; width: 0; height: 100%; background: var(--aiditor-accent); }
+
+.aiditor-csv-value-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--aiditor-size-icon-md);
+  flex-direction: column;
+  width: var(--aiditor-size-icon-md);
+  height: var(--aiditor-size-h-sm);
+  gap: var(--aiditor-space-1);
+  color: var(--aiditor-accent-fg);
+  background: var(--aiditor-accent);
+  border-radius: var(--aiditor-r-1);
+  cursor: grab;
+}
+.aiditor-csv-value-handle[data-kind="snd"] { color: var(--aiditor-warn-fg); background: var(--aiditor-warn); }
+.aiditor-csv-value-handle > i { display: block; width: 60%; border-top: var(--aiditor-border-w) solid currentColor; }
+.aiditor-csv-drag-source:active { cursor: grabbing; }
+
+.aiditor-csv-reference {
+  gap: var(--aiditor-space-1);
+  padding: 0 var(--aiditor-space-1);
+  overflow: hidden;
+  cursor: grab;
+}
+.aiditor-csv-reference[data-kind="id"] { justify-content: center; color: var(--aiditor-success); }
+.aiditor-csv-reference[data-kind="ref_id"] { color: var(--aiditor-info); }
+.aiditor-csv-reference > .aiditor-csv-image-preview { cursor: inherit; }
+.aiditor-csv-reference-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.aiditor-csv-reference-missing { color: var(--aiditor-error); background: var(--aiditor-error-bg); }
+
+.aiditor-ui-dropzone-active.aiditor-csv-cell-media,
+.aiditor-ui-dropzone-active.aiditor-csv-reference { box-shadow: inset 0 0 0 var(--aiditor-border-w-focus) var(--aiditor-accent); }
+.aiditor-csv-cell-invalid {
+  box-shadow: inset 0 calc(-1 * var(--aiditor-border-w-focus)) 0 var(--aiditor-error);
+  text-decoration: underline wavy var(--aiditor-error);
+  text-underline-offset: var(--aiditor-space-1);
+}
+
+@keyframes aiditor-csv-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .aiditor-csv-cell-media[data-state="loading"] .aiditor-csv-audio-play-icon { animation-duration: 1.8s; }
+}

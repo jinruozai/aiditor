@@ -20,8 +20,11 @@ for (const file of [
   'src/ai/provider-connections.js',
   'src/ai/schema.js',
   'src/ai/trace.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
   'src/ai/reference.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
@@ -30,6 +33,14 @@ for (const file of [
 }
 
 const ai = window.aiditor.ai
+const TEST_META = { owner: 'test:stream' }
+let nextSkill = 1
+function registerTool(name, spec) { return ai.tools.register(name, spec, TEST_META) }
+function skillRefs(tools) {
+  const id = 'test.stream.' + nextSkill++
+  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
+  return [id]
+}
 
 function byId(items, id) {
   return items.find(function (item) { return item.id === id })
@@ -154,7 +165,7 @@ assert.equal(await run.promise, null)
 assert.equal(byId(ai.agents(), aborting.id).messages.length, 1)
 assert.equal(byId(ai.agents(), aborting.id).messages[0].status, 'stopped')
 
-ai.tools.register('stream-read', {
+registerTool('stream-read', {
   run: function (args) { return { ok: true, query: args.query } },
 })
 let toolStreamRequests = 0
@@ -179,7 +190,7 @@ const streamingTool = ai.createAgent({
   name: 'Stream Tool',
   connection: 'stream-tool-flow',
   permissionMode: 'full',
-  toolRefs: ['stream-read'],
+  skillRefs: skillRefs(['stream-read']),
 })
 const toolRun = ai.message.send(streamingTool.id, { content: 'use streaming tool' }, 'user')
 await toolRun.promise
@@ -208,7 +219,7 @@ const structuredBridgeArgs = {
 }
 let receivedStructuredBridgeArgs = null
 let structuredBridgeRequests = 0
-ai.tools.register('structured-bridge-tool', {
+registerTool('structured-bridge-tool', {
   run: function (args) {
     receivedStructuredBridgeArgs = args
     return { ok: true }
@@ -240,7 +251,7 @@ const structuredBridgeAgent = ai.createAgent({
   name: 'Structured Bridge',
   connection: 'structured-bridge-flow',
   permissionMode: 'full',
-  toolRefs: ['structured-bridge-tool'],
+  skillRefs: skillRefs(['structured-bridge-tool']),
 })
 await ai.message.send(structuredBridgeAgent.id, { content: 'preserve structured arguments' }, 'user').promise
 assert.deepEqual(receivedStructuredBridgeArgs, structuredBridgeArgs)
@@ -264,7 +275,7 @@ ai.operations.register('stream.setValue', {
     return { title: 'Set stream value', next: input.value }
   },
   apply: function () { operationProjectionApplies += 1; return { applied: true } },
-})
+}, TEST_META)
 ai.operations.register('stream.dynamic', {
   exposeToModel: true,
   inputSchema: {
@@ -273,7 +284,7 @@ ai.operations.register('stream.dynamic', {
   },
   preview: function () { throw new Error('incompatible sibling must not execute') },
   apply: function () { return { applied: true } },
-})
+}, TEST_META)
 ai.registerTransport('operation-projection', {
   toolProtocol: 'native',
   toolArguments: 'json',
@@ -318,7 +329,7 @@ const operationProjectionAgent = ai.createAgent({
   name: 'Operation Projection',
   connection: 'operation-projection',
   permissionMode: 'full',
-  toolRefs: ['aiditor.applyOperation'],
+  skillRefs: skillRefs(['aiditor.applyOperation']),
 })
 const operationProjectionRun = ai.message.send(operationProjectionAgent.id, { content: 'preview value 4' }, 'user')
 const operationProjectionReply = await operationProjectionRun.promise
@@ -389,7 +400,7 @@ const operationProjectionRecoveryAgent = ai.createAgent({
   name: 'Operation Projection Recovery',
   connection: 'operation-projection-recovery',
   permissionMode: 'full',
-  toolRefs: ['aiditor.applyOperation'],
+  skillRefs: skillRefs(['aiditor.applyOperation']),
 })
 const operationProjectionRecoveryRun = ai.message.send(operationProjectionRecoveryAgent.id, { content: 'recover projected operation arguments' }, 'user')
 const operationProjectionRecoveryReply = await operationProjectionRecoveryRun.promise
@@ -406,7 +417,7 @@ let recoveredToolExecutions = 0
 let recoveryRequests = 0
 let recoveryReportErrors = 0
 let recoveryRequest = null
-ai.tools.register('recover-json-tool', {
+registerTool('recover-json-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function (args) {
     recoveredToolExecutions += 1
@@ -442,7 +453,7 @@ const recoveryAgent = ai.createAgent({
   name: 'Tool Arguments Recovery',
   connection: 'tool-arguments-recovery',
   permissionMode: 'full',
-  toolRefs: ['recover-json-tool'],
+  skillRefs: skillRefs(['recover-json-tool']),
 })
 const originalReportError = window.aiditor.reportError
 window.aiditor.reportError = function () { recoveryReportErrors += 1 }
@@ -466,7 +477,7 @@ assert.equal(ai.trace.list(recoveredRun.request.runId).filter(function (event) {
 let failedRecoveryRequests = 0
 let failedRecoveryExecutions = 0
 let failedRecoveryReports = 0
-ai.tools.register('fail-json-tool', {
+registerTool('fail-json-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function () { failedRecoveryExecutions += 1; return { ok: true } },
 })
@@ -492,7 +503,7 @@ const failedRecoveryAgent = ai.createAgent({
   name: 'Tool Arguments Recovery Fails',
   connection: 'tool-arguments-recovery-fails',
   permissionMode: 'full',
-  toolRefs: ['fail-json-tool'],
+  skillRefs: skillRefs(['fail-json-tool']),
 })
 window.aiditor.reportError = function () { failedRecoveryReports += 1 }
 const failedRecoveryRun = ai.message.send(failedRecoveryAgent.id, { content: 'fail malformed arguments twice' }, 'user')
@@ -518,11 +529,11 @@ assert.equal(ai.trace.list(failedRecoveryRun.request.runId).filter(function (eve
 let validBatchExecutions = 0
 let repairedBatchExecutions = 0
 let batchRecoveryRequests = 0
-ai.tools.register('batch-valid-tool', {
+registerTool('batch-valid-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function () { validBatchExecutions += 1; return { ok: true } },
 })
-ai.tools.register('batch-repaired-tool', {
+registerTool('batch-repaired-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function () { repairedBatchExecutions += 1; return { ok: true } },
 })
@@ -562,7 +573,7 @@ const batchRecoveryAgent = ai.createAgent({
   name: 'Tool Arguments Batch Recovery',
   connection: 'tool-arguments-batch-recovery',
   permissionMode: 'full',
-  toolRefs: ['batch-valid-tool', 'batch-repaired-tool'],
+  skillRefs: skillRefs(['batch-valid-tool', 'batch-repaired-tool']),
 })
 await ai.message.send(batchRecoveryAgent.id, { content: 'run an atomic tool-call batch' }, 'user').promise
 assert.equal(batchRecoveryRequests, 3)
@@ -572,7 +583,7 @@ assert.equal(repairedBatchExecutions, 1)
 let schemaCorrectionRequests = 0
 let schemaCorrectionExecutions = 0
 let schemaCorrectionToolResult = null
-ai.tools.register('schema-correction-tool', {
+registerTool('schema-correction-tool', {
   schema: {
     type: 'object',
     required: ['value'],
@@ -621,7 +632,7 @@ const schemaCorrectionAgent = ai.createAgent({
   name: 'Schema Correction',
   connection: 'schema-correction-flow',
   permissionMode: 'full',
-  toolRefs: ['schema-correction-tool'],
+  skillRefs: skillRefs(['schema-correction-tool']),
 })
 const schemaCorrectionRun = ai.message.send(schemaCorrectionAgent.id, { content: 'correct invalid schema arguments' }, 'user')
 const schemaCorrectionReply = await schemaCorrectionRun.promise
@@ -646,7 +657,7 @@ assert.equal(ai.trace.list(schemaCorrectionRun.request.runId).filter(function (e
 let nestedUnionRequests = 0
 let nestedUnionExecutions = 0
 let nestedUnionToolResult = null
-ai.tools.register('nested-union-correction-tool', {
+registerTool('nested-union-correction-tool', {
   schema: {
     type: 'object',
     required: ['actions'],
@@ -724,7 +735,7 @@ const nestedUnionAgent = ai.createAgent({
   name: 'Nested Union Correction',
   connection: 'nested-union-correction-flow',
   permissionMode: 'full',
-  toolRefs: ['nested-union-correction-tool'],
+  skillRefs: skillRefs(['nested-union-correction-tool']),
 })
 const nestedUnionReply = await ai.message.send(nestedUnionAgent.id, { content: 'correct nested union arguments' }, 'user').promise
 assert.equal(nestedUnionReply.content, 'nested union correction complete')
@@ -735,7 +746,7 @@ assert.equal(nestedUnionToolResult.keyword, 'required')
 
 let samePathCorrectionRequests = 0
 let samePathCorrectionExecutions = 0
-ai.tools.register('same-path-correction-tool', {
+registerTool('same-path-correction-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function () { samePathCorrectionExecutions += 1; return { ok: true } },
 })
@@ -758,7 +769,7 @@ const samePathCorrectionAgent = ai.createAgent({
   name: 'Same Path Correction',
   connection: 'same-path-correction-flow',
   permissionMode: 'full',
-  toolRefs: ['same-path-correction-tool'],
+  skillRefs: skillRefs(['same-path-correction-tool']),
 })
 const samePathCorrectionReply = await ai.message.send(samePathCorrectionAgent.id, { content: 'correct two distinct values' }, 'user').promise
 assert.equal(samePathCorrectionReply.content, 'same-path correction complete')
@@ -767,7 +778,7 @@ assert.equal(samePathCorrectionExecutions, 1)
 
 let repeatedCorrectionRequests = 0
 let repeatedCorrectionExecutions = 0
-ai.tools.register('repeated-correction-tool', {
+registerTool('repeated-correction-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function () { repeatedCorrectionExecutions += 1; return { ok: true } },
 })
@@ -784,7 +795,7 @@ const repeatedCorrectionAgent = ai.createAgent({
   name: 'Repeated Correction',
   connection: 'repeated-correction-flow',
   permissionMode: 'full',
-  toolRefs: ['repeated-correction-tool'],
+  skillRefs: skillRefs(['repeated-correction-tool']),
 })
 await ai.message.send(repeatedCorrectionAgent.id, { content: 'repeat the same invalid arguments' }, 'user').promise
 assert.equal(repeatedCorrectionRequests, 2)
@@ -796,7 +807,7 @@ assert.equal(repeatedCorrectionError.meta.toolArguments.correctionReason, 'repea
 
 let correctionBudgetRequests = 0
 let correctionBudgetExecutions = 0
-ai.tools.register('correction-budget-tool', {
+registerTool('correction-budget-tool', {
   schema: {
     type: 'object',
     required: ['value'],
@@ -825,7 +836,7 @@ const correctionBudgetAgent = ai.createAgent({
   name: 'Correction Budget',
   connection: 'correction-budget-flow',
   permissionMode: 'full',
-  toolRefs: ['correction-budget-tool'],
+  skillRefs: skillRefs(['correction-budget-tool']),
 })
 const correctionBudgetRun = ai.message.send(correctionBudgetAgent.id, { content: 'exhaust correction budget' }, 'user')
 await correctionBudgetRun.promise
@@ -841,7 +852,7 @@ assert.equal(ai.trace.list(correctionBudgetRun.request.runId).filter(function (e
 let bestEffortRequests = 0
 let bestEffortExecutions = 0
 let bestEffortReports = 0
-ai.tools.register('best-effort-json-tool', {
+registerTool('best-effort-json-tool', {
   schema: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'number' } } },
   run: function () { bestEffortExecutions += 1; return { ok: true } },
 })
@@ -862,7 +873,7 @@ const bestEffortAgent = ai.createAgent({
   name: 'Best Effort Tool Arguments',
   connection: 'best-effort-tool-arguments',
   permissionMode: 'full',
-  toolRefs: ['best-effort-json-tool'],
+  skillRefs: skillRefs(['best-effort-json-tool']),
 })
 window.aiditor.reportError = function () { bestEffortReports += 1 }
 const bestEffortRun = ai.message.send(bestEffortAgent.id, { content: 'do not weakly retry malformed arguments' }, 'user')
@@ -880,7 +891,7 @@ assert.equal(bestEffortMessage.meta.toolArguments.retryable, false)
 assert.equal(ai.trace.list(bestEffortRun.request.runId).filter(function (event) { return event.type === 'tool_arguments_recovery_started' }).length, 0)
 assert.equal(ai.trace.list(bestEffortRun.request.runId).filter(function (event) { return event.type === 'tool_arguments_correction_requested' }).length, 1)
 
-ai.tools.register('stream-hidden-tool', {
+registerTool('stream-hidden-tool', {
   exposeToModel: false,
   run: function () { hiddenToolExecuted += 1; throw new Error('hidden tool must not run') },
 })
@@ -925,7 +936,7 @@ assert.equal(byId(ai.agents(), hiddenToolAgent.id).messages.some(function (messa
   return message.content === 'continued after unavailable tool'
 }), true)
 
-ai.tools.register('stream-approval-edit', {
+registerTool('stream-approval-edit', {
   preview: function (args) { return { before: args.before, after: args.after } },
   apply: function (preview) { return { applied: true, preview: preview } },
 })
@@ -945,7 +956,7 @@ const streamApproval = ai.createAgent({
   name: 'Stream Approval',
   connection: 'stream-approval-flow',
   permissionMode: 'auto',
-  toolRefs: ['stream-approval-edit'],
+  skillRefs: skillRefs(['stream-approval-edit']),
 })
 await ai.message.send(streamApproval.id, { content: 'needs approval' }, 'user').promise
 assert.equal(byId(ai.agents(), streamApproval.id).status, 'waiting_approval')
@@ -980,7 +991,7 @@ assert.equal(reasoningMessage.content, 'visible')
 assert.equal(reasoningMessage.reasoning_content, 'hidden thought')
 assert.equal(ai.peekActiveRunState(reasoningAgent.id).modelTail, 'hidden thoughtvisible')
 
-ai.tools.register('circular-tool-result', {
+registerTool('circular-tool-result', {
   run: function () {
     const out = { ok: true }
     out.self = out
@@ -1007,7 +1018,7 @@ const circularAgent = ai.createAgent({
   name: 'Circular Tool',
   connection: 'stream-circular-tool-flow',
   permissionMode: 'full',
-  toolRefs: ['circular-tool-result'],
+  skillRefs: skillRefs(['circular-tool-result']),
 })
 const circularRun = ai.message.send(circularAgent.id, { content: 'use circular tool' }, 'user')
 await circularRun.promise
@@ -1020,7 +1031,7 @@ assert.equal(ai.peekActiveRunState(circularAgent.id).state, 'idle')
 
 let textProtocolRequests = 0
 let textProtocolCalls = 0
-ai.tools.register('stream-text-tool', {
+registerTool('stream-text-tool', {
   run: function () { textProtocolCalls += 1; return { ok: true } },
 })
 ai.registerTransport('stream-text-protocol', {
@@ -1042,7 +1053,7 @@ ai.registerConnection('stream-text-protocol', { auth: { type: 'none' }, transpor
 const textProtocolAgent = ai.createAgent({
   name: 'Text Protocol',
   connection: 'stream-text-protocol',
-  toolRefs: ['stream-text-tool'],
+  skillRefs: skillRefs(['stream-text-tool']),
 })
 await ai.message.send(textProtocolAgent.id, { content: 'use text protocol tool' }, 'user').promise
 assert.equal(textProtocolCalls, 1)

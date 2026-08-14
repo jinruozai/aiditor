@@ -31,18 +31,19 @@ workflow.
 
 ## Public Concept Model
 
-Expose only five concepts at the architecture level:
+Expose six concepts at the architecture level:
 
 ```text
 Agent             conversation, memory, runtime state
-Tool              model-callable action
+Skill             discoverable focused capability
+Tool              Skill-owned executable action
 Context Reference stable pointer to bounded readable context
 Operation         previewable/applyable mutation
 ChangeSet         grouped review/apply container
 ```
 
-Targets, attachments, rich prompt ranges, quests, inboxes, bundles, and
-templates are runtime or UX details. They may have APIs, but they should not
+Targets, attachments, rich prompt ranges, quests, and inboxes are runtime or
+UX details. They may have APIs, but they should not
 become new architectural layers.
 
 ## Context Flow
@@ -86,9 +87,8 @@ Target API:
 
 ```js
 aiditor.ai.tools.register(name, spec, meta)
-aiditor.ai.tools.unregister(name)
+aiditor.ai.tools.unregister(name, { owner })
 aiditor.ai.tools.unregisterOwner(owner)
-aiditor.ai.tools.unregisterPrefix(prefix)
 aiditor.ai.tools.get(name)
 aiditor.ai.tools.list(prefix)
 ```
@@ -236,9 +236,8 @@ Target API:
 
 ```js
 aiditor.ai.context.register(name, spec, meta)
-aiditor.ai.context.unregister(name, meta)
+aiditor.ai.context.unregister(name, { owner })
 aiditor.ai.context.unregisterOwner(owner)
-aiditor.ai.context.unregisterPrefix(prefix)
 aiditor.ai.context.get(name)
 aiditor.ai.context.list(prefix)
 ```
@@ -264,9 +263,8 @@ Target API:
 
 ```js
 aiditor.ai.operations.register(name, spec, meta)
-aiditor.ai.operations.unregister(name)
+aiditor.ai.operations.unregister(name, { owner })
 aiditor.ai.operations.unregisterOwner(owner)
-aiditor.ai.operations.unregisterPrefix(prefix)
 aiditor.ai.operations.get(name)
 aiditor.ai.operations.list(prefix)
 aiditor.ai.operations.preview(name, input)

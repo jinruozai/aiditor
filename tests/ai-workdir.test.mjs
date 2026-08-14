@@ -15,9 +15,12 @@ for (const file of [
   'src/ai/connection.js',
   'src/ai/adapter.js',
   'src/ai/schema.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
-  'src/ai/skills.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
+  'src/ai/skill/builtins.js',
   'src/ai/workdir.js',
   'src/ai/code.js',
   'src/ai/request.js',
@@ -35,30 +38,30 @@ const workspace = aiditor.workspace.memory({
   'README.md': 'hello workspace',
 })
 
-const agent = ai.createAgent({ name: 'Workspace Agent', permissionMode: 'default', skillRefs: ['aiditor.runtime-authoring'] })
+const agent = ai.createAgent({ name: 'Workspace Agent', permissionMode: 'default', skillRefs: ['aiditor.workspace-authoring'] })
 const noWorkspaceRequest = ai.makeRequest(agent, null, 'run_no_workspace_tools', 'user', 0)
 assert.equal(noWorkspaceRequest.tools.some(function (tool) { return tool.indexOf('workspace.') === 0 }), false)
 assert.equal(noWorkspaceRequest.tools.some(function (tool) { return tool.indexOf('code.') === 0 }), false)
 const blockedUiRequest = ai.makeRequest(agent, { role: 'user', content: '写一个简单的背包界面，放在主dock' }, 'run_blocked_ui_tools', 'user', 0)
 assert.equal(blockedUiRequest.tools.length, 0)
-assert.match(blockedUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
-assert.equal(blockedUiRequest.skills.includes('aiditor.runtime-authoring'), true)
-assert.match(blockedUiRequest.messages[0].content, /Do not create \.tsx/)
+assert.doesNotMatch(blockedUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
+assert.equal(blockedUiRequest.skills.includes('aiditor.workspace-authoring'), false)
+assert.equal(ai.skills.availability('aiditor.workspace-authoring', {}).available, false)
 assert.match(blockedUiRequest.messages[0].content, /Current runtime state and available tools/)
 const escapedChineseUiRequest = ai.makeRequest(agent, { role: 'user', content: '\u5199\u4e00\u4e2a\u7b80\u5355\u7684\u80cc\u5305\u754c\u9762\uff0c\u653e\u5728\u4e3bdock' }, 'run_escaped_chinese_ui_tools', 'user', 0)
 assert.equal(escapedChineseUiRequest.tools.length, 0)
-assert.match(escapedChineseUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
+assert.doesNotMatch(escapedChineseUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
 const dir = ai.setWorkspace(workspace, { id: 'memory:test', label: 'Test Workspace', kind: 'memory' })
 const plainWorkspaceRequest = ai.makeRequest(ai.createAgent({ name: 'Plain Workspace Agent' }), null, 'run_plain_workspace', 'user', 0)
 assert.deepEqual(plainWorkspaceRequest.tools, [])
-assert.equal(plainWorkspaceRequest.skills.includes('aiditor.runtime-authoring'), false)
+assert.equal(plainWorkspaceRequest.skills.includes('aiditor.workspace-authoring'), false)
 const workspaceRequest = ai.makeRequest(agent, null, 'run_workspace_tools', 'user', 0)
 assert.equal(workspaceRequest.tools.includes('workspace.fileSummary'), true)
-assert.equal(workspaceRequest.tools.includes('workspace.mkdir'), false)
-assert.equal(workspaceRequest.tools.includes('workspace.move'), false)
+assert.equal(workspaceRequest.tools.includes('workspace.mkdir'), true)
+assert.equal(workspaceRequest.tools.includes('workspace.move'), true)
 assert.equal(workspaceRequest.tools.includes('code.map'), true)
-assert.equal(workspaceRequest.skills.includes('aiditor.runtime-authoring'), true)
-assert.match(workspaceRequest.messages[0].content, /workspace component files/)
+assert.equal(workspaceRequest.skills.includes('aiditor.workspace-authoring'), true)
+assert.match(workspaceRequest.messages[0].content, /bounded workspace contract/)
 assert.equal(workspaceRequest.messages[0].meta.contextLayer, 'runtime')
 assert.equal(workspaceRequest.messages[1].meta.contextLayer, 'workspace')
 assert.match(workspaceRequest.messages[1].content, /Current workspace context/)

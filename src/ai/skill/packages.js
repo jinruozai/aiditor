@@ -1,4 +1,4 @@
-// File-backed Agent Skill packages over a bounded workspace adapter.
+// Bounded file-backed Skill packages over a workspace adapter.
 ;(function (aiditor) {
   'use strict'
 
@@ -34,6 +34,8 @@
 
   function scalar(text) {
     text = String(text || '').trim()
+    if (text === 'true') return true
+    if (text === 'false') return false
     if (text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') return JSON.parse(text)
     if (text.charAt(0) === "'" && text.charAt(text.length - 1) === "'") return text.slice(1, -1).replace(/''/g, "'")
     return text
@@ -66,57 +68,58 @@
     const description = String(data.description || '')
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error('SKILL.md name must be lowercase letters, digits, and hyphens (max 64)')
     if (!description || description.length > 1024) throw new Error('SKILL.md description is required and must be at most 1024 characters')
-    return { name: name, description: description, body: match[2].trim() }
-  }
-
-  function isNotFound(err) {
-    const code = String(err && (err.reason || err.code || err.name) || '').toLowerCase()
-    return code === 'not_found' || code === 'notfounderror' || code === 'enoent'
-  }
-
-  async function optionalDirectory(ws, path) {
-    if (!ws.stat) return true
-    try {
-      const stat = await ws.stat(path)
-      return stat && stat.kind === 'directory'
-    } catch (err) {
-      if (isNotFound(err)) return false
-      throw err
+    return {
+      name: name,
+      description: description,
+      argumentHint: String(data['argument-hint'] || ''),
+      userInvocable: data['user-invocable'] !== false,
+      body: match[2].trim(),
     }
+  }
+
+  function relativeToRoot(root, path) {
+    const prefix = root ? root + '/' : ''
+    if (path.indexOf(prefix) !== 0) throw new Error('Skill resource escaped package root: ' + path)
+    return path.slice(prefix.length)
   }
 
   async function collectResources(ws, root, maxResources) {
     const out = []
+    const rootEntries = await ws.list(root)
+    const directories = Object.create(null)
+    for (let i = 0; i < rootEntries.length; i++) {
+      const entry = rootEntries[i]
+      const entryPath = normalizePath(entry.path || joinPath(root, entry.name), 'Skill resource path')
+      const relative = relativeToRoot(root, entryPath)
+      const entryKind = entry.kind || entry.type
+      if (entryKind !== 'directory' || relative.indexOf('/') !== -1) continue
+      for (let j = 0; j < PACKAGE_DIRS.length; j++) {
+        if (PACKAGE_DIRS[j].path === relative) directories[relative] = entryPath
+      }
+    }
     for (let i = 0; i < PACKAGE_DIRS.length; i++) {
       const folder = PACKAGE_DIRS[i]
-      const path = joinPath(root, folder.path)
-      if (await optionalDirectory(ws, path)) await walkResources(ws, root, path, folder.kind, maxResources, out)
+      const path = directories[folder.path]
+      if (path) await walkResources(ws, root, path, folder.kind, maxResources, out)
     }
     out.sort(function (a, b) { return a.path.localeCompare(b.path) })
     return out
   }
 
   async function walkResources(ws, root, path, kind, maxResources, out) {
-    let entries
-    try {
-      entries = await ws.list(path)
-    } catch (err) {
-      if (isNotFound(err)) return
-      throw err
-    }
+    const entries = await ws.list(path)
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i]
       const entryPath = normalizePath(entry.path || joinPath(path, entry.name), 'Skill resource path')
+      const relative = relativeToRoot(root, entryPath)
       const entryKind = entry.kind || entry.type
       if (entryKind === 'directory') {
         await walkResources(ws, root, entryPath, kind, maxResources, out)
         continue
       }
       if (out.length >= maxResources) throw new Error('Skill package exceeds maxResources (' + maxResources + ')')
-      const prefix = root ? root + '/' : ''
-      if (entryPath.indexOf(prefix) !== 0) throw new Error('Skill resource escaped package root: ' + entryPath)
       out.push({
-        path: entryPath.slice(prefix.length),
+        path: relative,
         kind: kind,
         size: entry.size == null ? null : Number(entry.size),
         hash: entry.hash == null ? null : String(entry.hash),
@@ -168,6 +171,9 @@
     const spec = {
       title: String(input.title || parsed.name),
       description: parsed.description,
+      argumentHint: String(input.argumentHint != null ? input.argumentHint : parsed.argumentHint),
+      userInvocable: input.userInvocable == null ? parsed.userInvocable : input.userInvocable !== false,
+      modelInvocable: input.modelInvocable !== false,
       whenToUse: String(input.whenToUse || parsed.description),
       whenNotToUse: String(input.whenNotToUse || ''),
       systemPrompt: parsed.body,
@@ -177,7 +183,8 @@
       relatedApis: Array.isArray(input.relatedApis) ? input.relatedApis.slice() : [],
       resources: resources,
       docPath: manifestPath,
-      auto: input.auto,
+      available: input.available,
+      unavailableReason: input.unavailableReason,
       readResource: resourceReader(ws, root, resources),
     }
     const registration = Object.assign({

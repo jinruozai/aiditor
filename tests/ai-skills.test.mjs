@@ -9,11 +9,15 @@ for (const file of [
   'src/core/log.js',
   'src/core/names.js',
   'src/core/runtime.js',
+  'src/core/workspace.js',
   'src/ai/schema.js',
-  'src/ai/registries.js',
-  'src/ai/skill-packages.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/skill/packages.js',
   'src/ai/reference.js',
-  'src/ai/skill-reference.js',
+  'src/ai/skill/reference.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -25,12 +29,15 @@ const sourceRules = ['Review correctness']
 const registered = ai.skills.register('test.review', {
   title: 'Review',
   description: 'Review a change.',
+  argumentHint: '[target]',
   rules: sourceRules,
   tools: ['workspace.readTextRange'],
 }, { owner: 'test:review', layer: 'app', source: 'inline:test' })
 
 sourceRules.push('Late mutation')
 assert.equal(registered.id, 'test.review')
+assert.equal(registered.userInvocable, true)
+assert.equal(registered.argumentHint, '[target]')
 assert.deepEqual(registered.rules, ['Review correctness'])
 assert.deepEqual(ai.skills.list({ owner: 'test:review' }), ['test.review'])
 assert.deepEqual(ai.skills.list({ layer: 'app' }), ['test.review'])
@@ -43,12 +50,12 @@ assert.equal(ai.skills.get('test.review'), undefined)
 
 ai.skills.register('inline.resource', {
   resources: [{ path: 'references/info.md', kind: 'reference' }],
-})
+}, { owner: 'test:inline' })
 const inlineResource = ai.references.read({ uri: 'aiditor://skills/inline.resource' }).resources[0]
 assert.equal(inlineResource.readable, false)
 assert.equal(inlineResource.uri, null)
 assert.deepEqual(ai.references.capabilities({ uri: 'aiditor://skills/inline.resource/resources/references%2Finfo.md' }), [])
-ai.skills.unregister('inline.resource')
+ai.skills.unregister('inline.resource', { owner: 'test:inline' })
 
 const files = {
   'skills/review/SKILL.md': {
@@ -57,6 +64,8 @@ const files = {
       'name: code-review',
       'description: >-',
       '  Review bounded code changes for correctness and regressions.',
+      'argument-hint: "[path]"',
+      'user-invocable: false',
       'allowed-tools: ignored.tool',
       '---',
       '# Code Review',
@@ -70,6 +79,14 @@ const files = {
 }
 
 const directoryEntries = {
+  'skills/review': [
+    { path: 'skills/review/SKILL.md', name: 'SKILL.md', kind: 'file' },
+    { path: 'skills/review/references', name: 'references', kind: 'directory' },
+    { path: 'skills/review/assets', name: 'assets', kind: 'directory' },
+    { path: 'skills/review/scripts', name: 'scripts', kind: 'directory' },
+    { path: 'skills/review/agents', name: 'agents', kind: 'directory' },
+    { path: 'skills/review/notes', name: 'notes', kind: 'directory' },
+  ],
   'skills/review/references': [
     { path: 'skills/review/references/checklist.md', name: 'checklist.md', kind: 'file', size: 25, hash: 'ref-hash', mime: 'text/markdown' },
   ],
@@ -81,19 +98,16 @@ const directoryEntries = {
   ],
 }
 
+const listCalls = []
 const workspace = {
   readText: async function (path) {
     if (!files[path]) throw Object.assign(new Error('missing'), { code: 'not_found' })
     return Object.assign({ path: path }, files[path])
   },
   list: async function (path) {
+    listCalls.push(path)
     if (!directoryEntries[path]) throw Object.assign(new Error('missing'), { code: 'not_found' })
     return directoryEntries[path]
-  },
-  stat: async function (path) {
-    if (directoryEntries[path]) return { path: path, kind: 'directory' }
-    if (files[path]) return { path: path, kind: 'file' }
-    throw Object.assign(new Error('missing'), { code: 'not_found' })
   },
 }
 
@@ -106,6 +120,8 @@ const loaded = await ai.skills.loadPackage({
 
 assert.equal(loaded.id, 'workspace.review')
 assert.equal(loaded.description, 'Review bounded code changes for correctness and regressions.')
+assert.equal(loaded.argumentHint, '[path]')
+assert.equal(loaded.userInvocable, false)
 assert.match(loaded.systemPrompt, /Inspect behavior before style/)
 assert.deepEqual(loaded.tools, ['workspace.readTextRange'])
 assert.equal(loaded.tools.includes('ignored.tool'), false)
@@ -113,6 +129,12 @@ assert.deepEqual(loaded.resources.map(function (item) { return [item.path, item.
   ['assets/icon.png', 'asset'],
   ['references/checklist.md', 'reference'],
   ['scripts/check.js', 'script'],
+])
+assert.deepEqual(listCalls, [
+  'skills/review',
+  'skills/review/references',
+  'skills/review/assets',
+  'skills/review/scripts',
 ])
 assert.equal(ai.skills.meta('workspace.review').owner, 'workspace:case')
 assert.equal(ai.skills.meta('workspace.review').source, 'skills/review')
@@ -138,5 +160,23 @@ await assert.rejects(ai.skills.readResource('workspace.review', '../outside.md')
 assert.deepEqual(aiditor.runtime.unloadOwner('workspace:case').skills, ['workspace.review'])
 assert.equal(ai.skills.get('workspace.review'), undefined)
 await assert.rejects(ai.skills.loadPackage({ workspace: workspace, root: 'skills/invalid' }), /name must be lowercase/)
+
+const manifestOnlyWorkspace = aiditor.workspace.memory({
+  'skills/manifest-only/SKILL.md': [
+    '---',
+    'name: manifest-only',
+    'description: A valid Skill package without resource directories.',
+    '---',
+    '# Manifest Only',
+  ].join('\n'),
+})
+const manifestOnly = await ai.skills.loadPackage({
+  workspace: manifestOnlyWorkspace,
+  root: 'skills/manifest-only',
+  id: 'workspace.manifest-only',
+}, { owner: 'workspace:manifest-only' })
+assert.deepEqual(manifestOnly.resources, [])
+assert.equal(manifestOnly.systemPrompt, '# Manifest Only')
+assert.deepEqual(aiditor.runtime.unloadOwner('workspace:manifest-only').skills, ['workspace.manifest-only'])
 
 console.log('ai skills tests ok')

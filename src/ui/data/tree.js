@@ -4,17 +4,15 @@
 // one that matches their complexity budget, without changing the rest of
 // the opts surface:
 //
-//   Tier 1 — slots:           leadingSlot / trailingSlot / actions
-//                              Fastest to write. One function per slot, tree
-//                              composes the row DOM around the node.
+//   Tier 1 — managed row:     label / icon / leadingSlot / trailingSlot /
+//                              actions. Tree owns one stable keyed shell and
+//                              patches framework parts in place.
 //   Tier 2 — renderRow:        user returns the entire row element.
 //                              Tree still handles indent padding, events,
 //                              ARIA, focus ring.
 //   Tier 3 — renderTemplate:   user returns { root, update }. Tree keeps a
 //                              pool of template instances and calls update()
-//                              with the current node/row context as rows
-//                              scroll in/out of view — no per-scroll DOM
-//                              construction.
+//                              for complex stateful custom row structures.
 //
 // Only one tier can be in effect per instance (renderTemplate > renderRow
 // > slots). All tiers receive the same `ctx` so slot logic and full renders
@@ -23,9 +21,13 @@
 // ── data contract ─────────────────────────────────────────────────────
 //   TreeNode = { id, label?, icon?, children?, …caller-defined fields }
 //   Caller owns `items: signal<TreeNode[]>`. Any data change is reflected
-//   via items.set(...). Within a tree flatten, a node's identity is its `id`;
-//   across flattens, new node objects at the same id are treated as "same
-//   node with updated fields" for the purposes of expansion / selection.
+//   via items.set(...). `id` is globally unique within the entire available
+//   projection (including collapsed and loaded lazy descendants). Across
+//   flattens, new node objects at the same id are the same logical node for
+//   DOM reconciliation, expansion, selection, focus, and DnD.
+//   The presence of a `children` array is caller-authoritative, including [];
+//   lazy cache is eligible only when no array is supplied and hasChildren is
+//   true.
 //
 //   `selected: signal<id[]>` is always an array (length ≤ 1 in single
 //   select). `multi` defaults to true; `multi: false` collapses ctrl/shift
@@ -48,6 +50,100 @@
   }
 
   function asSet(x) { return x instanceof Set ? x : new Set(x || []) }
+
+  function duplicateIdError(id, firstParentId, secondParentId) {
+    const err = new Error('ui.tree: duplicate node.id "' + String(id) + '" in the available projection')
+    err.name = 'AiditorTreeDuplicateIdError'
+    err.nodeId = id
+    err.parentIds = [firstParentId, secondParentId]
+    return err
+  }
+
+  function buildProjection(items, inspectNode) {
+    const index = new Map()
+    function walk(nodes, parentId, depth) {
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i]
+        const previous = index.get(node.id)
+        if (previous) throw duplicateIdError(node.id, previous.parentId, parentId)
+        index.set(node.id, {
+          node: node,
+          parentId: parentId,
+          depth: depth,
+          indexInParent: i,
+        })
+        const children = inspectNode(node).children
+        if (children.length) walk(children, node.id, depth + 1)
+      }
+    }
+    walk(items, null, 0)
+    return { items: items, index: index }
+  }
+
+  // Indices of one longest increasing subsequence, ignoring -1 entries.
+  // The virtualizer uses this to retain the largest already-ordered DOM
+  // subsequence and move only the rows outside it.
+  function lisIndices(values) {
+    const tails = []
+    const tailsAt = []
+    const previous = new Array(values.length)
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i]
+      if (value < 0) { previous[i] = -1; continue }
+      let lo = 0, hi = tails.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (tails[mid] < value) lo = mid + 1
+        else hi = mid
+      }
+      tails[lo] = value
+      previous[i] = lo ? tailsAt[lo - 1] : -1
+      tailsAt[lo] = i
+    }
+    const out = new Set()
+    let cursor = tailsAt[tails.length - 1]
+    while (cursor != null && cursor >= 0) {
+      out.add(cursor)
+      cursor = previous[cursor]
+    }
+    return out
+  }
+
+  function reorderRows(parent, previousRows, nextRows) {
+    const oldIndex = new Map()
+    for (let i = 0; i < previousRows.length; i++) oldIndex.set(previousRows[i].id, i)
+    const positions = nextRows.map(function (entry) {
+      return !entry._needsInsert && oldIndex.has(entry.id) ? oldIndex.get(entry.id) : -1
+    })
+    const stable = lisIndices(positions)
+    for (let i = nextRows.length - 1; i >= 0; i--) {
+      const anchor = i + 1 < nextRows.length ? nextRows[i + 1].el : null
+      if (positions[i] < 0 || !stable.has(i)) parent.insertBefore(nextRows[i].el, anchor)
+    }
+    for (let i = 0; i < nextRows.length; i++) nextRows[i]._needsInsert = false
+  }
+
+  function containsNode(root, node) {
+    let current = node
+    while (current) {
+      if (current === root) return true
+      current = current.parentNode
+    }
+    return false
+  }
+
+  function sameRowProjection(a, b) {
+    return a.node === b.node &&
+      a.depth === b.depth &&
+      a.hasKids === b.hasKids &&
+      a.expanded === b.expanded &&
+      a.matched === b.matched &&
+      a.loadState === b.loadState &&
+      a.loading === b.loading &&
+      a.error === b.error &&
+      a.posInSet === b.posInSet &&
+      a.setSize === b.setSize
+  }
 
   // ── flatten (search-aware) ─────────────────────────────────────────
   // Returns Array<Row> where Row = { node, depth, hasKids, expanded, matched }.
@@ -158,23 +254,175 @@
     }
   }
 
-  // ── default row renderer (Tier 1 — slots) ──────────────────────────
-  // Builds:
-  //   <div class="aiditor-ui-tree-row" role="treeitem" data-depth="N">
-  //     <span class="aiditor-ui-tree-arrow">▸</span>   (or nothing if no arrow)
-  //     <span class="aiditor-ui-tree-leading">…</span> (leadingSlot result)
-  //     <span class="aiditor-ui-tree-icon">…</span>    (default icon if no slot)
-  //     <span class="aiditor-ui-tree-label">…</span>
-  //     <span class="aiditor-ui-tree-trailing">…</span>(trailingSlot result)
-  //     <span class="aiditor-ui-tree-actions">…</span> (actions result)
-  //   </div>
-  function buildDefaultRow(opts, row, ctx) {
+  // ── managed default row ────────────────────────────────────────────
+  // The framework-owned shell is created once per retained node id. Updates
+  // patch its parts in place; callers only need renderTemplate when they own
+  // a genuinely stateful custom row structure.
+  function createDefaultRow(opts) {
     const el = ui.h('div', 'aiditor-ui-tree-row')
     el.setAttribute('role', 'treeitem')
-    el.setAttribute('data-depth', String(row.depth))
-    el.style.paddingLeft = (4 + row.depth * opts._indent) + 'px'
+    const arrow = ui.h('span', 'aiditor-ui-tree-arrow')
+    el.appendChild(arrow)
+    const leading = ui.h('span', 'aiditor-ui-tree-leading')
+    const iconName = aiditor.signal('')
+    const icon = ui.icon({ name: iconName, size: 'sm' })
+    leading.appendChild(icon)
+    ui.collect(leading, function () { ui.disposeChildren(leading) })
+    leading.hidden = true
+    stopInteractionPropagation(leading)
+    el.appendChild(leading)
+    const label = ui.h('span', 'aiditor-ui-tree-label')
+    ui.collect(label, function () { ui.disposeChildren(label) })
+    el.appendChild(label)
+    const trailing = ui.h('span', 'aiditor-ui-tree-trailing')
+    ui.collect(trailing, function () { ui.disposeChildren(trailing) })
+    trailing.hidden = true
+    stopInteractionPropagation(trailing)
+    el.appendChild(trailing)
+    const actions = ui.h('span', 'aiditor-ui-tree-actions')
+    ui.collect(actions, function () { ui.disposeChildren(actions) })
+    actions.hidden = true
+    actions.setAttribute('data-visibility', opts.actionsVisibility || 'hover')
+    stopInteractionPropagation(actions)
+    el.appendChild(actions)
 
-    // Arrow (always takes space when reserved; clickable iff hasKids)
+    const runtime = {
+      el: el,
+      arrow: arrow,
+      leading: leading,
+      icon: icon,
+      iconName: iconName,
+      leadingChild: icon,
+      label: label,
+      labelChild: null,
+      labelSignature: null,
+      trailing: trailing,
+      trailingChild: null,
+      actions: actions,
+      actionMap: new Map(),
+      actionOrder: [],
+      row: null,
+      ctx: null,
+    }
+    arrow.addEventListener('click', function (ev) {
+      ev.stopPropagation()
+      if (!runtime.row || !runtime.row.hasKids) return
+      if (runtime.row.error) runtime.ctx.retry()
+      else runtime.ctx.toggle()
+    })
+    ui.collect(el, function () { ui.disposeChildren(el) })
+    return runtime
+  }
+
+  function callRowFactory(scope, fn, node, ctx) {
+    if (!fn) return null
+    return aiditor.safeCall({ scope: 'ui.tree', action: scope, nodeId: node.id }, function () {
+      return fn(node, ctx)
+    })
+  }
+
+  function replaceSlot(container, current, next) {
+    if (current === next) return current
+    ui.disposeChildren(container)
+    if (next) container.appendChild(next)
+    return next || null
+  }
+
+  function actionValue(value, ctx, action) {
+    if (ui._actionSurface) return ui._actionSurface.valueOf(value, ctx, action)
+    return typeof value === 'function' ? value(ctx, action) : value
+  }
+
+  function actionKey(action, index) {
+    if (action.nodeType === 1) return action
+    return action.id != null ? 'id:' + String(action.id) : 'index:' + index
+  }
+
+  function createActionState(key, action, runtime) {
+    if (action.nodeType === 1) return { id: key, el: action, raw: true, action: action }
+    const icon = aiditor.signal('')
+    const title = aiditor.signal('Action')
+    const ariaLabel = aiditor.signal('Action')
+    const disabled = aiditor.signal(false)
+    const kind = aiditor.signal('ghost')
+    const state = {
+      id: key, action: action, raw: false,
+      icon: icon, title: title, ariaLabel: ariaLabel,
+      disabled: disabled, kind: kind, el: null,
+    }
+    state.el = ui.iconButton({
+      icon: icon,
+      title: title,
+      ariaLabel: ariaLabel,
+      size: 'sm',
+      kind: kind,
+      disabled: disabled,
+      onClick: function (ev) {
+        ev.stopPropagation()
+        const current = state.action
+        if (typeof current.onClick === 'function') {
+          aiditor.safeCall({ scope: 'ui.tree', action: 'rowAction', nodeId: runtime.row.node.id }, function () {
+            current.onClick(runtime.row.node, ev)
+          })
+          return
+        }
+        if (ui._actionSurface) {
+          ui._actionSurface.runAction(current, {
+            node: runtime.row.node,
+            row: runtime.ctx.row,
+            tree: runtime.ctx,
+          }, 'ui.tree')
+        }
+      },
+    })
+    return state
+  }
+
+  function updateActions(runtime, opts) {
+    if (!opts.actions) {
+      runtime.actionMap.forEach(function (state) { ui.dispose(state.el) })
+      runtime.actionMap.clear()
+      runtime.actionOrder = []
+      runtime.actions.hidden = true
+      return
+    }
+    const resolved = callRowFactory('actions', opts.actions, runtime.row.node, runtime.ctx)
+    const list = Array.isArray(resolved) ? resolved : []
+    const nextMap = new Map()
+    const nextOrder = []
+    for (let i = 0; i < list.length; i++) {
+      const action = list[i]
+      if (!action) continue
+      const actionCtx = { node: runtime.row.node, row: runtime.ctx.row, tree: runtime.ctx }
+      if (action.nodeType !== 1 && actionValue(action.hidden, actionCtx, action)) continue
+      const key = actionKey(action, i)
+      let state = runtime.actionMap.get(key)
+      if (!state || state.raw !== (action.nodeType === 1)) state = createActionState(key, action, runtime)
+      state.action = action
+      if (!state.raw) {
+        const label = actionValue(action.label, actionCtx, action)
+        const title = actionValue(action.title, actionCtx, action) || label || action.id || action.icon || 'Action'
+        state.icon.set(actionValue(action.icon, actionCtx, action) || (action.menu ? 'more-vertical' : ''))
+        state.title.set(String(title))
+        state.ariaLabel.set(String(label || title))
+        state.disabled.set(!!actionValue(action.disabled, actionCtx, action))
+        state.kind.set(actionValue(action.variant, actionCtx, action) === 'danger' || action.danger ? 'danger' : 'ghost')
+      }
+      nextMap.set(key, state)
+      nextOrder.push(state)
+    }
+    runtime.actionMap.forEach(function (state, key) {
+      if (!nextMap.has(key)) ui.dispose(state.el)
+    })
+    reorderRows(runtime.actions, runtime.actionOrder, nextOrder)
+    runtime.actionMap = nextMap
+    runtime.actionOrder = nextOrder
+    runtime.actions.hidden = nextOrder.length === 0
+  }
+
+  function updateDefaultRow(runtime, opts, row, ctx) {
+    runtime.row = row
+    runtime.ctx = ctx
     const arrowMode = opts._showArrow
     const arrowShown = arrowMode === 'always'
       ? true
@@ -183,90 +431,48 @@
         : typeof arrowMode === 'function'
           ? !!arrowMode(row.node, row)
           : row.hasKids
-    const arrow = ui.h('span', 'aiditor-ui-tree-arrow')
-    if (arrowShown && row.hasKids) {
-      arrow.textContent = row.loading ? '' : (row.error ? '!' : (row.expanded ? '▾' : '▸'))
-      arrow.classList.toggle('aiditor-ui-tree-arrow-loading', !!row.loading)
-      arrow.classList.toggle('aiditor-ui-tree-arrow-error', !!row.error)
-      if (row.error) arrow.title = row.error.message || 'Failed to load children. Click to retry.'
-      arrow.addEventListener('click', function (e) {
-        e.stopPropagation()
-        if (row.error) ctx.retry()
-        else ctx.toggle()
-      })
-    } else {
-      arrow.textContent = ''
-    }
-    el.appendChild(arrow)
+    runtime.arrow.textContent = arrowShown && row.hasKids && !row.loading
+      ? (row.error ? '!' : (row.expanded ? '▾' : '▸'))
+      : ''
+    runtime.arrow.classList.toggle('aiditor-ui-tree-arrow-loading', !!(arrowShown && row.hasKids && row.loading))
+    runtime.arrow.classList.toggle('aiditor-ui-tree-arrow-error', !!(arrowShown && row.hasKids && row.error))
+    runtime.arrow.title = row.error ? (row.error.message || 'Failed to load children. Click to retry.') : ''
 
-    // Leading slot (falls back to default icon if no slot but node.icon exists)
     if (opts.leadingSlot) {
-      const node = opts.leadingSlot(row.node, ctx)
-      if (node) {
-        const w = ui.h('span', 'aiditor-ui-tree-leading')
-        w.appendChild(node)
-        stopInteractionPropagation(w)
-        el.appendChild(w)
-      }
-    } else if (row.node.icon) {
-      const ic = ui.h('span', 'aiditor-ui-tree-icon')
-      ic.appendChild(ui.icon({ name: row.node.icon, size: 'sm' }))
-      el.appendChild(ic)
-    }
-
-    // Label (with search highlight if query active)
-    const lab = ui.h('span', 'aiditor-ui-tree-label')
-    const labelText = row.node.label != null ? String(row.node.label) : String(row.node.id)
-    if (opts.labelSlot && !ctx.query) {
-      const node = opts.labelSlot(row.node, ctx)
-      if (node) lab.appendChild(node)
-      else lab.textContent = labelText
-    } else if (ctx.query) {
-      lab.appendChild(ctx.highlight(labelText))
+      const next = callRowFactory('leadingSlot', opts.leadingSlot, row.node, ctx)
+      runtime.leadingChild = replaceSlot(runtime.leading, runtime.leadingChild, next)
+      runtime.leading.hidden = !next
     } else {
-      lab.textContent = labelText
+      if (runtime.leadingChild !== runtime.icon) runtime.leadingChild = replaceSlot(runtime.leading, runtime.leadingChild, runtime.icon)
+      runtime.iconName.set(row.node.icon || '')
+      runtime.leading.hidden = !row.node.icon
     }
-    lab.title = labelText
-    el.appendChild(lab)
 
-    // Trailing slot
+    const labelText = row.node.label != null ? String(row.node.label) : String(row.node.id)
+    const labelSignature = labelText + '\x00' + ctx.query
+    if (opts.labelSlot && !ctx.query) {
+      const next = callRowFactory('labelSlot', opts.labelSlot, row.node, ctx)
+      runtime.labelChild = replaceSlot(runtime.label, runtime.labelChild, next)
+      if (!next) runtime.label.textContent = labelText
+      runtime.labelSignature = null
+    } else if (runtime.labelSignature !== labelSignature || runtime.labelChild) {
+      ui.disposeChildren(runtime.label)
+      runtime.labelChild = null
+      if (ctx.query) runtime.label.appendChild(ctx.highlight(labelText))
+      else runtime.label.textContent = labelText
+      runtime.labelSignature = labelSignature
+    }
+    runtime.label.title = labelText
+
     if (opts.trailingSlot) {
-      const node = opts.trailingSlot(row.node, ctx)
-      if (node) {
-        const w = ui.h('span', 'aiditor-ui-tree-trailing')
-        w.appendChild(node)
-        stopInteractionPropagation(w)
-        el.appendChild(w)
-      }
+      const next = callRowFactory('trailingSlot', opts.trailingSlot, row.node, ctx)
+      runtime.trailingChild = replaceSlot(runtime.trailing, runtime.trailingChild, next)
+      runtime.trailing.hidden = !next
+    } else {
+      runtime.trailingChild = replaceSlot(runtime.trailing, runtime.trailingChild, null)
+      runtime.trailing.hidden = true
     }
-
-    // Actions (right-side)
-    if (opts.actions) {
-      const list = opts.actions(row.node, ctx) || []
-      if (list.length) {
-        const ac = ui.h('span', 'aiditor-ui-tree-actions')
-        ac.setAttribute('data-visibility', opts.actionsVisibility || 'hover')
-        for (let i = 0; i < list.length; i++) {
-          const a = list[i]
-          if (!a) continue
-          // Accept either an Action spec { icon, title, onClick, disabled? }
-          // or a raw HTMLElement (escape hatch for bespoke controls).
-          if (a.nodeType === 1) { ac.appendChild(a); continue }
-          const btn = ui.iconButton({
-            icon: a.icon, title: a.title || a.icon || 'action',
-            size: 'sm', kind: 'ghost', disabled: a.disabled,
-            onClick: function (ev) {
-              ev.stopPropagation()
-              if (typeof a.onClick === 'function') a.onClick(row.node, ev)
-            },
-          })
-          ac.appendChild(btn)
-        }
-        stopInteractionPropagation(ac)
-        el.appendChild(ac)
-      }
-    }
-    return el
+    updateActions(runtime, opts)
   }
 
   // Clicks on interactive slot children must not bubble up and trigger
@@ -285,6 +491,8 @@
     const loadChildren = typeof o.loadChildren === 'function' ? o.loadChildren : null
     const loadVersion = aiditor.signal(0)
     const loadCache = new Map()
+    const activeBatches = new Set()
+    let projectionSig = null
     const rowH = o.rowHeight || DEFAULT_ROW_H
     const indent = o.indentSize || DEFAULT_INDENT
 
@@ -323,23 +531,32 @@
     let focusedId = null
     let anchorId = null
 
+    function ownsChildren(node) { return Array.isArray(node.children) }
+    function acceptsLazyCache(node) { return !ownsChildren(node) && node.hasChildren === true }
+
     function inspectNode(node) {
       const cached = loadCache.get(node.id)
-      const staticChildren = Array.isArray(node.children) ? node.children : []
-      const children = cached && cached.status === 'loaded' ? cached.children : staticChildren
-      const lazy = !!(loadChildren && node.hasChildren === true && !staticChildren.length && !(cached && cached.status === 'loaded'))
+      const staticChildren = ownsChildren(node) ? node.children : null
+      const activeCache = acceptsLazyCache(node) ? cached : null
+      const hasCachedValue = !!(activeCache && activeCache.hasValue)
+      const children = staticChildren || (hasCachedValue ? activeCache.children : [])
+      const lazy = !!(loadChildren && acceptsLazyCache(node) && !hasCachedValue)
       return {
         children: children,
-        hasKids: !!(children.length || lazy || (cached && (cached.status === 'loading' || cached.status === 'error'))),
-        loadState: cached ? cached.status : 'idle',
-        loading: !!(cached && cached.status === 'loading'),
-        error: cached && cached.status === 'error' ? cached.error : null,
+        hasKids: !!(children.length || lazy || (activeCache && (activeCache.status === 'loading' || activeCache.status === 'error'))),
+        loadState: activeCache ? activeCache.status : 'idle',
+        loading: !!(activeCache && activeCache.status === 'loading'),
+        error: activeCache && activeCache.status === 'error' ? activeCache.error : null,
       }
     }
 
     function bumpLoadVersion() { loadVersion.set(loadVersion.peek() + 1) }
 
     function findNode(id) {
+      if (projectionSig) {
+        const entry = projectionSig.peek().index.get(id)
+        return entry ? entry.node : null
+      }
       let found = null
       function walk(nodes) {
         for (let i = 0; i < nodes.length && !found; i++) {
@@ -353,20 +570,129 @@
       return found
     }
 
-    function ensureChildren(node) {
-      if (!loadChildren || !node || node.hasChildren !== true) return Promise.resolve([])
-      const staticChildren = Array.isArray(node.children) ? node.children : []
-      if (staticChildren.length) return Promise.resolve(staticChildren)
-      const current = loadCache.get(node.id)
-      if (current && current.status === 'loaded') return Promise.resolve(current.children)
-      if (current && current.status === 'loading') return current.promise
-      if (current && current.status === 'error') return Promise.resolve([])
+    function newLoadState() {
+      return {
+        status: 'idle', children: [], hasValue: false, stale: false,
+        error: null, promise: null, batch: null,
+        retryIds: null,
+      }
+    }
 
-      const controller = new AbortController()
-      const token = {}
-      const state = { status: 'loading', children: [], error: null, controller: controller, token: token, promise: null }
-      loadCache.set(node.id, state)
+    function normalizeIds(input) {
+      const values = input == null
+        ? Array.from(loadCache.keys())
+        : (Array.isArray(input) || input instanceof Set)
+          ? Array.from(input)
+          : [input]
+      const seen = new Set()
+      const out = []
+      for (let i = 0; i < values.length; i++) {
+        if (seen.has(values[i])) continue
+        seen.add(values[i])
+        out.push(values[i])
+      }
+      return out
+    }
+
+    function batchRollbackError(failedId, cause) {
+      const err = new Error('ui.tree: atomic children refresh kept the previous snapshot because node "' + String(failedId) + '" failed')
+      err.name = 'AiditorTreeRefreshBatchError'
+      err.failedNodeId = failedId
+      err.refreshCause = cause
+      return err
+    }
+
+    function cancelBatch(batch, publish) {
+      if (!batch || batch.finished) return
+      batch.finished = true
+      batch.controllers.forEach(function (controller) { controller.abort() })
+      for (let i = 0; i < batch.ids.length; i++) {
+        const id = batch.ids[i]
+        const state = loadCache.get(id)
+        if (!state || state.batch !== batch) continue
+        state.batch = null
+        state.promise = null
+        state.error = null
+        state.retryIds = null
+        if (state.hasValue) {
+          state.status = 'loaded'
+          state.stale = false
+        } else {
+          loadCache.delete(id)
+        }
+      }
+      activeBatches.delete(batch)
+      batch.resolve([])
+      if (publish) bumpLoadVersion()
+    }
+
+    function candidateInfo(node, staged) {
+      const base = inspectNode(node)
+      if (!acceptsLazyCache(node) || !staged.has(node.id)) return base
+      const children = staged.get(node.id)
+      return {
+        children: children,
+        hasKids: children.length > 0,
+        loadState: 'loaded',
+        loading: false,
+        error: null,
+      }
+    }
+
+    function finishBatch(batch, outcomes) {
+      if (batch.finished) return
+      batch.finished = true
+      activeBatches.delete(batch)
+      let failed = null
+      for (let i = 0; i < outcomes.length; i++) {
+        if (!outcomes[i].ok) { failed = outcomes[i]; break }
+      }
+      const staged = new Map()
+      if (!failed) {
+        for (let i = 0; i < outcomes.length; i++) staged.set(outcomes[i].id, outcomes[i].children)
+        try {
+          buildProjection(items.peek() || [], function (node) { return candidateInfo(node, staged) })
+        } catch (err) {
+          failed = { id: err.nodeId, error: err }
+        }
+      }
+
+      if (failed) {
+        for (let i = 0; i < batch.ids.length; i++) {
+          const id = batch.ids[i]
+          const state = loadCache.get(id)
+          if (!state || state.batch !== batch) continue
+          const own = outcomes.find(function (outcome) { return outcome.id === id && !outcome.ok })
+          state.status = 'error'
+          state.error = own ? own.error : batchRollbackError(failed.id, failed.error)
+          state.stale = state.hasValue
+          state.batch = null
+          state.promise = null
+          state.retryIds = batch.ids.slice()
+        }
+        bumpLoadVersion()
+        batch.resolve(outcomes)
+        return
+      }
+
+      for (let i = 0; i < outcomes.length; i++) {
+        const outcome = outcomes[i]
+        const state = loadCache.get(outcome.id)
+        if (!state || state.batch !== batch) continue
+        state.status = 'loaded'
+        state.children = outcome.children
+        state.hasValue = true
+        state.stale = false
+        state.error = null
+        state.batch = null
+        state.promise = null
+        state.retryIds = null
+      }
       bumpLoadVersion()
+      batch.resolve(outcomes)
+    }
+
+    function loadOutcome(node, controller) {
       const source = { scope: 'ui.tree', action: 'loadChildren', nodeId: node.id }
       let thrown = null
       const result = aiditor.safeCall(source, function () {
@@ -374,52 +700,89 @@
         catch (err) { thrown = err; throw err }
       })
       const pending = thrown ? Promise.reject(thrown) : Promise.resolve(result)
-      state.promise = pending.then(function (children) {
-        if (controller.signal.aborted || loadCache.get(node.id) !== state || state.token !== token) return []
+      return pending.then(function (children) {
         if (!Array.isArray(children)) throw new Error('ui.tree: loadChildren must resolve to an array')
-        state.status = 'loaded'
-        state.children = children
-        state.controller = null
-        bumpLoadVersion()
-        return children
+        return { id: node.id, ok: true, children: children }
       }).catch(function (err) {
-        if (controller.signal.aborted || loadCache.get(node.id) !== state) return []
-        state.status = 'error'
-        state.error = err
-        state.controller = null
-        bumpLoadVersion()
-        return []
+        return { id: node.id, ok: false, error: err }
       })
-      return state.promise
+    }
+
+    function refreshChildren(input, reason) {
+      if (!loadChildren) return Promise.resolve([])
+      const requested = normalizeIds(input)
+      const nodes = []
+      for (let i = 0; i < requested.length; i++) {
+        const node = findNode(requested[i])
+        if (!node || !acceptsLazyCache(node)) continue
+        nodes.push(node)
+      }
+      if (!nodes.length) return Promise.resolve([])
+
+      const overlapping = new Set()
+      for (let i = 0; i < nodes.length; i++) {
+        const state = loadCache.get(nodes[i].id)
+        if (state && state.batch) overlapping.add(state.batch)
+      }
+      overlapping.forEach(function (batch) { cancelBatch(batch, false) })
+
+      const batch = {
+        ids: nodes.map(function (node) { return node.id }),
+        cancelOnCollapse: reason === 'expand',
+        controllers: new Map(),
+        finished: false,
+        promise: null,
+        resolve: null,
+      }
+      batch.promise = new Promise(function (resolve) { batch.resolve = resolve })
+      activeBatches.add(batch)
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i]
+        const controller = new AbortController()
+        let state = loadCache.get(node.id)
+        if (!state) { state = newLoadState(); loadCache.set(node.id, state) }
+        state.status = 'loading'
+        state.stale = state.hasValue
+        state.error = null
+        state.promise = batch.promise
+        state.batch = batch
+        state.retryIds = batch.ids.slice()
+        batch.controllers.set(node.id, controller)
+      }
+      bumpLoadVersion()
+      Promise.all(nodes.map(function (node) {
+        return loadOutcome(node, batch.controllers.get(node.id))
+      })).then(function (outcomes) { finishBatch(batch, outcomes) })
+      return batch.promise
+    }
+
+    function ensureChildren(node) {
+      if (!loadChildren || !node) return Promise.resolve([])
+      if (ownsChildren(node)) return Promise.resolve(node.children)
+      if (!acceptsLazyCache(node)) return Promise.resolve([])
+      const current = loadCache.get(node.id)
+      if (current && current.status === 'loading') return current.promise
+      if (current && current.hasValue && !current.stale) return Promise.resolve(current.children)
+      if (current && current.status === 'error') return Promise.resolve(current.children)
+      return refreshChildren([node.id], 'expand').then(function () {
+        const state = loadCache.get(node.id)
+        return state && state.hasValue ? state.children : []
+      })
     }
 
     function abortLoad(id) {
       const state = loadCache.get(id)
-      if (!state || state.status !== 'loading') return
-      state.controller.abort()
-      loadCache.delete(id)
-      bumpLoadVersion()
+      if (!state || !state.batch || !state.batch.cancelOnCollapse) return
+      cancelBatch(state.batch, true)
     }
 
-    function invalidateChildren(id) {
-      const ids = id == null ? Array.from(loadCache.keys()) : [id]
-      for (let i = 0; i < ids.length; i++) {
-        const state = loadCache.get(ids[i])
-        if (state && state.controller) state.controller.abort()
-        loadCache.delete(ids[i])
-      }
-      bumpLoadVersion()
-      for (let i = 0; i < ids.length; i++) {
-        if (!asSet(expanded.peek()).has(ids[i])) continue
-        const node = findNode(ids[i])
-        if (node) ensureChildren(node)
-      }
+    function invalidateChildren(ids) {
+      return refreshChildren(ids, 'invalidate')
     }
 
     function retryChildren(id) {
-      invalidateChildren(id)
-      const node = findNode(id)
-      return node ? ensureChildren(node) : Promise.resolve([])
+      const state = loadCache.get(id)
+      return refreshChildren(state && state.retryIds ? state.retryIds : [id], 'retry')
     }
 
     // Root element. Role + aria-multiselectable announce the tree to AT.
@@ -439,15 +802,26 @@
       })
     }
 
-    // Derived flat list; recomputed whenever items / expanded / search change.
-    const flatSig = aiditor.derived(function () {
+    // The available projection includes collapsed and asynchronously cached
+    // descendants. It is the single identity authority for reconciliation,
+    // lookup, DnD parent-chain checks, and duplicate-id validation.
+    projectionSig = aiditor.derived(function () {
       loadVersion()
-      return flatten(items(), expanded(), searchSig(), matchFn, searchBehavior, inspectNode)
+      return buildProjection(items() || [], inspectNode)
+    })
+    ui.collect(el, projectionSig.dispose)
+
+    // Derived flat list; recomputed whenever projection / expansion / search changes.
+    const flatSig = aiditor.derived(function () {
+      const projection = projectionSig()
+      return flatten(projection.items, expanded(), searchSig(), matchFn, searchBehavior, inspectNode)
     })
     ui.collect(el, flatSig.dispose)
 
-    // Virtualizer state.
-    const rowCache = new Map()   // index → { el, row }
+    // Virtualizer state. Only visible/overscan rows own DOM, but every
+    // retained row is keyed by node id rather than by its current index.
+    const rowCache = new Map()   // node id → RowRuntime
+    let visibleOrder = []
     const tpool = []             // template instances when Tier 3 is active
 
     // Pick renderer tier.
@@ -481,13 +855,13 @@
         highlight: makeHighlight(searchSig.peek()),
         toggle:   function () { toggleNode(row.node.id) },
         retry:    function () { return retryChildren(row.node.id) },
-        invalidate: function () { invalidateChildren(row.node.id) },
+        invalidate: function () { return invalidateChildren(row.node.id) },
         select:   function (mode) { applyClickSelect(row, mode || 'replace') },
         activate: function () { if (typeof o.onActivate === 'function') o.onActivate(row.node) },
       }
     }
 
-    function renderRow(row) {
+    function createRenderedRow(row) {
       const ctx = makeCtx(row)
       if (tier3) {
         const tpl = tpool.pop() || tier3()
@@ -496,7 +870,7 @@
         tpl.root.setAttribute('role', 'treeitem')
         tpl.root.setAttribute('data-depth', String(row.depth))
         tpl.root.style.paddingLeft = (4 + row.depth * indent) + 'px'
-        return { el: tpl.root, tpl: tpl }
+        return { el: tpl.root, tpl: tpl, managed: null, kind: 'template' }
       }
       if (tier2) {
         const rel = tier2(row.node, row, ctx)
@@ -504,9 +878,11 @@
         if (!rel.getAttribute('role')) rel.setAttribute('role', 'treeitem')
         rel.setAttribute('data-depth', String(row.depth))
         rel.style.paddingLeft = (4 + row.depth * indent) + 'px'
-        return { el: rel, tpl: null }
+        return { el: rel, tpl: null, managed: null, kind: 'renderRow' }
       }
-      return { el: buildDefaultRow(_opts, row, ctx), tpl: null }
+      const managed = createDefaultRow(_opts)
+      updateDefaultRow(managed, _opts, row, ctx)
+      return { el: managed.el, tpl: null, managed: managed, kind: 'default' }
     }
 
     function applyRowState(rowEl, row) {
@@ -654,41 +1030,41 @@
     let previousExpanded = new Set()
     const stopAsyncExpansion = aiditor.effect(function () {
       const current = asSet(expanded())
-      loadVersion()
+      const projection = projectionSig()
       previousExpanded.forEach(function (id) { if (!current.has(id)) abortLoad(id) })
       current.forEach(function (id) {
-        const node = findNode(id)
-        if (node) ensureChildren(node)
+        const entry = projection.index.get(id)
+        if (entry) ensureChildren(entry.node)
       })
       previousExpanded = new Set(current)
     })
     ui.collect(el, stopAsyncExpansion)
 
     const stopPruneLoads = aiditor.effect(function () {
-      items()
-      loadVersion()
-      const known = new Set()
-      function walk(nodes) {
-        for (let i = 0; i < nodes.length; i++) {
-          known.add(nodes[i].id)
-          const children = inspectNode(nodes[i]).children
-          if (children.length) walk(children)
-        }
-      }
-      walk(items.peek() || [])
+      const known = projectionSig().index
+      const cancelled = new Set()
       loadCache.forEach(function (state, id) {
-        if (known.has(id)) return
-        if (state.controller) state.controller.abort()
-        loadCache.delete(id)
+        const entry = known.get(id)
+        if (entry && acceptsLazyCache(entry.node)) return
+        if (state.batch) cancelled.add(state.batch)
       })
+      cancelled.forEach(function (batch) { cancelBatch(batch, false) })
+      let changed = cancelled.size > 0
+      loadCache.forEach(function (state, id) {
+        const entry = known.get(id)
+        if (entry && acceptsLazyCache(entry.node)) return
+        loadCache.delete(id)
+        changed = true
+      })
+      if (changed) bumpLoadVersion()
     })
     ui.collect(el, stopPruneLoads)
 
     // ── virtualizer ────────────────────────────────────────────────
-    // Slots and renderRow use the simple per-index cache. renderTemplate is
-    // the stable high-frequency path: visible instances reconcile by node id
-    // and update in place, so data refreshes cannot interrupt pointer/focus
-    // sessions inside an unchanged row.
+    // Every rendering tier now participates in one id-keyed visible-window
+    // reconciliation. The managed default row and renderTemplate update in
+    // place. Legacy renderRow has no update protocol, so only that row is
+    // replaced when its projection changes.
     function discardRow(entry) {
       if (entry.tpl && tier3) {
         if (typeof entry.tpl.reset === 'function') entry.tpl.reset()
@@ -700,117 +1076,136 @@
     }
 
     function makeEntry(row) {
-      const built = renderRow(row)
+      const built = createRenderedRow(row)
       let entry = built.tpl && built.el.__aiditorTreeEntry
       if (entry) {
+        entry.id = row.node.id
+        entry.el = built.el
         entry.tpl = built.tpl
+        entry.managed = built.managed
+        entry.kind = built.kind
         entry.row = row
+        entry.query = searchSig.peek()
+        entry._needsInsert = true
       } else {
-        entry = { el: built.el, tpl: built.tpl, row: row }
-        if (built.tpl) built.el.__aiditorTreeEntry = entry
+        entry = {
+          id: row.node.id,
+          el: built.el,
+          tpl: built.tpl,
+          managed: built.managed,
+          kind: built.kind,
+          row: row,
+          query: searchSig.peek(),
+          _needsInsert: true,
+        }
         attachRowEvents(built.el, entry)
       }
+      built.el.__aiditorTreeEntry = entry
       built.el.style.height = rowH + 'px'
+      built.el.setAttribute('data-depth', String(row.depth))
+      built.el.style.paddingLeft = (4 + row.depth * indent) + 'px'
       applyRowState(built.el, row)
       return entry
     }
 
-    function updateTemplateEntry(entry, row) {
+    function updateEntry(entry, row) {
+      const query = searchSig.peek()
+      if (sameRowProjection(entry.row, row) && entry.query === query) {
+        entry.row = row
+        if (entry.managed) entry.managed.row = row
+        return
+      }
+      if (entry.kind === 'renderRow') {
+        const previousEl = entry.el
+        const built = createRenderedRow(row)
+        entry.el = built.el
+        entry.tpl = null
+        entry.managed = null
+        entry.kind = built.kind
+        entry._needsInsert = true
+        attachRowEvents(entry.el, entry)
+        ui.dispose(previousEl)
+      } else if (entry.kind === 'template') {
+        entry.tpl.update(row.node, row, makeCtx(row))
+      } else {
+        updateDefaultRow(entry.managed, _opts, row, makeCtx(row))
+      }
+      entry.id = row.node.id
       entry.row = row
-      entry.tpl.update(row.node, row, makeCtx(row))
+      entry.query = query
       entry.el.setAttribute('data-depth', String(row.depth))
       entry.el.style.paddingLeft = (4 + row.depth * indent) + 'px'
+      entry.el.style.height = rowH + 'px'
+      entry.el.__aiditorTreeEntry = entry
       applyRowState(entry.el, row)
     }
 
-    function paintSimple(flat, start, end) {
-      const want = new Set()
-      for (let i = start; i < end; i++) want.add(i)
-      rowCache.forEach(function (entry, idx) {
-        if (!want.has(idx)) { discardRow(entry); rowCache.delete(idx) }
-      })
-      for (let i = start; i < end; i++) {
-        if (!rowCache.has(i)) {
-          const entry = makeEntry(flat[i])
-          rowCache.set(i, entry)
-          win.appendChild(entry.el)
-        }
-      }
-    }
-
-    function paintTemplates(flat, start, end) {
-      const byId = new Map()
-      rowCache.forEach(function (entry) { byId.set(entry.row.node.id, entry) })
-
-      const next = new Map()
-      const retained = new Set()
+    function reconcileRows(flat, start, end, retainedScrollTop) {
+      const nextCache = new Map()
+      const nextOrder = []
       for (let i = start; i < end; i++) {
         const row = flat[i]
-        let entry = byId.get(row.node.id)
-        if (entry && !retained.has(entry)) {
-          retained.add(entry)
-          if (entry.row !== row) updateTemplateEntry(entry, row)
-        } else {
-          entry = makeEntry(row)
-        }
-        next.set(i, entry)
+        let entry = rowCache.get(row.node.id)
+        if (entry) updateEntry(entry, row)
+        else entry = makeEntry(row)
+        nextCache.set(row.node.id, entry)
+        nextOrder.push(entry)
       }
-
-      rowCache.forEach(function (entry) {
-        if (!retained.has(entry)) discardRow(entry)
+      rowCache.forEach(function (entry, id) {
+        if (!nextCache.has(id)) discardRow(entry)
       })
+      const active = document.activeElement
+      const restoreFocus = !!(active && containsNode(win, active))
+      reorderRows(win, visibleOrder, nextOrder)
       rowCache.clear()
-      next.forEach(function (entry, index) { rowCache.set(index, entry) })
-
-      let cursor = win.firstChild
-      next.forEach(function (entry) {
-        if (entry.el === cursor) cursor = cursor.nextSibling
-        else {
-          win.insertBefore(entry.el, cursor)
-          cursor = entry.el.nextSibling
-        }
-      })
+      nextCache.forEach(function (entry, id) { rowCache.set(id, entry) })
+      visibleOrder = nextOrder
+      el.scrollTop = retainedScrollTop
+      if (restoreFocus && containsNode(win, active) && document.activeElement !== active) {
+        active.focus({ preventScroll: true })
+        el.scrollTop = retainedScrollTop
+      }
     }
 
     function paint() {
+      const retainedScrollTop = el.scrollTop
       const flat = flatSig.peek()
       spacer.style.height = (flat.length * rowH) + 'px'
-      const top = el.scrollTop
       const h = el.clientHeight || 240
-      const start = Math.max(0, Math.floor(top / rowH) - 4)
-      const end   = Math.min(flat.length, Math.ceil((top + h) / rowH) + 4)
+      const start = Math.max(0, Math.floor(retainedScrollTop / rowH) - 4)
+      const end   = Math.min(flat.length, Math.ceil((retainedScrollTop + h) / rowH) + 4)
       win.style.transform = 'translateY(' + (start * rowH) + 'px)'
-      if (tier3) paintTemplates(flat, start, end)
-      else paintSimple(flat, start, end)
+      reconcileRows(flat, start, end, retainedScrollTop)
     }
 
-    function rebuild() {
-      if (tier3) { paint(); return }
-      rowCache.forEach(discardRow)
-      rowCache.clear()
-      paint()
-    }
+    function rebuild() { paint() }
     function refreshStates() {
-      rowCache.forEach(function (entry) { applyRowState(entry.el, entry.row) })
+      rowCache.forEach(function (entry) {
+        applyRowState(entry.el, entry.row)
+      })
     }
 
     el.addEventListener('scroll', paint, { passive: true })
     ui.collect(el, function () {
-      loadCache.forEach(function (state) { if (state.controller) state.controller.abort() })
+      Array.from(activeBatches).forEach(function (batch) { cancelBatch(batch, false) })
       loadCache.clear()
       rowCache.forEach(function (entry) {
         if (entry.tpl && typeof entry.tpl.dispose === 'function') entry.tpl.dispose()
         else ui.dispose(entry.el)
       })
       rowCache.clear()
+      visibleOrder = []
       for (let i = 0; i < tpool.length; i++) {
         if (tpool[i].dispose) tpool[i].dispose()
         else ui.dispose(tpool[i].root)
       }
       tpool.length = 0
     })
-    ui.bind(el, flatSig, rebuild)
-    if (selSig) ui.bind(el, selSig, refreshStates)
+    // The bindings own the explicit Tree dependencies. DOM construction may
+    // create reactive child components, whose private signals must not leak
+    // into either outer Tree effect and synchronously re-enter reconciliation.
+    ui.bind(el, flatSig, function () { aiditor.untracked(rebuild) })
+    if (selSig) ui.bind(el, selSig, function () { aiditor.untracked(refreshStates) })
 
     // ── keyboard navigation ────────────────────────────────────────
     if (keyboardOn) {
@@ -921,9 +1316,8 @@
       collapseAll: function () { writeExpanded(new Set()) },
       getFlat:     function () { return flatSig.peek() },
       getRowEl:    function (id) {
-        let out = null
-        rowCache.forEach(function (e) { if (e.row.node.id === id) out = e.el })
-        return out
+        const entry = rowCache.get(id)
+        return entry ? entry.el : null
       },
       rowHeight: rowH,
       focus:     function () { el.focus() },
@@ -937,12 +1331,16 @@
       // not part of the public contract.
       _rowCache: rowCache,
       _flat:     flatSig,
+      _projection: projectionSig,
     }
 
     // DnD is an optional layer — attach only when the caller opted in.
     if (o.dnd && ui._treeDnd && typeof ui._treeDnd.attach === 'function') {
       ui._treeDnd.attach(el, items, expanded, flatSig, o.dnd, {
-        rowHeight: rowH, writeSelSet: writeSelSet, readSelSet: readSelSet,
+        rowHeight: rowH,
+        writeSelSet: writeSelSet,
+        readSelSet: readSelSet,
+        projection: projectionSig,
       })
     }
 

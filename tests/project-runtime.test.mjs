@@ -47,8 +47,11 @@ for (const file of [
   'src/ai/store.js',
   'src/ai/connection.js',
   'src/ai/schema.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
   'src/ai/workdir.js',
   'src/ai/verify.js',
   'src/ai/reference.js',
@@ -65,14 +68,7 @@ aiditor.ai.setActiveConnection('project-test')
 
 const closedProjectAgent = aiditor.ai.createAgent({
   name: 'Closed Project Agent',
-  toolRefs: [
-    'demo.project.readDescriptor',
-    'demo.project.readSource',
-    'demo.project.inspectPanel',
-    'demo.project.runCheck',
-    'workspace.writeText',
-    'workspace.patchText',
-  ],
+  skillRefs: ['demo.project.authoring'],
 })
 const closedProjectRequest = aiditor.ai.makeRequest(closedProjectAgent, null, 'run_closed_project', 'user', 0)
 assert.equal(closedProjectRequest.tools.some(function (tool) { return tool.indexOf('demo.project.') === 0 }), false)
@@ -142,8 +138,8 @@ const ws = aiditor.workspace.memory({
 
 aiditor.ai.setWorkspace(ws, { id: 'memory:case', label: 'Case Folder', kind: 'memory' })
 const workspaceProjectRequest = aiditor.ai.makeRequest(closedProjectAgent, null, 'run_workspace_project', 'user', 0)
-assert.equal(workspaceProjectRequest.tools.includes('demo.project.openWorkspace'), false)
-assert.equal(workspaceProjectRequest.tools.includes('demo.project.mountPanel'), false)
+assert.equal(workspaceProjectRequest.tools.includes('demo.project.openWorkspace'), true)
+assert.equal(workspaceProjectRequest.tools.includes('demo.project.mountPanel'), true)
 const openedFromWorkspace = await aiditor.ai.tools.get('demo.project.openWorkspace').run({})
 assert.equal(openedFromWorkspace.id, 'case')
 assert.equal(window.Demo.project.current().id, 'case')
@@ -158,17 +154,17 @@ assert.equal(openProjectRequest.tools.includes('demo.project.readDescriptor'), t
 assert.equal(openProjectRequest.tools.includes('demo.project.readSource'), true)
 assert.equal(openProjectRequest.tools.includes('demo.project.inspectPanel'), true)
 assert.equal(openProjectRequest.tools.includes('demo.project.runCheck'), true)
-assert.equal(openProjectRequest.tools.includes('demo.project.searchFiles'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.readFile'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.readFileRange'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.writeFile'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.createFile'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.patchFile'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.updateDescriptor'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.reload'), false)
-assert.equal(openProjectRequest.tools.includes('demo.project.mountPanel'), false)
-assert.equal(openProjectRequest.tools.includes('workspace.writeText'), true)
-assert.equal(openProjectRequest.tools.includes('workspace.patchText'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.searchFiles'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.readFile'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.readFileRange'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.writeFile'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.createFile'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.patchFile'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.updateDescriptor'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.reload'), true)
+assert.equal(openProjectRequest.tools.includes('demo.project.mountPanel'), true)
+assert.equal(openProjectRequest.tools.includes('workspace.writeText'), false)
+assert.equal(openProjectRequest.tools.includes('workspace.patchText'), false)
 assert.equal(aiditor.componentRegistration('case.panel').owner.startsWith('project:case'), true)
 assert.equal(aiditor.ai.toolMeta('case.ping').owner.startsWith('project:case'), true)
 assert.deepEqual(aiditor.ai.references.read({ uri: 'case.ref://x', resolver: 'case.ref' }), { ok: true })

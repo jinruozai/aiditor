@@ -476,6 +476,8 @@
     if (!aiditor.commands || aiditor.commands.get && aiditor.commands.get('ai.compactCurrentAgent')) return
     aiditor.commands.register('ai.compactCurrentAgent', {
       title: 'Compact Current Agent Context',
+      description: 'Compact closed conversation history while preserving the full transcript.',
+      icon: 'history',
       run: function (input, ctx) {
         const agent = commandAgent(input, ctx)
         if (!agent) return { compacted: false, reason: 'No active agent' }
@@ -500,6 +502,15 @@
         const agent = commandAgent(input, ctx)
         return agent ? records(agent.id) : []
       },
+    }, { owner: 'aiditor.ai', layer: 'builtin' })
+    aiditor.commands.registerMenu('ai.compactCurrentAgent.composer', {
+      target: 'ai.composer.slash',
+      command: 'ai.compactCurrentAgent',
+      name: 'compact',
+      label: 'Compact context',
+      description: 'Compact closed conversation history without deleting the transcript.',
+      icon: 'history',
+      order: 100,
     }, { owner: 'aiditor.ai', layer: 'builtin' })
   }
 

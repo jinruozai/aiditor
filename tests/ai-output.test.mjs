@@ -20,8 +20,11 @@ for (const file of [
   'src/ai/adapter.js',
   'src/ai/provider.js',
   'src/ai/provider-transports.js',
-  'src/ai/registries.js',
-  'src/ai/context.js',
+  'src/ai/contribution-registry.js',
+  'src/ai/tool/registry.js',
+  'src/ai/context/registry.js',
+  'src/ai/skill/registry.js',
+  'src/ai/tool/runtime.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
 ]) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
@@ -75,12 +78,13 @@ assert.equal(current.status, 'failed')
 
 ai.tools.register('structured.read', {
   run: function () { return { value: 2 } },
-})
+}, { owner: 'test:output' })
+ai.skills.register('test.structured-output', { title: 'Structured Output', tools: ['structured.read'] }, { owner: 'test:output' })
 const toolAgent = ai.createAgent({
   name: 'Structured Tool Flow',
   connection: 'structured-test',
   outputSchema: outputSchema,
-  toolRefs: ['structured.read'],
+  skillRefs: ['test.structured-output'],
 })
 replies.push({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1', toolId: 'structured.read', args: {} }], finishReason: 'tool_calls' })
 replies.push({ role: 'assistant', content: '{"name":"after tool","count":2}' })

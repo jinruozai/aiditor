@@ -35,7 +35,6 @@
       meta: clone(target.meta || {}),
       schema: clone(target.schema || null),
       capabilities: clone(target.capabilities || []),
-      tools: clone(target.tools || []),
     }
   }
 
@@ -303,7 +302,7 @@
           truncated: !!(ref.meta && ref.meta.truncated),
         }
       },
-    })
+    }, { owner: 'aiditor.ai.target', layer: 'builtin' })
   }
 
   function addCleanup(el, fn) {

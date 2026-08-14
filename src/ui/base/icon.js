@@ -73,7 +73,6 @@
         el.textContent = ''
       }
     }
-    paint()
     return el
   }
 })(window.aiditor = window.aiditor || {})

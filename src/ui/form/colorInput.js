@@ -2,7 +2,9 @@
 //
 // opts:
 //   value:     string|int|array|signal   "#rrggbb", "#aarrggbb", 24-bit int, vec3, or vec4
-//   onChange?: (v) => void
+//   onChange?: (v, meta) => void
+//   onCommit?: (v, meta) => void
+//   onCancel?: (initial, meta) => void
 //   valueKind?: 'hex' | 'int' | 'vec3' | 'vec4'      (default 'hex')
 //   valueScale?: 1 | 255           vec component scale; default 1
 //   disabled?: bool|signal
@@ -24,11 +26,66 @@
     const disabled = ui.asSig(o.disabled != null ? o.disabled : false)
     const rawWrite = ui.writer(sig, o.onChange, 'ui.colorInput')
     let lastExternal = sig.peek()
+    let currentValue = lastExternal
+    let edit = null
     let pop = null
 
-    function writeArgb(argb, preferAlpha) {
+    function editValue(value) {
+      return Array.isArray(value) ? value.slice() : value
+    }
+
+    function editMeta(phase, value) {
+      return {
+        edit: {
+          phase: phase,
+          source: edit.source,
+          initialValue: editValue(edit.initialValue),
+          value: editValue(value),
+        },
+      }
+    }
+
+    function beginEdit(source) {
+      if (edit) return
+      edit = { source: source, initialValue: editValue(currentValue), updated: false }
+    }
+
+    function updateArgb(argb, preferAlpha, source) {
+      beginEdit(source)
       const next = formatForValue(argb, lastExternal, valueKind, preferAlpha, valueScale)
-      rawWrite(next)
+      currentValue = next
+      edit.updated = true
+      rawWrite(next, editMeta('update', next))
+    }
+
+    function commitEdit() {
+      if (!edit) return
+      const session = edit
+      const value = editValue(currentValue)
+      const meta = editMeta('commit', value)
+      edit = null
+      if (session.updated && typeof o.onCommit === 'function') {
+        aiditor.untracked(function () { o.onCommit(value, meta) })
+      }
+    }
+
+    function cancelEdit() {
+      if (!edit) return
+      const session = edit
+      const initial = editValue(session.initialValue)
+      const meta = editMeta('cancel', initial)
+      edit = null
+      currentValue = initial
+      if (session.updated) rawWrite(initial, meta)
+      if (typeof o.onCancel === 'function') {
+        aiditor.untracked(function () { o.onCancel(initial, meta) })
+      }
+    }
+
+    function applyDiscrete(argb, preferAlpha, source) {
+      beginEdit(source)
+      updateArgb(argb, preferAlpha, source)
+      commitEdit()
     }
 
     const el = ui.h('div', 'aiditor-ui-color')
@@ -39,8 +96,10 @@
       disabled: disabled,
       onChange: function (raw) {
         const parsed = parseColor(raw)
-        if (parsed) writeArgb(parsed, hasAlpha(raw) || alphaOf(parsed) < 255)
+        if (parsed) updateArgb(parsed, hasAlpha(raw) || alphaOf(parsed) < 255, 'text')
       },
+      onCommit: commitEdit,
+      onCancel: cancelEdit,
     })
     text.classList.add('aiditor-ui-color-text')
     swatch.appendChild(swatchFill)
@@ -51,6 +110,7 @@
     ui.bind(el, disabled, function (v) { el.classList.toggle('aiditor-ui-color-disabled', !!v) })
     ui.bind(el, sig, function (v) {
       lastExternal = v
+      currentValue = v
       const argb = normalizeColor(v, valueKind, valueScale)
       swatchFill.style.background = argbToRgba(argb)
       const shown = formatForDisplay(argb, v, valueKind, alphaOf(argb) < 255 || hasAlpha(v), valueScale)
@@ -62,13 +122,22 @@
     swatch.addEventListener('click', function () {
       if (disabled.peek()) return
       if (pop) { pop.close(); pop = null; return }
-      pop = openPicker(el, normalizeColor(sig.peek(), valueKind, valueScale), writeArgb, function () { pop = null })
+      pop = openPicker(el, normalizeColor(sig.peek(), valueKind, valueScale), {
+        begin: beginEdit,
+        update: updateArgb,
+        commit: commitEdit,
+        cancel: cancelEdit,
+        apply: applyDiscrete,
+      }, function () { pop = null })
     })
-    ui.collect(el, function () { if (pop) { pop.close(); pop = null } })
+    ui.collect(el, function () {
+      cancelEdit()
+      if (pop) { pop.close(); pop = null }
+    })
     return el
   }
 
-  function openPicker(anchor, initialArgb, doWrite, onClose) {
+  function openPicker(anchor, initialArgb, edit, onClose) {
     const state = {
       argb: normalizeColor(initialArgb, 'hex'),
       mode: aiditor.signal('hex'),
@@ -108,10 +177,10 @@
     wrap.appendChild(values)
     wrap.appendChild(favorites)
 
-    function setArgb(argb, preferAlpha) {
+    function setArgb(argb, preferAlpha, source) {
       state.argb = normalizeColor(argb, 'hex')
       render()
-      doWrite(state.argb, preferAlpha)
+      edit.update(state.argb, preferAlpha, source)
     }
 
     function sync(argb) {
@@ -147,8 +216,10 @@
           value: state.argb,
           onChange: function (v) {
             const parsed = parseColor(v)
-            if (parsed) setArgb(parsed, hasAlpha(v))
+            if (parsed) setArgb(parsed, hasAlpha(v), 'picker.hex')
           },
+          onCommit: edit.commit,
+          onCancel: edit.cancel,
         })
         hex.classList.add('aiditor-ui-color-hex-field')
         state.valueFills.push(preview.querySelector('.aiditor-ui-color-preview-fill'))
@@ -160,7 +231,7 @@
             icon: 'pipette',
             title: 'Pick color from screen',
             size: 'sm',
-            onClick: function () { pickFromScreen(setArgb) },
+            onClick: function () { pickFromScreen(edit.apply) },
           }))
         }
         valueRow.appendChild(ui.iconButton({
@@ -190,17 +261,18 @@
           ]
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i]
+        const source = 'picker.' + currentMode + '.' + ch[0]
         valueRow.appendChild(channelInput(ch[0], ch[1], ch[2], ch[3], ch[4], function (next) {
           if (currentMode === 'rgb') {
             const nextRgb = argbToRgb(state.argb)
             nextRgb[ch[0]] = next
-            setArgb(rgbToArgb(nextRgb.r, nextRgb.g, nextRgb.b, nextRgb.a), true)
+            setArgb(rgbToArgb(nextRgb.r, nextRgb.g, nextRgb.b, nextRgb.a), true, source)
           } else {
             const nextHsl = argbToHsl(state.argb)
             nextHsl[ch[0]] = next
-            setArgb(hslToArgb(nextHsl.h, nextHsl.s, nextHsl.l, nextHsl.a), true)
+            setArgb(hslToArgb(nextHsl.h, nextHsl.s, nextHsl.l, nextHsl.a), true, source)
           }
-        }, state, currentMode))
+        }, state, currentMode, edit, source))
       }
       updateValueControls()
     }
@@ -241,7 +313,7 @@
         })
         btn.appendChild(colorPreview(fav, 'aiditor-ui-color-favorite-fill'))
         btn.classList.toggle('aiditor-ui-color-favorite-active', fav.toUpperCase() === state.argb.toUpperCase())
-        btn.addEventListener('click', function () { setArgb(fav, alphaOf(fav) < 255) })
+        btn.addEventListener('click', function () { edit.apply(fav, alphaOf(fav) < 255, 'picker.favorite') })
         btn.addEventListener('contextmenu', function (e) {
           e.preventDefault()
           removeFavorite(state, fav)
@@ -254,8 +326,13 @@
 
     ui.bind(wrap, state.mode, renderValueRow)
     ui.collect(wrap, ui.attachDrag(sv, {
-      onStart: scrubSv,
+      onStart: function (event) {
+        edit.begin('picker.sv')
+        scrubSv(event)
+      },
       onMove: scrubSv,
+      onEnd: edit.commit,
+      onCancel: edit.cancel,
     }))
     function scrubSv(e) {
       const r = sv.getBoundingClientRect()
@@ -265,15 +342,17 @@
       const s = Math.round(x * 100)
       const brightness = 1 - y
       const l = Math.round(brightness * (50 + (100 - s) / 2))
-      setArgb(hslToArgb(hsl.h, s, l, hsl.a), alphaOf(state.argb) < 255)
+      setArgb(hslToArgb(hsl.h, s, l, hsl.a), alphaOf(state.argb) < 255, 'picker.sv')
     }
+    bindRangeEdit(hueInput, 'picker.hue', edit)
     hueInput.addEventListener('input', function () {
       const hsl = argbToHsl(state.argb)
-      setArgb(hslToArgb(Number(hueInput.value), hsl.s, hsl.l, hsl.a), alphaOf(state.argb) < 255)
+      setArgb(hslToArgb(Number(hueInput.value), hsl.s, hsl.l, hsl.a), alphaOf(state.argb) < 255, 'picker.hue')
     })
+    bindRangeEdit(alphaInput, 'picker.alpha', edit)
     alphaInput.addEventListener('input', function () {
       const hsl = argbToHsl(state.argb)
-      setArgb(hslToArgb(hsl.h, hsl.s, hsl.l, Number(alphaInput.value)), true)
+      setArgb(hslToArgb(hsl.h, hsl.s, hsl.l, Number(alphaInput.value)), true, 'picker.alpha')
     })
     render()
 
@@ -282,10 +361,28 @@
       content: wrap,
       side: 'bottom',
       align: 'start',
-      onDismiss: onClose,
+      onDismiss: function (cause) {
+        if (cause === 'escape' || cause === 'dispose') edit.cancel()
+        else edit.commit()
+        onClose(cause)
+      },
     })
     pop.sync = sync
     return pop
+  }
+
+  function bindRangeEdit(input, source, edit) {
+    input.addEventListener('pointerdown', function (event) {
+      if (event.button === 0) edit.begin(source)
+    })
+    input.addEventListener('change', edit.commit)
+    input.addEventListener('pointercancel', edit.cancel)
+    input.addEventListener('blur', edit.commit)
+    input.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      edit.cancel()
+    })
   }
 
   function colorPreview(argb, cls) {
@@ -296,7 +393,7 @@
     return el
   }
 
-  function channelInput(label, value, min, max, step, onChange, state, mode) {
+  function channelInput(label, value, min, max, step, onChange, state, mode, edit, source) {
     const sig = aiditor.signal(value)
     const wrap = ui.h('div', 'aiditor-ui-color-channel')
     const input = ui.numberInput({
@@ -310,17 +407,30 @@
       precision: step < 1 ? 2 : 0,
       label: label,
     })
+    const field = input.querySelector('input')
+    input.addEventListener('pointerdown', function (event) {
+      if (event.button === 0) edit.begin(source)
+    })
+    input.addEventListener('pointerup', edit.commit)
+    input.addEventListener('pointercancel', edit.cancel)
+    input.addEventListener('click', edit.commit)
+    field.addEventListener('focus', function () { edit.begin(source) })
+    field.addEventListener('blur', edit.commit)
+    field.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return
+      edit.cancel()
+    }, true)
     wrap.appendChild(input)
-    state.valueInputs.push({ kind: mode, channel: label, step: step, sig: sig, el: input.querySelector('input') })
+    state.valueInputs.push({ kind: mode, channel: label, step: step, sig: sig, el: field })
     return wrap
   }
 
-  async function pickFromScreen(setArgb) {
+  async function pickFromScreen(apply) {
     try {
       const eyeDropper = new window.EyeDropper()
       const result = await eyeDropper.open()
       if (!result || !result.sRGBHex) return
-      setArgb(normalizeColor(result.sRGBHex, 'hex'), false)
+      apply(normalizeColor(result.sRGBHex, 'hex'), false, 'picker.eyedropper')
     } catch (_) {}
   }
 

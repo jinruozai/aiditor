@@ -131,6 +131,9 @@
       const spec = {
         title: item.title || item.label || item.id,
         description: item.description || '',
+        argumentHint: item.argumentHint || '',
+        userInvocable: item.userInvocable !== false,
+        modelInvocable: item.modelInvocable !== false,
         whenToUse: item.whenToUse || '',
         whenNotToUse: item.whenNotToUse || '',
         systemPrompt: item.systemPrompt || '',
@@ -227,6 +230,8 @@
       const spec = {
         title: c.title || c.label || c.id,
         label: c.label || c.title || c.id,
+        description: c.description || '',
+        argumentHint: c.argumentHint || '',
         icon: c.icon || '',
         kbd: c.kbd || '',
         danger: !!c.danger,

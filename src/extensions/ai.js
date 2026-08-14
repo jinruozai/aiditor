@@ -148,13 +148,60 @@
           manifest: { type: 'object' },
         },
       },
-      exposeToModel: false,
       preview: function (input, ctx) { return ext.review(input, actorOptions(ctx)) },
       apply: function (preview, ctx) {
         if (preview && preview.ok === false) return { applied: false, ok: false, errors: preview.errors || [], preview: preview }
         if (preview && preview.canApply === false) return { applied: false, ok: false, error: 'Extension install is not approved', preview: preview }
         return Object.assign({ applied: true }, ext.install(preview.manifest, actorOptions(ctx)))
       },
+    }, META)
+    ai.tools.register('aiditor.inspectExtensions', {
+      title: 'Inspect Extensions',
+      description: 'List installed Extensions with their lifecycle state, layer, owner, and contribution summary.',
+      schema: { type: 'object', properties: {} },
+      run: function () { return ext.list() },
+    }, META)
+    ai.tools.register('aiditor.updateExtension', {
+      title: 'Update Extension',
+      description: 'Review and update an installed Extension from a complete replacement manifest.',
+      schema: { type: 'object', required: ['manifest'], properties: { manifest: { type: 'object' } } },
+      preview: function (input, ctx) { return ext.review(input, actorOptions(ctx)) },
+      apply: function (preview, ctx) {
+        const manifest = preview.manifest || preview.input && preview.input.manifest
+        return Object.assign({ applied: true }, ext.update(manifest.id, manifest, actorOptions(ctx)))
+      },
+    }, META)
+    ai.tools.register('aiditor.enableExtension', {
+      title: 'Enable Extension',
+      description: 'Enable one installed Extension by id.',
+      schema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+      preview: function (input) { return extensionPreview(input, 'enable', 'Enable extension') },
+      apply: function (preview, ctx) { return Object.assign({ applied: true }, ext.enable(preview.input.id, actorOptions(ctx))) },
+    }, META)
+    ai.tools.register('aiditor.disableExtension', {
+      title: 'Disable Extension',
+      description: 'Disable one installed Extension by id and unload all contributions owned by it.',
+      schema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+      preview: function (input) { return extensionPreview(input, 'disable', 'Disable extension') },
+      apply: function (preview, ctx) { return Object.assign({ applied: true }, ext.disable(preview.input.id, actorOptions(ctx))) },
+    }, META)
+    ai.tools.register('aiditor.removeExtension', {
+      title: 'Remove Extension',
+      description: 'Remove one installed Extension and its owner-scoped contributions.',
+      schema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+      preview: function (input) { return extensionPreview(input, 'remove', 'Remove extension') },
+      apply: function (preview, ctx) { return Object.assign({ applied: true }, ext.uninstall(preview.input.id, Object.assign({ force: true }, actorOptions(ctx)))) },
+    }, META)
+    ai.tools.register('aiditor.promoteExtensionLayer', {
+      title: 'Set Extension Layer',
+      description: 'Move one installed Extension to an explicit runtime layer.',
+      schema: {
+        type: 'object',
+        required: ['id', 'layer'],
+        properties: { id: { type: 'string' }, layer: { type: 'string' } },
+      },
+      preview: function (input) { return extensionPreview(input, 'setLayer', 'Set extension layer') },
+      apply: function (preview, ctx) { return Object.assign({ applied: true }, ext.setLayer(preview.input.id, preview.input.layer, actorOptions(ctx))) },
     }, META)
     /**
      * @aiditorApi aiditor.addPanelToDock

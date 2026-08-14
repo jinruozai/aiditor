@@ -168,8 +168,11 @@ aiditor/
       store.js                     # agents/messages/quests/attachments 完整内存状态
       persistence.js               # IndexedDB 完整转录持久化 + localStorage 启动清单
       schema.js                    # tool/output 共用 JSON schema normalize/validate
-      registries.js                # tools/skills/context/templates/bundles registry
-      context.js                   # tool-call lifecycle + run context helpers
+      contribution-registry.js     # AI contribution exact-owner lifecycle primitive
+      tool/registry.js             # Tool schema/capability/availability registry
+      tool/runtime.js              # tool-call lifecycle + run context helpers
+      context/registry.js          # factual request Context providers
+      skill/                       # Skill registry/runtime/builtins/packages/reference
       request.js / runtime.js      # request assembly + scheduler/run/resume/tool approval
       checkpoints.js / evals.js    # 可选恢复检查点 + 基于 trace 的轻量确定性评估
       reference.js / change-set.js # references/operations + grouped review/apply
@@ -247,11 +250,11 @@ aiditor/
 
 **AI Host(可选层)**:
 - `src/ai/permission.js` 是统一 permission resolver / audit / path rule owner。Tools、operations、ChangeSet apply、workspace writes、extension install、host adapter 调用都走同一套 actor/target/scope 判断。
-- `src/ai/registries.js` 统一管理 tools、skills、context providers、agent templates、bundles。Dotted name 是公开命名和筛选形状;extension 生命周期用 owner 精确清理。
-- `src/ai/context.js` 只负责 tool-call lifecycle 和 run context helper,不再承担 registry。
-- `src/ai/persistence.js` 将完整 JSON-safe 聊天转录异步保存到 IndexedDB;`localStorage` 只保存轻量 Agent 启动清单。模型上下文压缩只影响 provider request projection,不得删除 UI transcript。
-- `src/ai/request.js` 负责请求组装:先解析 active skills/context,再只暴露 `agent.toolRefs + skill.tools + runtimeContext.tools` 的有效工具集;空引用不回退全量工具。Runtime kernel 保持最小,workspace/task/skill catalog 按需注入。
-- Skill registry 使用统一 `SkillSpec` 和精确 owner/source/hash 生命周期;`skillRefs`、runtime intent、`auto(ctx)` 在每次请求只解析一次并写入 `skill_activated` trace。`src/ai/skill-packages.js` 可从 bounded workspace 加载标准 `SKILL.md` 并按需读取 `references/`,但绝不执行 package scripts 或绕过 Tool/permission registry。
+- AI contributions 分为 `tool/registry.js`、`context/registry.js`、`skill/registry.js`;`contribution-registry.js` 只提供必须 owner 的精确生命周期。Dotted name 只负责命名/发现,不能用于卸载。
+- `src/ai/tool/runtime.js` 只负责 tool-call lifecycle 和 run context helper。
+- `src/ai/persistence.js` 将完整 JSON-safe 聊天转录异步保存到 IndexedDB;`localStorage` 只保存轻量 Agent 启动清单。持久化边界负责 v2 → v3 快照迁移并立即回写;损坏的单条 transcript 用当前有效启动状态覆盖恢复,不得清空整个数据库或永久阻塞启动。模型上下文压缩只影响 provider request projection,不得删除 UI transcript。
+- `src/ai/request.js` 负责 Skill-first 请求组装:Context 只提供事实;Tool 面严格等于 `skill.list/skill.activate + activeSkill.tools`,再经过 availability/permission,不接受 Agent 直配 Tool、Context/Reference 注入 Tool,也不回退全量 Tool。
+- Skill registry 使用统一 `SkillSpec` 和精确 owner/source/hash 生命周期;显式 Skill、`agent.skillRefs`、run-scoped `skill.activate` 写入 `skill_activated` trace。框架不做关键词/`auto(ctx)` 猜测。`src/ai/skill/packages.js` 可从 bounded workspace 加载标准 `SKILL.md` 并按需读取 `references/`,但绝不执行 package scripts 或绕过 Tool/permission registry。
 - Agent 可声明 provider-neutral `outputSchema`;最终无工具调用的回复统一解析/校验到 `message.output`。Connection 层提供 bounded retry 与 health signal;流开始后不重放。可选 `ai.checkpoints` 只恢复安全排队状态,`ai.evals` 复用现有 trace 做确定性评估,都不引入项目 workflow 语义。
 - Tool envelope (`toolProtocol`) 与参数可靠性 (`toolArguments: strict|structured|json|none`) 是正交能力。严格连接按请求期 Tool Schema 约束生成;Adapter 只做一次 wire decode;Runtime 先完整解码并保留整批结构化参数,再按原始 Schema 校验,最后才允许执行。完整 strict 批次可先做一次隐藏约束恢复;其他无副作用的参数错误以结构化 Tool Result 进入同一 run 的有限纠正状态机。重复指纹包含 Tool、规范化参数哈希和具体错误;trace/log 只保存有界摘要与哈希。联合 Schema 只有在所有分支共同声明唯一 `const`/单值 `enum` 判别字段时才展开具体分支错误;候选由 Schema 决定且与输入字段顺序无关,缺失分支属性只会使候选失效,不得抛异常或猜测业务形状。
 - `src/ai/runtime.js` 负责 scheduler/run/resume/tool approval/continuation。Quest 使用统一 `{maxTurns,timeoutMs,maxTokens}` budget,达到边界后以稳定 `stopReason` 停止并通知父 Agent;模型委托另受 `maxDelegationDepth` 限制。
@@ -889,7 +892,7 @@ demo/              Host/demo app code, not framework design
 - `src/` 继续保持 IIFE + `window.aiditor` 单命名空间;不写 `import/export`。
 - 新 framework 能力必须进正确层:Core/UI、AI Host、Extension Runtime、Demo Runtime 不能互相偷概念。
 - Extension contribution 发布 dotted public name,但生命周期 owner 是 `extension:<id>`;卸载/禁用用 owner 精确清理。
-- AI Host 的 model-facing 主概念保持 Agent / Tool / Context Reference / Operation / ChangeSet;targets、attachments、rich prompt、quests、bundles、templates 是 runtime/UX 细节。
+- AI Host 的 model-facing 主概念保持 Agent / Skill / Tool / Context Reference / Operation / ChangeSet;Skill 是能力选择面,Tool 是内部执行协议;targets、attachments、rich prompt、quests 是 runtime/UX 细节。
 - 所有组件和 toolbar item 引用 component 都只能用已注册 string name。
 - CSS 可调常数优先放在 `src/style/theme.css` 的 `--aiditor-*` token;JS 只有需要数值计算时用 `aiditor.ui.readNum(...)`。
 
@@ -927,7 +930,7 @@ git diff --check
 - `src/extensions/manifest.js` / `install.js` / `runtime.js` 分别负责 manifest helper、registry install、lifecycle/recovery/dock panel placement。
 - `src/extensions/ai.js` 负责 Extension Runtime 与 AI Host 的 operations/tools bridge。
 - `src/ai/permission.js` 负责统一 permission resolver/audit/path rules。
-- `src/ai/registries.js` 负责 tools/skills/context/templates/bundles registry。
+- `src/ai/contribution-registry.js` + `src/ai/{tool,context,skill}/` 负责 AI contribution、精确 Owner 生命周期和 Skill-first 能力面;不再存在 agentTemplates/bundles 平行概念。
 - rich prompt 使用 `refId`;chat attachments 不是新的 model-facing registry。
 - Extension 卸载按 owner 精确清理,并有 nested extension 回归测试覆盖主要 registry。
 - 发布边界的最终目标是 core/full 双 bundle 和干净 npm runtime 包;当前代码优化计划应优先落这里。
@@ -983,7 +986,10 @@ git diff --check
 
 ```text
 src/ai/permission.js
-src/ai/registries.js
+src/ai/contribution-registry.js
+src/ai/tool/registry.js
+src/ai/context/registry.js
+src/ai/skill/registry.js
 src/extensions/runtime.js
 src/extensions/ai.js
 ```

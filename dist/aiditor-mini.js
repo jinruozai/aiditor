@@ -616,7 +616,11 @@
         target: item.target,
         command: item.command || null,
         childrenTarget: item.childrenTarget || null,
+        name: valueOf(item.name, ctx, item, cmd) || item.command || id,
         label: valueOf(item.label, ctx, item, cmd) || valueOf(item.title, ctx, item, cmd) || (cmd && (cmd.title || cmd.label)) || id,
+        description: valueOf(item.description, ctx, item, cmd) || cmd && cmd.description || '',
+        detail: valueOf(item.detail, ctx, item, cmd) || '',
+        argumentHint: valueOf(item.argumentHint, ctx, item, cmd) || cmd && cmd.argumentHint || '',
         icon: valueOf(item.icon, ctx, item, cmd) || cmd && cmd.icon || '',
         kbd: explicitKbd || shortcutKbd,
         danger: !!(valueOf(item.danger, ctx, item, cmd) || cmd && cmd.danger),
@@ -817,9 +821,24 @@
   //   handlers.onStart(e, ctx)
   //   handlers.onMove (e, ctx)
   //   handlers.onEnd  (e, ctx)
+  //   handlers.onCancel(e, ctx)
   //   ctx = { startX, startY, dx, dy, target }
   ui.attachDrag = function (el, handlers) {
+    let active = null
+
+    function clearActive() {
+      if (!active) return null
+      const current = active
+      active = null
+      el.removeEventListener('pointermove', current.onMove)
+      el.removeEventListener('pointerup', current.onUp)
+      el.removeEventListener('pointercancel', current.onCancel)
+      try { el.releasePointerCapture(current.pointerId) } catch (_) {}
+      return current
+    }
+
     function onDown(e) {
+      if (active) return
       if (e.button !== 0) return
       e.preventDefault()
       const ctx = { startX: e.clientX, startY: e.clientY, dx: 0, dy: 0, target: el }
@@ -831,18 +850,27 @@
         handlers.onMove && handlers.onMove(ev, ctx)
       }
       function onUp(ev) {
+        if (!active) return
+        clearActive()
         handlers.onEnd && handlers.onEnd(ev, ctx)
-        el.removeEventListener('pointermove', onMove)
-        el.removeEventListener('pointerup', onUp)
-        el.removeEventListener('pointercancel', onUp)
-        try { el.releasePointerCapture(e.pointerId) } catch (_) {}
       }
+      function onCancel(ev) {
+        if (!active) return
+        clearActive()
+        if (handlers.onCancel) handlers.onCancel(ev, ctx)
+        else if (handlers.onEnd) handlers.onEnd(ev, ctx)
+      }
+      active = { onMove: onMove, onUp: onUp, onCancel: onCancel, pointerId: e.pointerId, ctx: ctx }
       el.addEventListener('pointermove', onMove)
       el.addEventListener('pointerup', onUp)
-      el.addEventListener('pointercancel', onUp)
+      el.addEventListener('pointercancel', onCancel)
     }
     el.addEventListener('pointerdown', onDown)
-    return function () { el.removeEventListener('pointerdown', onDown) }
+    return function () {
+      const current = clearActive()
+      if (current && handlers.onCancel) handlers.onCancel(null, current.ctx)
+      el.removeEventListener('pointerdown', onDown)
+    }
   }
 })(window.aiditor = window.aiditor || {})
 
@@ -902,7 +930,7 @@
       ? onChange
       : (typeof sig === 'function' && typeof sig.set === 'function' ? sig.set : null)
     if (!write) throw new Error((name || 'ui') + ': `value` must be a writable signal or `onChange` is required')
-    return function (v) { aiditor.untracked(function () { write(v) }) }
+    return function (v, meta) { aiditor.untracked(function () { write(v, meta) }) }
   }
   ui.writer = writer
 
@@ -1273,10 +1301,10 @@
 //                          // modal/drawer backdrops).
 //     focusTrap?,          // default: true if modal, false otherwise.
 //     role?, ariaLabel?, ariaLabelledBy?, ariaModal?,
-//     onDismiss,           // fired when the overlay is closed by this
-//                          // controller (outside click, ESC, or
-//                          // handle.close()). Components use it to run
-//                          // their own cleanup + animations.
+//     onDismiss,           // fired with the close cause when the overlay is
+//                          // closed by this controller (outside click, ESC,
+//                          // handle.close(), or ui.dispose(el)). Components
+//                          // use it to run their own cleanup + animations.
 //   })
 //
 //   handle.close()         Close and pop off the stack. Idempotent.
@@ -1296,11 +1324,23 @@
   // the stack
   // Each frame: { el, opts, prevFocus, onAnyDown, onKey, zBase }
   const stack = []
+  const modalDepthState = aiditor.signal(0)
+  const modalDepth = function () { return modalDepthState() }
+  modalDepth.peek = function () { return modalDepthState.peek() }
+  ui.modalDepth = modalDepth
+
   let globalBound = false
   let lastPointerDownAt = 0
 
   function topFrame() { return stack.length ? stack[stack.length - 1] : null }
   function hasModalFrame() { return stack.some(function (f) { return f.opts.modal }) }
+  function publishModalDepth() {
+    let depth = 0
+    for (let i = 0; i < stack.length; i++) {
+      if (stack[i].opts.modal) depth++
+    }
+    modalDepthState.set(depth)
+  }
 
   function onGlobalKey(e) {
     if (e.key !== 'Escape') return
@@ -1398,7 +1438,10 @@
     // Pop it (and any above it, though overlays dismissed via ESC/outside
     // should always be topmost by construction).
     const idx = stack.indexOf(frame)
-    if (idx >= 0) stack.splice(idx, 1)
+    if (idx >= 0) {
+      stack.splice(idx, 1)
+      publishModalDepth()
+    }
     if (frame.uninstallTrap) frame.uninstallTrap()
     // Restore focus for modal-class overlays.
     if (frame.opts.focusTrap && frame.prevFocus && typeof frame.prevFocus.focus === 'function') {
@@ -1448,7 +1491,12 @@
       frame.armed = false
       setTimeout(function () { frame.armed = true }, 0)
 
+      // An overlay frame cannot outlive its component root. This keeps the
+      // stack authoritative when a host disposes the root directly instead
+      // of going through the imperative close handle.
+      ui.collect(el, function () { dismiss(frame, 'dispose') })
       stack.push(frame)
+      publishModalDepth()
       bindGlobals()
 
       if (frame.opts.focusTrap) installFocusTrap(frame)
@@ -1655,7 +1703,6 @@
         el.textContent = ''
       }
     }
-    paint()
     return el
   }
 })(window.aiditor = window.aiditor || {})
@@ -2334,11 +2381,11 @@
 
     let overlay = null
     let unregister = null
-    function cleanup() {
+    function cleanup(cause) {
       if (unregister) { unregister(); unregister = null }
-      ui.dispose(el)
+      if (cause !== 'dispose') ui.dispose(el)
       unmount()
-      o.onDismiss && o.onDismiss()
+      o.onDismiss && o.onDismiss(cause)
     }
 
     overlay = ui._overlay.open(el, {
@@ -3394,7 +3441,9 @@
 //
 // opts:
 //   value:     string|int|array|signal   "#rrggbb", "#aarrggbb", 24-bit int, vec3, or vec4
-//   onChange?: (v) => void
+//   onChange?: (v, meta) => void
+//   onCommit?: (v, meta) => void
+//   onCancel?: (initial, meta) => void
 //   valueKind?: 'hex' | 'int' | 'vec3' | 'vec4'      (default 'hex')
 //   valueScale?: 1 | 255           vec component scale; default 1
 //   disabled?: bool|signal
@@ -3416,11 +3465,66 @@
     const disabled = ui.asSig(o.disabled != null ? o.disabled : false)
     const rawWrite = ui.writer(sig, o.onChange, 'ui.colorInput')
     let lastExternal = sig.peek()
+    let currentValue = lastExternal
+    let edit = null
     let pop = null
 
-    function writeArgb(argb, preferAlpha) {
+    function editValue(value) {
+      return Array.isArray(value) ? value.slice() : value
+    }
+
+    function editMeta(phase, value) {
+      return {
+        edit: {
+          phase: phase,
+          source: edit.source,
+          initialValue: editValue(edit.initialValue),
+          value: editValue(value),
+        },
+      }
+    }
+
+    function beginEdit(source) {
+      if (edit) return
+      edit = { source: source, initialValue: editValue(currentValue), updated: false }
+    }
+
+    function updateArgb(argb, preferAlpha, source) {
+      beginEdit(source)
       const next = formatForValue(argb, lastExternal, valueKind, preferAlpha, valueScale)
-      rawWrite(next)
+      currentValue = next
+      edit.updated = true
+      rawWrite(next, editMeta('update', next))
+    }
+
+    function commitEdit() {
+      if (!edit) return
+      const session = edit
+      const value = editValue(currentValue)
+      const meta = editMeta('commit', value)
+      edit = null
+      if (session.updated && typeof o.onCommit === 'function') {
+        aiditor.untracked(function () { o.onCommit(value, meta) })
+      }
+    }
+
+    function cancelEdit() {
+      if (!edit) return
+      const session = edit
+      const initial = editValue(session.initialValue)
+      const meta = editMeta('cancel', initial)
+      edit = null
+      currentValue = initial
+      if (session.updated) rawWrite(initial, meta)
+      if (typeof o.onCancel === 'function') {
+        aiditor.untracked(function () { o.onCancel(initial, meta) })
+      }
+    }
+
+    function applyDiscrete(argb, preferAlpha, source) {
+      beginEdit(source)
+      updateArgb(argb, preferAlpha, source)
+      commitEdit()
     }
 
     const el = ui.h('div', 'aiditor-ui-color')
@@ -3431,8 +3535,10 @@
       disabled: disabled,
       onChange: function (raw) {
         const parsed = parseColor(raw)
-        if (parsed) writeArgb(parsed, hasAlpha(raw) || alphaOf(parsed) < 255)
+        if (parsed) updateArgb(parsed, hasAlpha(raw) || alphaOf(parsed) < 255, 'text')
       },
+      onCommit: commitEdit,
+      onCancel: cancelEdit,
     })
     text.classList.add('aiditor-ui-color-text')
     swatch.appendChild(swatchFill)
@@ -3443,6 +3549,7 @@
     ui.bind(el, disabled, function (v) { el.classList.toggle('aiditor-ui-color-disabled', !!v) })
     ui.bind(el, sig, function (v) {
       lastExternal = v
+      currentValue = v
       const argb = normalizeColor(v, valueKind, valueScale)
       swatchFill.style.background = argbToRgba(argb)
       const shown = formatForDisplay(argb, v, valueKind, alphaOf(argb) < 255 || hasAlpha(v), valueScale)
@@ -3454,13 +3561,22 @@
     swatch.addEventListener('click', function () {
       if (disabled.peek()) return
       if (pop) { pop.close(); pop = null; return }
-      pop = openPicker(el, normalizeColor(sig.peek(), valueKind, valueScale), writeArgb, function () { pop = null })
+      pop = openPicker(el, normalizeColor(sig.peek(), valueKind, valueScale), {
+        begin: beginEdit,
+        update: updateArgb,
+        commit: commitEdit,
+        cancel: cancelEdit,
+        apply: applyDiscrete,
+      }, function () { pop = null })
     })
-    ui.collect(el, function () { if (pop) { pop.close(); pop = null } })
+    ui.collect(el, function () {
+      cancelEdit()
+      if (pop) { pop.close(); pop = null }
+    })
     return el
   }
 
-  function openPicker(anchor, initialArgb, doWrite, onClose) {
+  function openPicker(anchor, initialArgb, edit, onClose) {
     const state = {
       argb: normalizeColor(initialArgb, 'hex'),
       mode: aiditor.signal('hex'),
@@ -3500,10 +3616,10 @@
     wrap.appendChild(values)
     wrap.appendChild(favorites)
 
-    function setArgb(argb, preferAlpha) {
+    function setArgb(argb, preferAlpha, source) {
       state.argb = normalizeColor(argb, 'hex')
       render()
-      doWrite(state.argb, preferAlpha)
+      edit.update(state.argb, preferAlpha, source)
     }
 
     function sync(argb) {
@@ -3539,8 +3655,10 @@
           value: state.argb,
           onChange: function (v) {
             const parsed = parseColor(v)
-            if (parsed) setArgb(parsed, hasAlpha(v))
+            if (parsed) setArgb(parsed, hasAlpha(v), 'picker.hex')
           },
+          onCommit: edit.commit,
+          onCancel: edit.cancel,
         })
         hex.classList.add('aiditor-ui-color-hex-field')
         state.valueFills.push(preview.querySelector('.aiditor-ui-color-preview-fill'))
@@ -3552,7 +3670,7 @@
             icon: 'pipette',
             title: 'Pick color from screen',
             size: 'sm',
-            onClick: function () { pickFromScreen(setArgb) },
+            onClick: function () { pickFromScreen(edit.apply) },
           }))
         }
         valueRow.appendChild(ui.iconButton({
@@ -3582,17 +3700,18 @@
           ]
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i]
+        const source = 'picker.' + currentMode + '.' + ch[0]
         valueRow.appendChild(channelInput(ch[0], ch[1], ch[2], ch[3], ch[4], function (next) {
           if (currentMode === 'rgb') {
             const nextRgb = argbToRgb(state.argb)
             nextRgb[ch[0]] = next
-            setArgb(rgbToArgb(nextRgb.r, nextRgb.g, nextRgb.b, nextRgb.a), true)
+            setArgb(rgbToArgb(nextRgb.r, nextRgb.g, nextRgb.b, nextRgb.a), true, source)
           } else {
             const nextHsl = argbToHsl(state.argb)
             nextHsl[ch[0]] = next
-            setArgb(hslToArgb(nextHsl.h, nextHsl.s, nextHsl.l, nextHsl.a), true)
+            setArgb(hslToArgb(nextHsl.h, nextHsl.s, nextHsl.l, nextHsl.a), true, source)
           }
-        }, state, currentMode))
+        }, state, currentMode, edit, source))
       }
       updateValueControls()
     }
@@ -3633,7 +3752,7 @@
         })
         btn.appendChild(colorPreview(fav, 'aiditor-ui-color-favorite-fill'))
         btn.classList.toggle('aiditor-ui-color-favorite-active', fav.toUpperCase() === state.argb.toUpperCase())
-        btn.addEventListener('click', function () { setArgb(fav, alphaOf(fav) < 255) })
+        btn.addEventListener('click', function () { edit.apply(fav, alphaOf(fav) < 255, 'picker.favorite') })
         btn.addEventListener('contextmenu', function (e) {
           e.preventDefault()
           removeFavorite(state, fav)
@@ -3646,8 +3765,13 @@
 
     ui.bind(wrap, state.mode, renderValueRow)
     ui.collect(wrap, ui.attachDrag(sv, {
-      onStart: scrubSv,
+      onStart: function (event) {
+        edit.begin('picker.sv')
+        scrubSv(event)
+      },
       onMove: scrubSv,
+      onEnd: edit.commit,
+      onCancel: edit.cancel,
     }))
     function scrubSv(e) {
       const r = sv.getBoundingClientRect()
@@ -3657,15 +3781,17 @@
       const s = Math.round(x * 100)
       const brightness = 1 - y
       const l = Math.round(brightness * (50 + (100 - s) / 2))
-      setArgb(hslToArgb(hsl.h, s, l, hsl.a), alphaOf(state.argb) < 255)
+      setArgb(hslToArgb(hsl.h, s, l, hsl.a), alphaOf(state.argb) < 255, 'picker.sv')
     }
+    bindRangeEdit(hueInput, 'picker.hue', edit)
     hueInput.addEventListener('input', function () {
       const hsl = argbToHsl(state.argb)
-      setArgb(hslToArgb(Number(hueInput.value), hsl.s, hsl.l, hsl.a), alphaOf(state.argb) < 255)
+      setArgb(hslToArgb(Number(hueInput.value), hsl.s, hsl.l, hsl.a), alphaOf(state.argb) < 255, 'picker.hue')
     })
+    bindRangeEdit(alphaInput, 'picker.alpha', edit)
     alphaInput.addEventListener('input', function () {
       const hsl = argbToHsl(state.argb)
-      setArgb(hslToArgb(hsl.h, hsl.s, hsl.l, Number(alphaInput.value)), true)
+      setArgb(hslToArgb(hsl.h, hsl.s, hsl.l, Number(alphaInput.value)), true, 'picker.alpha')
     })
     render()
 
@@ -3674,10 +3800,28 @@
       content: wrap,
       side: 'bottom',
       align: 'start',
-      onDismiss: onClose,
+      onDismiss: function (cause) {
+        if (cause === 'escape' || cause === 'dispose') edit.cancel()
+        else edit.commit()
+        onClose(cause)
+      },
     })
     pop.sync = sync
     return pop
+  }
+
+  function bindRangeEdit(input, source, edit) {
+    input.addEventListener('pointerdown', function (event) {
+      if (event.button === 0) edit.begin(source)
+    })
+    input.addEventListener('change', edit.commit)
+    input.addEventListener('pointercancel', edit.cancel)
+    input.addEventListener('blur', edit.commit)
+    input.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      edit.cancel()
+    })
   }
 
   function colorPreview(argb, cls) {
@@ -3688,7 +3832,7 @@
     return el
   }
 
-  function channelInput(label, value, min, max, step, onChange, state, mode) {
+  function channelInput(label, value, min, max, step, onChange, state, mode, edit, source) {
     const sig = aiditor.signal(value)
     const wrap = ui.h('div', 'aiditor-ui-color-channel')
     const input = ui.numberInput({
@@ -3702,17 +3846,30 @@
       precision: step < 1 ? 2 : 0,
       label: label,
     })
+    const field = input.querySelector('input')
+    input.addEventListener('pointerdown', function (event) {
+      if (event.button === 0) edit.begin(source)
+    })
+    input.addEventListener('pointerup', edit.commit)
+    input.addEventListener('pointercancel', edit.cancel)
+    input.addEventListener('click', edit.commit)
+    field.addEventListener('focus', function () { edit.begin(source) })
+    field.addEventListener('blur', edit.commit)
+    field.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return
+      edit.cancel()
+    }, true)
     wrap.appendChild(input)
-    state.valueInputs.push({ kind: mode, channel: label, step: step, sig: sig, el: input.querySelector('input') })
+    state.valueInputs.push({ kind: mode, channel: label, step: step, sig: sig, el: field })
     return wrap
   }
 
-  async function pickFromScreen(setArgb) {
+  async function pickFromScreen(apply) {
     try {
       const eyeDropper = new window.EyeDropper()
       const result = await eyeDropper.open()
       if (!result || !result.sRGBHex) return
-      setArgb(normalizeColor(result.sRGBHex, 'hex'), false)
+      apply(normalizeColor(result.sRGBHex, 'hex'), false, 'picker.eyedropper')
     } catch (_) {}
   }
 
@@ -4854,32 +5011,37 @@
   ui.quickPick = function (opts) {
     const o = opts || {}
     const id = 'aiditor-quick-pick-' + (nextId++)
-    const query = aiditor.signal('')
+    const query = ui.asSig(o.query != null ? o.query : '')
     const itemsSig = ui.asSig(o.items || [])
     const selectedSig = ui.asSig(o.selectedKey != null ? o.selectedKey : null)
-    const root = ui.h('div', 'aiditor-ui-quick-pick')
-    const input = ui.searchInput({
+    const root = ui.h('div', 'aiditor-ui-quick-pick' + (o.className ? ' ' + o.className : ''))
+    const input = o.showSearch === false ? null : ui.searchInput({
       value: query,
       placeholder: o.placeholder || 'Search...',
-      onChange: function (v) {
-        query.set(v)
-        render('query')
-      },
     })
     const list = ui.h('div', 'aiditor-ui-quick-pick-list', {
       id: id + '-list',
       role: 'listbox',
     })
-    input.classList.add('aiditor-ui-quick-pick-input')
-    root.appendChild(input)
+    if (input) {
+      input.classList.add('aiditor-ui-quick-pick-input')
+      root.appendChild(input)
+    }
     root.appendChild(list)
 
-    const inputEl = input.querySelector('input')
+    const inputEl = input && input.querySelector('input')
+    const ariaTarget = o.ariaTarget || inputEl
+    const ariaNames = ['aria-expanded', 'aria-controls', 'aria-autocomplete', 'aria-activedescendant', 'aria-haspopup']
+    const ariaBefore = {}
     if (inputEl) {
       inputEl.setAttribute('role', 'combobox')
-      inputEl.setAttribute('aria-expanded', 'true')
-      inputEl.setAttribute('aria-controls', id + '-list')
-      inputEl.setAttribute('aria-autocomplete', 'list')
+    }
+    if (ariaTarget) {
+      for (let i = 0; i < ariaNames.length; i++) ariaBefore[ariaNames[i]] = ariaTarget.getAttribute(ariaNames[i])
+      ariaTarget.setAttribute('aria-expanded', 'true')
+      ariaTarget.setAttribute('aria-controls', id + '-list')
+      ariaTarget.setAttribute('aria-autocomplete', 'list')
+      ariaTarget.setAttribute('aria-haspopup', 'listbox')
     }
 
     const rows = new Map()
@@ -4906,9 +5068,17 @@
 
     function cleanupAnchor() {
       closed = true
+      if (ariaTarget) {
+        for (let i = 0; i < ariaNames.length; i++) {
+          const name = ariaNames[i]
+          if (ariaBefore[name] == null) ariaTarget.removeAttribute(name)
+          else ariaTarget.setAttribute(name, ariaBefore[name])
+        }
+      }
       if (tempAnchor && tempAnchor.parentNode) tempAnchor.parentNode.removeChild(tempAnchor)
       tempAnchor = null
       pop = null
+      if (typeof o.onDismiss === 'function') o.onDismiss()
     }
 
     function source(action, key) {
@@ -5030,7 +5200,7 @@
       ui.collect(el, aiditor.effect(function () {
         const v = state.active()
         el.classList.toggle('aiditor-ui-quick-pick-row-active', v)
-        if (v && inputEl) inputEl.setAttribute('aria-activedescendant', state.id)
+        if (v && ariaTarget) ariaTarget.setAttribute('aria-activedescendant', state.id)
       }))
       ui.collect(el, aiditor.effect(function () {
         const v = state.selected()
@@ -5151,9 +5321,9 @@
         if (isActive) activeId = state.id
         state.selected.set(String(selectedSig.peek()) === state.key)
       })
-      if (inputEl) {
-        if (activeId) inputEl.setAttribute('aria-activedescendant', activeId)
-        else inputEl.removeAttribute('aria-activedescendant')
+      if (ariaTarget) {
+        if (activeId) ariaTarget.setAttribute('aria-activedescendant', activeId)
+        else ariaTarget.removeAttribute('aria-activedescendant')
       }
       const state = rows.get(activeKey)
       if (state && !state.disabled.peek() && state.el.scrollIntoView) state.el.scrollIntoView({ block: 'nearest' })
@@ -5234,27 +5404,31 @@
       paintState()
     }
 
-    input.addEventListener('keydown', function (ev) {
+    function handleKeyDown(ev) {
       if (ev.key === 'ArrowDown') {
         ev.preventDefault()
         chooseActive('next')
-        return
+        return true
       }
       if (ev.key === 'ArrowUp') {
         ev.preventDefault()
         chooseActive('prev')
-        return
+        return true
       }
-      if (ev.key === 'Enter') {
+      if (ev.key === 'Enter' || (o.acceptTab && ev.key === 'Tab')) {
         ev.preventDefault()
         if (activeKey != null) choose(activeKey)
-        return
+        return true
       }
       if (ev.key === 'Escape') {
         ev.preventDefault()
         close()
+        return true
       }
-    })
+      return false
+    }
+
+    if (input) input.addEventListener('keydown', handleKeyDown)
 
     ui.collect(root, function () {
       rows.forEach(function (state) { ui.dispose(state.el) })
@@ -5263,6 +5437,7 @@
     })
     ui.bind(root, itemsSig, function () { render('items') })
     ui.bind(root, selectedSig, paintState)
+    ui.bind(root, query, function () { render('query') })
 
     const r = anchor.getBoundingClientRect()
     root.style.width = (o.width || Math.max(260, Math.min(460, r.width || 320))) + 'px'
@@ -5276,7 +5451,7 @@
       role: 'dialog',
       onDismiss: cleanupAnchor,
     })
-    setTimeout(function () {
+    if (o.focus !== false) setTimeout(function () {
       if (inputEl) {
         inputEl.focus()
         inputEl.select()
@@ -5285,6 +5460,8 @@
     return {
       el: pop.el,
       close: close,
+      handleKeyDown: handleKeyDown,
+      query: query,
     }
   }
 })(window.aiditor = window.aiditor || {})
@@ -5339,11 +5516,12 @@
     const overlay = ui._overlay.open(box, {
       modal:          true,
       outsideTarget:  back,   // click on backdrop (outside box) → close
+      dismissOnOutside: true,
       role:           'dialog',
       ariaLabelledBy: titleId || undefined,
       ariaLabel:      titleId ? undefined : (o.ariaLabel || 'Dialog'),
-      onDismiss: function () {
-        ui.dispose(box)
+      onDismiss: function (cause) {
+        if (cause !== 'dispose') ui.dispose(box)
         unmount()
         o.onClose && o.onClose()
       },
@@ -5402,11 +5580,17 @@
     const overlay = ui._overlay.open(panel, {
       modal:          true,
       outsideTarget:  back,
+      dismissOnOutside: true,
       role:           'dialog',
       ariaLabelledBy: titleId || undefined,
       ariaLabel:      titleId ? undefined : (o.ariaLabel || 'Drawer'),
-      onDismiss: function () {
+      onDismiss: function (cause) {
         panel.classList.remove('aiditor-ui-drawer-open')
+        if (cause === 'dispose') {
+          unmount()
+          o.onClose && o.onClose()
+          return
+        }
         // Slide-out transition uses --aiditor-dur-slow; unmount after it finishes.
         setTimeout(function () { ui.dispose(panel); unmount(); o.onClose && o.onClose() },
           ui.readNum('--aiditor-dur-slow', 240))

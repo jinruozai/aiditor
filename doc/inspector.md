@@ -178,6 +178,7 @@ compatibility decision, including mixed-type cases.
 | `schema` | `ui.propertyForm` schema. |
 | `values` | One plain value per target, in the same order. The first value is displayed. |
 | `actions` | Optional `UiAction[]` rendered on the Inspector header's right side. |
+| `renderBeforeForm(ctx)` | Optional provider-owned element rendered below property search and above the standard form. Use for compact target-level controls that are not authored fields. |
 | `groups` | Optional property group metadata passed to `ui.propertyForm`; supports `label`, `actions`, `defaultCollapsed`, and same-level `enabledBy`. |
 | `groupActions(groupCtx)` | Optional per-group `UiAction[]` factory passed to `ui.propertyForm`. Returning `null` / `undefined` uses `groups[groupId].actions`; returning `[]` explicitly renders no actions. |
 | `fieldContextActions(fieldCtx)` | Optional field-row context-menu strategy passed to `ui.propertyForm`. Returns `UiAction[]` or `Promise<UiAction[]>`. |
@@ -191,6 +192,14 @@ compatibility decision, including mixed-type cases.
 | `defaults` | Optional default values for reset buttons. |
 | `subscribe(refresh, ctx)` | Optional external data subscription. Returns cleanup. |
 | `render(ctx)` | Optional custom renderer for complex inspections. |
+
+For controls with continuous editing, `write` also receives `ctx.edit`. A
+color-picker gesture forwards `{ phase: "update" | "commit" | "cancel",
+source, initialValue, value }`: providers may preview every `update`, create one
+history entry on `commit`, and discard transient work on `cancel`. This metadata
+comes from the editor that owns the interaction; providers must not infer it
+from pointer events on the Inspector DOM because an editor may render in the
+shared Portal.
 
 `render(ctx)` is for cases that are not just fields: table schema editors,
 binding rows, layout pickers, texture lists, or tool buttons. When the complex
@@ -563,6 +572,12 @@ disappear. Clearing the query restores the previous collapsed state. The full
 schema and every field editor remain mounted throughout. Custom `render(ctx)`
 inspections own their entire body UI and are not filtered by this property
 search.
+
+`renderBeforeForm(ctx)` contributes one compact provider-owned element between
+that search field and the standard property form. It does not replace or wrap
+the form, and it is ignored by custom `render(ctx)` inspections. Domain state
+and mutations remain owned by the provider; the Inspector only owns placement,
+refresh, and disposal.
 
 Inspector refreshes may return fresh `schema`, `groups`, and `values` objects.
 The built-in panel keeps value updates separate from form structure updates:

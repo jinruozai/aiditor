@@ -53,7 +53,7 @@
       ? onChange
       : (typeof sig === 'function' && typeof sig.set === 'function' ? sig.set : null)
     if (!write) throw new Error((name || 'ui') + ': `value` must be a writable signal or `onChange` is required')
-    return function (v) { aiditor.untracked(function () { write(v) }) }
+    return function (v, meta) { aiditor.untracked(function () { write(v, meta) }) }
   }
   ui.writer = writer
 
