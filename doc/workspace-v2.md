@@ -117,6 +117,7 @@ workspace.revokeObjectUrl(url)
 workspace.releaseObjectUrls(owner)
 
 workspace.revealInSystem(path, options)
+workspace.pickSaveTarget(options)
 workspace.recoverPermission(options)
 ```
 
@@ -147,6 +148,7 @@ The final design uses `readText` and `writeText` for text IO. Generic
   previewOperation: boolean,
   applyOperation: boolean,
   revealInSystem: boolean,
+  pickSaveTarget: boolean,
   permissionRecovery: boolean,
 }
 ```
@@ -585,6 +587,26 @@ This is not a file mutation. It does not use `previewOperation` /
 an `OpenService.reveal` style call moves focus to an editor tree, panel, or
 resource inside the application. `workspace.revealInSystem` delegates to the
 host operating system file manager.
+
+## Save Target Picker
+
+```js
+workspace.pickSaveTarget({
+  suggestedName?: string,
+  extensions?: string[],
+  description?: string,
+  mimeType?: string,
+})
+```
+
+The File System Access adapter opens the system save picker from the current
+workspace directory. It resolves the selected file back through the workspace
+root, rejects targets outside that root or outside the allowed extensions, and
+returns only a normalized workspace-relative path. User cancellation returns
+`null`; the raw file handle is never exposed.
+
+This API selects a target only. Saving still uses `previewOperation` and
+`applyOperation`, including the existing version and overwrite checks.
 
 ## Permission Recovery
 

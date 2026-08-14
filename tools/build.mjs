@@ -210,6 +210,7 @@ const JS_ORDER = [
   'ui/data/dataGrid.js',
   'ui/data/breadcrumbs.js',
   'ui/data/progressBar.js',
+  'ui/data/collectionBrowser.js',
   'ui/data/fileBrowser.js',
   'ui/data/changeReview.js',
 

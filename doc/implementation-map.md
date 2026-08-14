@@ -38,7 +38,8 @@ preserved or deliberately replaced.
 | `src/dock/layout.js` | [ui.md](./ui.md) | `createDockLayout`. |
 | `src/ui/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Ordered Inspector selection, provider registry, multi-target edit gates, and formula-ready change helpers. |
 | `src/ui/panel/inspector.js` | [inspector.md](./inspector.md), [ui.md](./ui.md) | Built-in generic Inspector dock panel backed by `aiditor.inspector` and `aiditor.ui.propertyForm`. |
-| `src/ui/data/fileBrowser.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Neutral controlled current-directory browser with list/icon presentation and generic action/drag/drop hooks. |
+| `src/ui/data/collectionBrowser.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Stable-key fixed-size two-dimensional virtual collection, controlled selection, keyboard/marquee interaction, and shared DnD/action routing. |
+| `src/ui/data/fileBrowser.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Thin file preset over collectionBrowser: breadcrumbs, file projection, metadata rendering, directory activation, and file-shaped contexts. |
 | `src/ui/data/dataGrid.js` | [csv-editor.md](./csv-editor.md), [ui.md](./ui.md) | Controlled spreadsheet interaction surface with virtual rows; no CSV or persistence knowledge. |
 | `src/ui/editor/textDocument.js` | [csv-editor.md](./csv-editor.md), [host-file-workflow.md](./host-file-workflow.md) | Shared format-neutral text file load/save, CAS dirty/stale state, and watch lifecycle. |
 | `src/ui/editor/csv/*.js` | [csv-editor.md](./csv-editor.md), [schema-value-encoding.md](./schema-value-encoding.md) | Shared CSV row grammar, explicit `csv`/`gamecsv` formats, and the immutable typed single-table document. |

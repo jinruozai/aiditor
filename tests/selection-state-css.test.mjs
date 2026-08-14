@@ -22,7 +22,7 @@ for (const selector of [
   '.aiditor-ui-tree-row-active:hover',
   '.aiditor-ui-errlog-row-selected:hover',
   '.aiditor-history-row-current:hover:not(:disabled)',
-  '.aiditor-ui-fileitem.is-selected:hover',
+  '.aiditor-ui-collection-item.is-selected:hover',
 ]) {
   assert.ok(data.includes(selector), selector + ' must keep selected state above hover')
 }

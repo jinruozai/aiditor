@@ -432,13 +432,16 @@ item remains visibly selected while the pointer is over it. Green/success colors
 are reserved for status, confirmation, running/done indicators, and valid drop
 feedback.
 
-`aiditor.ui.fileBrowser` is the neutral current-directory list/icon browser.
-It supports controlled path, selection, view and sort state plus generic
-activation, context action, drag source and drop target hooks. It does not load
-directories or own file mutations. Compose it with `aiditor.ui.tree` when an
-expandable directory outline is required. `aiditor.ui.assetBrowser` is an
-alternate name for the same neutral primitive, not a second asset model. See
-[file-browser.md](./file-browser.md).
+`aiditor.ui.collectionBrowser` is the virtualized, stable-key Icon/List
+collection owner. It provides controlled selection, search/sort projection,
+keyboard and marquee selection, context actions, and adapters over the shared
+`dragsource/dropzone` transport without knowing a domain model.
+
+`aiditor.ui.fileBrowser` is its current-directory file preset. It adds path
+breadcrumbs, file sorting and metadata rendering, directory activation, and
+file-shaped action/drop contexts. It does not load directories or own file
+mutations. Compose it with `aiditor.ui.tree` when an expandable directory
+outline is required. See [file-browser.md](./file-browser.md).
 
 `aiditor.ui.tree` accepts optional `loadChildren(node, signal)` for nodes that
 declare `hasChildren:true`. Lazy children are cached by node id without

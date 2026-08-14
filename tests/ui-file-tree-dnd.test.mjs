@@ -33,6 +33,7 @@ class FakeEl {
     this.scrollTop = 0
     this.scrollLeft = 0
     this.clientHeight = 240
+    this.clientWidth = 320
   }
   appendChild(child) { return this.insertBefore(child, null) }
   insertBefore(child, before) { if (child.parentNode) child.parentNode.removeChild(child); const index = before ? this.children.indexOf(before) : -1; if (index < 0) this.children.push(child); else this.children.splice(index, 0, child); child.parentNode = this; return child }
@@ -57,7 +58,14 @@ class FakeEl {
   closest(selector) { let node = this; while (node) { if (node.matches && node.matches(selector)) return node; node = node.parentNode } return null }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null }
   querySelectorAll(selector) { const out = []; function visit(el) { for (let i = 0; i < el.children.length; i++) { const child = el.children[i]; if (child.matches && child.matches(selector)) out.push(child); visit(child) } } visit(this); return out }
-  getBoundingClientRect() { return { left: 0, top: 0, right: 100, bottom: 24, width: 100, height: 24 } }
+  getBoundingClientRect() {
+    const match = /translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(this.style.transform || '')
+    const left = match ? Number(match[1]) : 0
+    const top = match ? Number(match[2]) : 0
+    const width = parseFloat(this.style.width) || this.clientWidth || 100
+    const height = parseFloat(this.style.height) || this.clientHeight || 24
+    return { left, top, right: left + width, bottom: top + height, width, height }
+  }
 }
 
 class FakeText { constructor(text) { this.nodeType = 3; this.textContent = String(text); this.parentNode = null } }
@@ -80,10 +88,13 @@ window.removeEventListener = function (type, fn) { const list = windowEvents[typ
 window.dispatch = function (type, event) { const list = (windowEvents[type] || []).slice(); for (let i = 0; i < list.length; i++) list[i](event) }
 global.requestAnimationFrame = function (fn) { fn(); return 1 }
 global.cancelAnimationFrame = function () {}
+global.getComputedStyle = function (el) {
+  return { getPropertyValue(name) { return el && el.style && el.style[name] || '' } }
+}
 global.DataTransferItem = function () {}
 DataTransferItem.prototype.webkitGetAsEntry = function () {}
 
-for (const file of ['src/core/signal.js', 'src/core/log.js', 'src/ui/_internal/_signal.js', 'src/ui/_internal/_edit-session.js']) {
+for (const file of ['src/core/signal.js', 'src/core/log.js', 'src/ui/_internal/_signal.js', 'src/ui/_internal/_css.js', 'src/ui/_internal/_edit-session.js']) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
 
@@ -92,7 +103,7 @@ const ui = aiditor.ui
 const flush = function () { return new Promise(function (resolve) { setImmediate(resolve) }) }
 ui.menu = function () { return { close() {} } }
 
-for (const file of ['src/ui/base/icon.js', 'src/ui/base/iconButton.js', 'src/ui/form/input.js', 'src/ui/form/searchInput.js', 'src/ui/_internal/_dnd.js', 'src/ui/data/tree.js', 'src/ui/data/tree-dnd.js', 'src/ui/data/fileBrowser.js']) {
+for (const file of ['src/ui/base/icon.js', 'src/ui/base/iconButton.js', 'src/ui/form/input.js', 'src/ui/form/searchInput.js', 'src/ui/_internal/_dnd.js', 'src/ui/data/tree.js', 'src/ui/data/tree-dnd.js', 'src/ui/data/collectionBrowser.js', 'src/ui/data/fileBrowser.js']) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
 
@@ -500,7 +511,7 @@ const browserSelected = aiditor.signal([])
 const browserView = aiditor.signal('icons')
 const browserSort = aiditor.signal({ by: 'name', direction: 'asc' })
 const browser = ui.fileBrowser({ entries: browserEntries, path: browserPath, selected: browserSelected, view: browserView, sort: browserSort })
-let rows = browser.querySelectorAll('.aiditor-ui-fileitem')
+let rows = browser.querySelectorAll('.aiditor-ui-collection-item')
 assert.deepEqual(rows.map(function (row) { return row.dataset.key }), ['folder', 'a.txt', 'b.txt'])
 const retained = rows[2]
 browserEntries.set([
@@ -508,7 +519,7 @@ browserEntries.set([
   { id: 'folder', name: 'folder', path: 'folder', kind: 'directory' },
   { id: 'a.txt', name: 'a.txt', path: 'a.txt', kind: 'file', size: 1 },
 ])
-rows = browser.querySelectorAll('.aiditor-ui-fileitem')
+rows = browser.querySelectorAll('.aiditor-ui-collection-item')
 assert.equal(rows[2], retained)
 assert.equal(retained.querySelector('.aiditor-ui-filename').textContent, 'b-renamed.txt')
 rows[1].dispatch('click', { ctrlKey: false, metaKey: false, shiftKey: false })
@@ -516,7 +527,7 @@ assert.deepEqual(browserSelected.peek(), ['a.txt'])
 rows[0].dispatch('dblclick', {})
 assert.equal(browserPath.peek(), 'folder')
 browserView.set('list')
-assert.equal(browser.querySelector('.aiditor-ui-filegrid').classList.contains('aiditor-ui-filegrid-list'), true)
+assert.equal(browser.querySelector('.aiditor-ui-collection-viewport').dataset.layout, 'list')
 assert.equal(browser.querySelector('.aiditor-ui-filethumb').querySelector('.aiditor-ui-icon').textContent, 'folder')
 const searchInput = browser.querySelector('input')
 searchInput.value = 'renamed'
@@ -524,4 +535,137 @@ searchInput.dispatch('input', { target: searchInput })
 assert.deepEqual(browser.__aiditorFileBrowser.getVisibleEntries().map(function (entry) { return entry.id }), ['b.txt'])
 ui.dispose(browser)
 
-console.log('file browser, async tree, and external drop tests ok')
+const collectionItems = aiditor.signal(Array.from({ length: 1000 }, function (_, index) {
+  return { id: 'item-' + index, label: 'Item ' + index, detail: 'Detail ' + index }
+}))
+const collectionSelected = aiditor.signal([])
+const collectionView = aiditor.signal('rows')
+let renderCount = 0
+let disposeCount = 0
+let readonlyChecked = false
+let activated = null
+const collection = ui.collectionBrowser({
+  items: collectionItems,
+  selected: collectionSelected,
+  view: collectionView,
+  views: [{ id: 'rows', layout: 'list', label: 'Rows' }],
+  searchable: false,
+  getKey(item) { return item.id },
+  getLabel(item) { return item.label },
+  renderItem(itemSignal, ctx) {
+    renderCount++
+    readonlyChecked = readonlyChecked || (
+      typeof itemSignal.set === 'undefined' &&
+      typeof ctx.index.set === 'undefined' &&
+      typeof ctx.selected.set === 'undefined' &&
+      typeof ctx.focused.set === 'undefined' &&
+      typeof ctx.view.set === 'undefined'
+    )
+    const el = document.createElement('div')
+    ui.bind(el, itemSignal, function (item) { el.textContent = item.label })
+    ui.collect(el, function () { disposeCount++ })
+    return el
+  },
+  onActivate(item) { activated = item.id },
+})
+const collectionHandle = collection.__aiditorCollectionBrowser
+let rendered = collection.querySelectorAll('.aiditor-ui-collection-item')
+assert.equal(readonlyChecked, true)
+assert.equal(rendered.length < 40, true)
+assert.equal(renderCount, rendered.length)
+const firstItemEl = rendered.find(function (row) { return row.dataset.key === 'item-0' })
+const updatedItems = collectionItems.peek().slice()
+updatedItems[0] = { id: 'item-0', label: 'Updated item 0', detail: 'Updated' }
+collectionItems.set(updatedItems)
+assert.equal(collection.querySelectorAll('.aiditor-ui-collection-item').find(function (row) { return row.dataset.key === 'item-0' }), firstItemEl)
+assert.equal(firstItemEl.children[0].textContent, 'Updated item 0')
+
+assert.equal(collectionHandle.scrollToKey('item-500'), true)
+rendered = collection.querySelectorAll('.aiditor-ui-collection-item')
+assert.equal(rendered.length < 40, true)
+const item500 = rendered.find(function (row) { return row.dataset.key === 'item-500' })
+assert.ok(item500)
+assert.equal(item500.getAttribute('aria-posinset'), '501')
+assert.equal(item500.getAttribute('aria-setsize'), '1000')
+const reordered = collectionItems.peek().slice()
+const moved = reordered[500]
+reordered[500] = reordered[501]
+reordered[501] = moved
+collectionItems.set(reordered)
+assert.equal(collection.querySelectorAll('.aiditor-ui-collection-item').find(function (row) { return row.dataset.key === 'item-500' }), item500)
+assert.equal(item500.getAttribute('aria-posinset'), '502')
+
+item500.dispatch('click', {})
+assert.deepEqual(collectionSelected.peek(), ['item-500'])
+const collectionViewport = collection.querySelector('.aiditor-ui-collection-viewport')
+collectionViewport.dispatch('keydown', { key: 'ArrowDown', shiftKey: true })
+assert.deepEqual(collectionSelected.peek(), ['item-500', 'item-502'])
+collectionViewport.dispatch('keydown', { key: 'a', ctrlKey: true })
+assert.equal(collectionSelected.peek().length, 1000)
+collectionViewport.dispatch('keydown', { key: 'Escape' })
+assert.deepEqual(collectionSelected.peek(), [])
+item500.dispatch('click', {})
+collectionViewport.dispatch('keydown', { key: 'Enter' })
+assert.equal(activated, 'item-500')
+
+const previousRaf = global.requestAnimationFrame
+let marqueeTick = null
+global.requestAnimationFrame = function (fn) { marqueeTick = fn; return 77 }
+collectionViewport.dispatch('pointerdown', { button: 0, pointerId: 4, clientX: 300, clientY: 120 })
+collectionViewport.dispatch('pointermove', { pointerId: 4, clientX: 310, clientY: 239 })
+assert.ok(marqueeTick)
+const beforeMarqueeScroll = collectionViewport.scrollTop
+marqueeTick()
+assert.equal(collectionViewport.scrollTop > beforeMarqueeScroll, true)
+collectionViewport.dispatch('pointercancel', { pointerId: 4 })
+global.requestAnimationFrame = previousRaf
+
+const originalDragSource = ui.dragsource
+const originalDropzone = ui.dropzone
+let dragSourceUses = 0
+let dropzoneUses = 0
+let capturedDropzone = null
+let latestDropContext = null
+let collectionDropped = false
+ui.dragsource = function (el, options) { dragSourceUses++; return originalDragSource(el, options) }
+ui.dropzone = function (el, options) { dropzoneUses++; capturedDropzone = options; return originalDropzone(el, options) }
+const dndCollection = ui.collectionBrowser({
+  items: [{ id: 'drag', label: 'Drag' }],
+  selected: aiditor.signal(['drag']),
+  view: aiditor.signal('icons'),
+  searchable: false,
+  getKey(item) { return item.id },
+  dragData() { return { 'text/plain': 'drag' } },
+  canDrop(ctx) { latestDropContext = ctx; return true },
+  async onDrop(ctx) { latestDropContext = ctx; collectionDropped = true },
+})
+assert.equal(dragSourceUses, 1)
+assert.equal(dropzoneUses, 1)
+const dndRow = dndCollection.querySelector('.aiditor-ui-collection-item')
+assert.equal(capturedDropzone.canDrop({ text: 'drag' }, { type: 'dragover', target: dndRow, clientY: 12 }), true)
+assert.equal(latestDropContext.phase, 'hover')
+assert.deepEqual(latestDropContext.selectedItems.map(function (item) { return item.id }), ['drag'])
+assert.equal('items' in latestDropContext, false)
+capturedDropzone.onDrop({ text: 'drag' }, { type: 'drop', target: dndRow, clientY: 12 })
+assert.equal(collectionDropped, true)
+assert.equal(latestDropContext.phase, 'drop')
+assert.equal(dndCollection.querySelector('.aiditor-ui-collection-default-label').textContent, 'Drag')
+ui.dispose(dndCollection)
+ui.dragsource = originalDragSource
+ui.dropzone = originalDropzone
+
+assert.throws(function () {
+  ui.collectionBrowser({
+    items: [{ id: 'same' }, { id: 'same' }],
+    selected: aiditor.signal([]),
+    searchable: false,
+    getKey(item) { return item.id },
+  })
+}, /duplicate key/)
+
+const mountedBeforeDispose = collectionHandle.getRenderedKeys().length
+ui.dispose(collection)
+assert.equal(disposeCount >= mountedBeforeDispose, true)
+assert.equal(disposeCount, renderCount)
+
+console.log('collection/file browser, async tree, and external drop tests ok')

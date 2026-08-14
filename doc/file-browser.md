@@ -1,20 +1,100 @@
-# File Browser, Async Tree, and External Drops
+# Collection Browser, File Browser, Async Tree, and External Drops
 
-These primitives form the framework-level file browsing surface. They operate
-on generic files and directories only. Workspace access, project identity,
-assets, imports, commands, history, and persistence remain host concerns.
+These primitives form the framework-level collection and file browsing
+surface. Workspace access, project identity, assets, imports, commands,
+history, and persistence remain host concerns.
 
 ## Responsibility Split
 
 | Primitive | Owns | Does not own |
 | --- | --- | --- |
-| `aiditor.ui.fileBrowser` | Current-directory presentation, local filtering, selection, view/sort controls, activation, context actions, and drag/drop hooks. | File IO, directory loading, mutation policy, project paths, or asset semantics. |
+| `aiditor.ui.collectionBrowser` | Stable keyed projection, controlled selection, fixed-size two-dimensional virtualization, Icon/List presentation, search/sort controls, keyboard, marquee, context actions, and drag/drop routing. | Domain models, loading, paging, persistence, or mutation policy. |
+| `aiditor.ui.fileBrowser` | File accessors, breadcrumbs, file sorting and metadata rendering, directory activation, and file-shaped action/drop contexts. | Collection interaction, virtualization, File IO, directory loading, mutation policy, project paths, or asset semantics. |
 | `aiditor.ui.tree` | Hierarchical presentation, expansion, selection, virtualization, and optional node-level async child loading. | File semantics, persistence, or recursive eager loading. |
 | `aiditor.ui.dropzone` | Native drag event ownership and normalization of external files/directories. | Import policy, target path decisions, writes, or business validation. |
 
 A two-pane file explorer composes an async `ui.tree` for directory navigation
 with a `ui.fileBrowser` for the selected directory. `fileBrowser` does not
 duplicate tree expansion or async loading state.
+
+## `aiditor.ui.collectionBrowser`
+
+`collectionBrowser` presents one flat, currently available keyed projection.
+It is not a data source and does not load or page records. Hierarchical data
+belongs in `ui.tree`; callers update `items` when their source changes.
+
+```js
+const browser = aiditor.ui.collectionBrowser({
+  items,                 // Signal<Item[]> | Item[]
+  selected,              // required writable Signal<string[]>
+  view,                  // writable Signal<view id>
+  views: [
+    { id: 'cards', layout: 'grid', label: 'Cards', icon: 'grid' },
+    { id: 'rows', layout: 'list', label: 'Rows', icon: 'list' },
+  ],
+  query,
+  searchable: true,
+  sort,
+  sortOptions,
+
+  getKey(item),
+  getLabel(item),
+  getIcon(item),
+  getDescription(item),
+  getSearchText(item),
+  filter(item, normalizedQuery, sourceIndex),
+  compare(a, b, sort),
+
+  renderItem(itemSignal, ctx),
+  renderToolbarLeading(ctx),
+  onActivate(item, ctx),
+  contextActions(ctx),
+  dragData(ctx),
+  canDrop(ctx),
+  onDrop(ctx),
+})
+```
+
+`getKey` must return a non-empty globally unique string. The complete source is
+checked before filtering. `selected` is the only selection write path; there
+is no parallel callback owner. Observers subscribe to that signal.
+
+Views have stable ids and one implemented layout, `grid` or `list`. A view id
+may be domain-friendly, such as `cards`, without introducing another layout
+engine. `searchable:false` hides the built-in input; an externally supplied
+query still filters the projection.
+
+The default renderer reads `getIcon`, `getLabel`, and `getDescription`. A
+custom `renderItem` completely replaces it and runs once per mounted key. It
+receives read-only `itemSignal` plus read-only `ctx.index`, `ctx.selected`,
+`ctx.focused`, and `ctx.view` signals. It returns one `HTMLElement` and records
+cleanup on that element with `ui.collect`. The browser calls `ui.dispose`
+exactly once when the virtual item is evicted or the browser is disposed.
+There is no value/index renderer compatibility mode.
+
+Visible and overscan items reconcile by key. Retained items keep their shell,
+renderer, focus state, and content signals across item replacement and
+reordering. Items outside the virtual window are disposed. Selection, range
+anchor, logical focus, and ARIA position remain key-based.
+
+Both layouts use fixed item extents from `--aiditor-collection-*` CSS tokens.
+Scroll and resize work is proportional to the visible window. Grid column
+count responds to viewport width while keeping the first visible item as the
+resize anchor. Marquee hit testing uses virtual geometry and continues during
+proportional edge auto-scroll.
+
+Keyboard interaction includes two-dimensional arrows, Home/End, Shift range
+extension, Ctrl/Meta focus movement, Ctrl/Meta+Space toggle, Ctrl/Meta+A,
+Enter activation, and Escape cancellation/clear. Mounted options synchronize
+`aria-posinset` and `aria-setsize`; their DOM order follows the logical
+projection in addition to visual transforms.
+
+Collection DnD adapts the existing `ui.dragsource` and one viewport-level
+`ui.dropzone`; it does not own another transport. Contexts use
+`selectedItems`, never an ambiguous `items` field. `canDrop(ctx)` is a
+synchronous lightweight decision and is rerun against the latest projection
+at drop time. `onDrop(ctx)` may return a Promise. Positions are `before`, `on`,
+`after`, or `surface`.
 
 ## Neutral Entry Contract
 
@@ -41,8 +121,8 @@ without copying it.
 ```js
 const browser = aiditor.ui.fileBrowser({
   entries,          // Signal<Entry[]> | Entry[] for the current directory
-  path,             // optional Signal<string>, default ''
-  selected,         // optional Signal<key[]>, default internal
+  path,             // writable Signal<string>
+  selected,         // required writable Signal<key[]>
   view,             // optional Signal<'icons' | 'list'>
   sort,             // optional Signal<{ by, direction }>
 
@@ -51,10 +131,8 @@ const browser = aiditor.ui.fileBrowser({
   getPath(entry),
   getKind(entry),
   getSearchText(entry),
-  renderItem(entry, index, ctx),
+  renderItem(entrySignal, ctx),
 
-  onPathChange(path),
-  onSelect(entries, meta),
   onActivate(entry, meta),
   contextActions(ctx),
   dragData(ctx),
@@ -63,31 +141,19 @@ const browser = aiditor.ui.fileBrowser({
 })
 ```
 
-`path`, `selected`, `view`, and `sort` follow the normal AIditor controlled
-signal contract. A writable signal is updated directly; a read-only signal
-requires the corresponding callback. Plain values create local component
-state.
+Directory activation writes `path` and clears `selected`. File activation calls
+`onActivate`. The browser never lists a directory itself; the host observes
+`path` and updates `entries`. Selection has the same single writable-signal
+owner as the underlying collection.
 
-Directory activation writes `path` and calls `onPathChange`. File activation
-calls `onActivate`. The browser never lists a directory itself; the host updates
-`entries` when `path` changes.
+`renderItem(entrySignal, ctx)` uses the collection renderer lifecycle and adds
+a read-only `ctx.path` signal. Default content provides file/directory icons
+plus type, size, and modified metadata.
 
-Rows are keyed by `getKey(entry)`. Entry refreshes update retained row content
-in place, so selection, focus, marquee interaction, and drag state are not
-discarded merely because the caller supplied a new array.
-
-`renderItem` renders item content only. The browser owns the selectable row or
-tile shell, hover/selected state, ARIA, activation, context menu, and drag/drop
-events. It runs once for a retained key; custom content reads current values
-from `ctx.entry`, `ctx.index`, `ctx.selected`, and `ctx.view` signals.
-
-`contextActions(ctx)` returns ordinary `UiAction[]`. `dragData(ctx)` returns a
-MIME-to-string map for `ui.dragsource`. `canDrop(ctx)` and `onDrop(ctx)` receive
-the normalized drop payload plus `targetEntry`, `targetPath`, and current
-selection. No mutation action is built in.
-
-`aiditor.ui.assetBrowser` is an alternate name for the same neutral primitive;
-it does not introduce an asset-specific contract.
+`contextActions(ctx)` returns ordinary `UiAction[]`. File contexts contain
+`entry`, `selectedEntries`, and `path`. Drop contexts additionally contain the
+normalized payload, `targetEntry`, `targetPath`, position, and phase. No
+mutation action is built in.
 
 ## Stable `aiditor.ui.tree` rows
 

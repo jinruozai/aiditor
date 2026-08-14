@@ -50,15 +50,73 @@
       maybeEvictLRU(layout)
     }
 
-    layout.removePanel = function (panelId) {
+    layout.removePanels = function (panelIds) {
       if (layout.disposed) return
-      const dr = findOwningDockRuntime(layout, panelId)
-      const pr = dr && dr.panelRuntimes.get(panelId)
-      layout.setTree(aiditor.removePanel(treeSig.peek(), panelId))
-      if (pr) {
-        disposePanelRuntime(pr)
-        dr.panelRuntimes.delete(panelId)
+      const ids = uniquePanelIds(panelIds)
+      const runtimes = []
+      let next = treeSig.peek()
+      for (let i = 0; i < ids.length; i++) {
+        const dr = findOwningDockRuntime(layout, ids[i])
+        const pr = dr && dr.panelRuntimes.get(ids[i])
+        if (pr) runtimes.push({ dock: dr, panel: pr, id: ids[i] })
+        next = aiditor.removePanel(next, ids[i])
       }
+      layout.setTree(next)
+      for (let i = 0; i < runtimes.length; i++) {
+        const item = runtimes[i]
+        if (item.dock.panelRuntimes.get(item.id) !== item.panel) continue
+        disposePanelRuntime(item.panel)
+        item.dock.panelRuntimes.delete(item.id)
+      }
+    }
+
+    layout.removePanel = function (panelId) {
+      layout.removePanels([panelId])
+    }
+
+    layout.requestClosePanels = async function (panelIds, reason) {
+      if (layout.disposed) return false
+      const ids = uniquePanelIds(panelIds)
+      const panels = []
+      const guards = []
+      const liveIds = []
+      const current = treeSig.peek()
+      for (let i = 0; i < ids.length; i++) {
+        const found = aiditor.findPanel(current, ids[i])
+        if (!found) continue
+        liveIds.push(ids[i])
+        panels.push(found.panel)
+        guards.push(createPanelCloseGuard(found.panel))
+      }
+      if (!panels.length) return false
+
+      const hook = layout.hooks.onPanelCloseRequest
+      if (hook) {
+        let allowed
+        try {
+          allowed = await hook({
+            reason: reason || 'close',
+            panelIds: liveIds.slice(),
+            panels: panels.slice(),
+          })
+        } catch (err) {
+          aiditor.reportError({ scope: 'dock', action: 'panel-close-request' }, err)
+          return false
+        }
+        if (allowed !== true) return false
+      }
+
+      const closingIds = []
+      const latest = treeSig.peek()
+      for (let i = 0; i < liveIds.length; i++) {
+        const found = aiditor.findPanel(latest, liveIds[i])
+        if (!found) continue
+        if (!isPanelCloseGuardCurrent(guards[i], found.panel)) return false
+        closingIds.push(liveIds[i])
+      }
+      if (!closingIds.length) return false
+      layout.removePanels(closingIds)
+      return true
     }
 
     // Single authoritative mutation path for adding panels. Every caller
@@ -132,6 +190,42 @@
     }
 
     return layout
+  }
+
+  function uniquePanelIds(panelIds) {
+    const ids = []
+    const seen = {}
+    for (let i = 0; i < (panelIds || []).length; i++) {
+      const id = String(panelIds[i] || '')
+      if (!id || seen[id]) continue
+      seen[id] = true
+      ids.push(id)
+    }
+    return ids
+  }
+
+  function createPanelCloseGuard(panel) {
+    const keys = Object.keys(panel)
+    const values = new Array(keys.length)
+    for (let i = 0; i < keys.length; i++) values[i] = panel[keys[i]]
+    return { panel: panel, keys: keys, values: values, dirty: panel.dirty }
+  }
+
+  function isPanelCloseGuardCurrent(guard, panel) {
+    if (panel === guard.panel) return sameGuardFields(guard, panel, false)
+    return guard.dirty === true && panel.dirty === false && sameGuardFields(guard, panel, true)
+  }
+
+  function sameGuardFields(guard, panel, ignoreDirty) {
+    const keys = Object.keys(panel)
+    if (keys.length !== guard.keys.length) return false
+    for (let i = 0; i < guard.keys.length; i++) {
+      const key = guard.keys[i]
+      if (!Object.prototype.hasOwnProperty.call(panel, key)) return false
+      if (ignoreDirty && key === 'dirty') continue
+      if (!Object.is(panel[key], guard.values[i])) return false
+    }
+    return true
   }
 
   // ── DockRuntime ───────────────────────────────────────

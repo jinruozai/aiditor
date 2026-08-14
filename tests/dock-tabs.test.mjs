@@ -35,14 +35,16 @@ aiditor.registerComponent('case.emptyScene', {
 
 function makeCtx() {
   const added = []
+  const closeRequests = []
   return {
     added: added,
+    closeRequests: closeRequests,
     ctx: {
       dock: {
         panels: function () { return [] },
         activeId: function () { return null },
         activatePanel: function () {},
-        removePanel: function () {},
+        requestClosePanel: function (id, reason) { closeRequests.push({ id: id, reason: reason }); return Promise.resolve(true) },
         addPanel: function (partial) { added.push(partial); return { panelId: 'new-panel' } },
         id: function () { return 'dock-a' },
       },
@@ -55,6 +57,8 @@ const tabs = aiditor.resolveComponent('tab-standard')
 let env = makeCtx()
 tabs.factory({ peek: function () { return {} } }, env.ctx)
 assert.equal(tabCalls[0].addable, false)
+await tabCalls[0].onClose('panel-a')
+assert.deepEqual(env.closeRequests, [{ id: 'panel-a', reason: 'close' }])
 tabCalls[0].onAdd()
 assert.equal(env.added.length, 0)
 

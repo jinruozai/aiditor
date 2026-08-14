@@ -101,7 +101,7 @@
       canCollapse: scopedDerived(runtime, function () { return aiditor.canCollapseDock(treeSig(), dockIdSig()) }),
 
       activatePanel: function (id) { layout.activatePanel(id) },
-      removePanel:   function (id) { layout.removePanel(id) },
+      requestClosePanel: function (id, reason) { return layout.requestClosePanels([id], reason) },
       // Return shape matches the public LayoutHandle (§ 4.9 Layer 1):
       // `{ panelId }`, never a bare string. One operation, one shape.
       addPanel:      function (partial) { return { panelId: layout.addPanel(dockIdSig(), partial) } },
@@ -141,7 +141,7 @@
       },
 
       promote: function () { layout.promotePanel(panelId) },
-      close:   function () { layout.removePanel(panelId) },
+      close:   function (reason) { return layout.requestClosePanels([panelId], reason) },
       popOut:  function () {
         if (aiditor._dock.popOutPanel) aiditor._dock.popOutPanel(panelId, layout)
       },

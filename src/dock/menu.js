@@ -29,7 +29,7 @@
     commands.register('aiditor.dock.closeActivePanel', {
       title: 'Close Active',
       icon: 'x',
-      run: function (_, ctx) { if (ctx.activeId) ctx.layout.removePanel(ctx.activeId) },
+      run: function (_, ctx) { return ctx.activeId ? ctx.layout.requestClosePanels([ctx.activeId], 'close') : false },
     }, { owner: OWNER, layer: 'core' })
     commands.register('aiditor.dock.closeOtherPanels', {
       title: 'Close Others',
@@ -203,20 +203,20 @@
   }
 
   function closeOtherPanels(dockId, activeId, layout) {
-    if (!activeId) return
+    if (!activeId) return false
     const dock = findDock(layout.treeSig.peek(), dockId)
-    if (!dock) return
+    if (!dock) return false
     const ids = dock.node.panels
       .filter(function (p) { return p.id !== activeId })
       .map(function (p) { return p.id })
-    for (let i = 0; i < ids.length; i++) layout.removePanel(ids[i])
+    return layout.requestClosePanels(ids, 'close-others')
   }
 
   function closeAllPanels(dockId, layout) {
     const dock = findDock(layout.treeSig.peek(), dockId)
-    if (!dock) return
+    if (!dock) return false
     const ids = dock.node.panels.map(function (p) { return p.id })
-    for (let i = 0; i < ids.length; i++) layout.removePanel(ids[i])
+    return layout.requestClosePanels(ids, 'close-all')
   }
 
   function openAddPanelMenu(pos, dockId, layout) {

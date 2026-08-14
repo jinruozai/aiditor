@@ -24,13 +24,13 @@ let tree = {
   activeId: 'panel-a',
 }
 
-let removed = null
+const closeRequests = []
 let promoted = null
 const layout = {
   dockMenu: true,
   treeSig: { peek: function () { return tree } },
   setTree: function (next) { tree = next },
-  removePanel: function (id) { removed = id },
+  requestClosePanels: function (ids, reason) { closeRequests.push({ ids: ids.slice(), reason: reason }); return Promise.resolve(true) },
   promotePanel: function (id) { promoted = id },
 }
 
@@ -68,7 +68,13 @@ removeWhenEmpty.onSelect()
 assert.equal(aiditor.findDock(tree, 'dock-a').node.removeWhenEmpty, false)
 
 panelMenu.items.find(function (item) { return item.label === 'Close Active' }).onSelect()
-assert.equal(removed, 'panel-a')
+assert.deepEqual(closeRequests.shift(), { ids: ['panel-a'], reason: 'close' })
+
+panelMenu.items.find(function (item) { return item.label === 'Close Others' }).onSelect()
+assert.deepEqual(closeRequests.shift(), { ids: ['panel-b'], reason: 'close-others' })
+
+panelMenu.items.find(function (item) { return item.label === 'Close All' }).onSelect()
+assert.deepEqual(closeRequests.shift(), { ids: ['panel-a', 'panel-b'], reason: 'close-all' })
 
 let opened = null
 aiditor.ui = { contextMenu: function (_, menuItems) { opened = menuItems } }

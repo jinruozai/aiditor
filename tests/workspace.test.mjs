@@ -88,7 +88,13 @@ await ws.restoreSnapshot(snapshot, { baseHash: aiditor.workspace.hashText('after
 assert.equal((await ws.readText('undo.txt')).text, 'before')
 assert.equal((await ws.capabilities()).mkdir, true)
 assert.equal((await ws.capabilities()).revealInSystem, false)
+assert.equal((await ws.capabilities()).pickSaveTarget, false)
 assert.deepEqual(await ws.revealInSystem('undo.txt', { select: true }), { ok: false, reason: 'unsupported' })
+await assert.rejects(function () { return ws.pickSaveTarget() }, function (err) {
+  assert.equal(err.code, 'UNSUPPORTED')
+  assert.equal(err.reason, 'unsupported')
+  return true
+})
 
 const createPreview = await ws.previewOperation({ op: 'writeText', path: 'preview/create.txt', text: 'one' })
 await ws.writeText('preview/create.txt', 'raced')
@@ -154,6 +160,21 @@ class FakeDirHandle {
   }
   async *values() {
     for (const name of Object.keys(this.entries)) yield this.entries[name]
+  }
+  async resolve(handle) {
+    async function visit(dir, path) {
+      for (const name of Object.keys(dir.entries)) {
+        const entry = dir.entries[name]
+        const next = path.concat(name)
+        if (entry === handle) return next
+        if (entry.kind === 'directory') {
+          const found = await visit(entry, next)
+          if (found) return found
+        }
+      }
+      return null
+    }
+    return visit(this, [])
   }
 }
 
@@ -265,7 +286,48 @@ const src = await root.getDirectoryHandle('src', { create: true })
 const nested = await root.getDirectoryHandle('nested', { create: true })
 src.entries['panel.js'] = new FakeFileHandle('panel.js', src, 'alpha\nbeta\n')
 nested.entries['other.js'] = new FakeFileHandle('other.js', nested, 'beta\n')
+src.entries['export.csv'] = new FakeFileHandle('export.csv', src, '')
+src.entries['wrong.txt'] = new FakeFileHandle('wrong.txt', src, '')
+let saveTargetHandle = src.entries['export.csv']
+let savePickerOptions = null
+window.showSaveFilePicker = async function (opts) {
+  savePickerOptions = opts
+  if (saveTargetHandle instanceof Error) throw saveTargetHandle
+  return saveTargetHandle
+}
 const fsa = aiditor.workspace.fromHandle(root)
+assert.equal((await fsa.capabilities()).pickSaveTarget, true)
+assert.equal(await fsa.pickSaveTarget({
+  suggestedName: 'export',
+  extensions: ['csv'],
+  description: 'CSV file',
+  mimeType: 'text/csv',
+}), 'src/export.csv')
+assert.equal(savePickerOptions.startIn, root)
+assert.equal(savePickerOptions.suggestedName, 'export.csv')
+assert.deepEqual(savePickerOptions.types, [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }])
+assert.equal(savePickerOptions.excludeAcceptAllOption, true)
+
+saveTargetHandle = src.entries['wrong.txt']
+await assert.rejects(function () {
+  return fsa.pickSaveTarget({ extensions: ['.csv'] })
+}, function (err) {
+  assert.equal(err.code, 'INVALID_EXTENSION')
+  return true
+})
+
+saveTargetHandle = new FakeFileHandle('outside.csv', null, '')
+await assert.rejects(function () {
+  return fsa.pickSaveTarget({ extensions: ['.csv'] })
+}, function (err) {
+  assert.equal(err.code, 'OUTSIDE_WORKSPACE')
+  assert.equal(err.reason, 'outside_workspace')
+  return true
+})
+
+saveTargetHandle = Object.assign(new Error('cancel'), { name: 'AbortError' })
+assert.equal(await fsa.pickSaveTarget({ extensions: ['.csv'] }), null)
+saveTargetHandle = src.entries['export.csv']
 assert.equal((await fsa.search('beta', { path: 'src', limit: 10 })).matches.length, 1)
 assert.equal((await fsa.search('beta', { path: 'src/panel.js', limit: 10 })).matches[0].path, 'src/panel.js')
 assert.equal((await fsa.capabilities()).search, true)

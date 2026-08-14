@@ -71,6 +71,8 @@
       replacePanel:  function (panelId, partial, opts)       { return { panelId: layout.replacePanel(panelId, partial, opts) } },
       reloadPanel:   function (panelId)                      { return { panelId: layout.reloadPanel(panelId) } },
       removePanel:   function (panelId)                      { layout.removePanel(panelId) },
+      requestClosePanel: function (panelId, reason)          { return layout.requestClosePanels([panelId], reason) },
+      requestClosePanels: function (panelIds, reason)        { return layout.requestClosePanels(panelIds, reason) },
       activatePanel: function (panelId)                      { layout.activatePanel(panelId) },
       promotePanel:  function (panelId)                      { layout.promotePanel(panelId) },
       movePanel:     function (panelId, dstDockId, dstIndex) { layout.movePanel(panelId, dstDockId, dstIndex) },

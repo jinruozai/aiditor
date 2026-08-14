@@ -192,7 +192,7 @@ aiditor/
       editor/                      # gradientInput / curveInput / codeInput / pathInput / fileInput
       container/                   # section / propRow / card / view / scrollArea / tabPanel
       timeline/                    # neutral numeric-axis layout + controlled Canvas/input surface
-      data/                        # list / tree / table / breadcrumbs / progressBar(全部虚拟化)
+      data/                        # list / tree / table / collectionBrowser / fileBrowser preset / breadcrumbs / progressBar(数据视口全部虚拟化)
       overlay/                     # menu / modal / drawer / alert / toast
       panel/                       # 能被 registerComponent 注册的 "panel 级" 内置 component
                                    # panel-list / inspector / dock-tabs(tab-standard/compact/collapsible/sidebar 预设) / log
@@ -228,7 +228,7 @@ aiditor/
 - Component 注册表 + ComponentContext 工厂(§ 4.8 / § 4.9)
 - Runtime loader `aiditor.runtime.loadScript` + owner-scoped cleanup。AI 新写 workspace panel 文件时,`aiditor.addPanelToDock({ component, dock, path })` 会先加载 `path` 注册 component,再放入 dock。
 - History 支持同步/异步 apply;`jump/undo/redo` 返回 Promise,apply 失败时 index 不前移/后移。内置 `history` panel 是通用交互 primitive,只绑定 `aiditor.history` 实例,不接项目 saved/file journal 语义。
-- Workspace v2 bounded contract:`readText/writeText`、二进制 blob IO、mkdir/copy/move/rename/delete、capabilities、稳定 stat(hash/mtime/size/kind)、object URL lease、bundle URL lease、snapshot/restore、可选 `revealInSystem` 平台能力。FSA/adapter IO 错误带稳定 `path/op/reason/code` 和 permission recovery 建议。它仍然只是文件边界,不是 project/asset 数据模型。
+- Workspace v2 bounded contract:`readText/writeText`、二进制 blob IO、mkdir/copy/move/rename/delete、capabilities、稳定 stat(hash/mtime/size/kind)、object URL lease、bundle URL lease、snapshot/restore、可选 `revealInSystem` 平台能力和 `pickSaveTarget()` 受限保存目标选择。FSA/adapter IO 错误带稳定 `path/op/reason/code` 和 permission recovery 建议。它仍然只是文件边界,不是 project/asset 数据模型。
 - Workspace 文本搜索使用统一 bounded walker:memory/FSA 直接复用,bridge adapter 在缺少 `search` 但具备 `list + readText` 时自动增强。结果统一返回 matches、部分错误、扫描统计和 limitHit,文件数/单文件大小/结果数均有界。
 - `aiditor.shortcuts.dispatchKey(input, surface?)` 允许桌面/原生宿主直接派发结构化按键快照;DOM keydown 与宿主输入共用同一套归一化、context/scope、优先级、用户 override 和 command 路由,不模拟 KeyboardEvent,不维护残留修饰键状态。
 - Dock 多 panel + detached DOM activate(§ 4.3)+ LRU dispose(§ 4.3)
@@ -243,7 +243,7 @@ aiditor/
 - 全部基于 caller-owned `value: signal<T>` 的"信号优先"设计 —— 组件不持有自己的 state
 - 全部走统一 cleanup 协议:`el.__aiditorCleanups: fn[]` + `aiditor.ui.dispose(el)`
 - Overlay 走 `_portal.js` 的 `#aiditor-portal-root` 单例
-- 数据组件(list/tree/table)直接虚拟化,tree 先 flatten 再复用 list 行;`fileBrowser` 是中性文件/列表/网格 primitive,`assetBrowser` 是兼容别名
+- 数据组件(list/tree/table/collectionBrowser)直接虚拟化。`collectionBrowser` 是稳定 key 的固定尺寸二维 Icon/List 集合 owner;`fileBrowser` 只提供路径、文件排序/渲染和文件型 action/drop context 预设,不复制选择、虚拟化或 DnD runtime。
 - `aiditor.ui.timeline` 提供中性单数值轴布局与受控 Canvas/输入生命周期;数据、绘制、选择、命令、history、播放和领域语义由宿主拥有
 - 全部 50+ 个组件 + 内部辅助 + 11 个 CSS 文件 = 已经 100% 编出 dist 并在 demo 里可以点
 - `aiditor.inspector` 是 UI 层通用检查器协议:ordered targets + provider.inspect + 内置 `inspector` dock panel。多选显示第一个 target,只有所有 target 都有且可写的字段才可编辑;业务对象语义、校验、持久化由 provider 所属编辑器负责。
@@ -386,7 +386,7 @@ Tab component **就是一个普通 toolbar 组件**,没有任何特殊 API。它
 - 它在 `factory(propsSig, ctx)` 里订阅了 `ctx.dock.panels`(signal)和 `ctx.dock.activeId`(signal)
 - 它把每个 panel 渲染成一个按钮
 - 点击调 `ctx.dock.activatePanel(id)`
-- 关闭按钮调 `ctx.dock.removePanel(id)`
+- 关闭按钮调 `ctx.dock.requestClosePanel(id, 'close')`,统一经过异步 `onPanelCloseRequest` hook
 
 任何第三方 component 都能做同样的事。框架不给它开任何后门。
 
@@ -480,6 +480,9 @@ LayoutConfig = {
   dockMenu?: boolean,                // 默认 false; true 时安装内置 Dock Menu contribution
   hooks?: {
     onDirtyDiscard?: (panels: PanelData[]) => 'discard' | 'cancel',   // § 4.2
+    onPanelCloseRequest?: (request: { reason, panelIds, panels }) => boolean | Promise<boolean>,
+    // Hook 内允许保存:原 dirty:true 最终仅变为 dirty:false 时许可仍有效;
+    // clean→dirty、保存后再次 dirty、replacement 或其他 PanelData 变化使整批许可失效。
   },
 }
 
@@ -490,7 +493,9 @@ LayoutHandle = {
 
   // 便利 API = 对应纯函数 + setTree + 返回生成的 id
   addPanel(dockId, partial, opts?):               { panelId },
-  removePanel(panelId):                           void,
+  requestClosePanel(panelId, reason?):            Promise<boolean>,
+  requestClosePanels(panelIds, reason?):          Promise<boolean>,
+  removePanel(panelId):                           void, // 内部/宿主强制清理,不走关闭请求 hook
   activatePanel(panelId):                         void,
   movePanel(panelId, dstDockId, dstIndex?):       void,
   splitDock(dockId, dir, side, ratio?, opts?):    { newDockId, newPanelId? },
@@ -684,7 +689,7 @@ ctx.dock = {
   activeId:  signal<string|null>,
   collapsed: signal<boolean>,
   focused:   signal<boolean>,
-  activatePanel(id), removePanel(id), addPanel(partial),
+  activatePanel(id), requestClosePanel(id, reason), addPanel(partial),
   toggleFocus(), setFocus(b), setCollapsed(b),
 }
 ```
@@ -944,6 +949,7 @@ git diff --check
   - `createObjectUrl(path)` 返回 `{ url, path, hash, size, mime, release }` lease;支持 owner cleanup。
   - `createUrlBundle(paths)` 为 glTF/模型这类多文件预览提供 bundle lease,但框架不解析资源图。
   - `revealInSystem(path,{select})` 是可选平台 adapter capability;memory/FSA 默认 `false`,desktop/native bridge 可实现,返回稳定 reason,不暴露绝对路径。
+  - `pickSaveTarget({suggestedName,extensions,description,mimeType})` 是可选保存目标选择 capability;FSA 从 workspace root 打开系统 picker,只返回验证后的相对路径,不暴露 handle,不替代 preview/apply/CAS。
   - `snapshot(path[, { binary:true }])` / `compareSnapshot()` / `restoreSnapshot()` 只提供 undo/redo 的底层快照存储和 CAS,不是 FileOperationJournal。
 - `src/ai/workdir.js` 新增 model-facing 通用 workspace tools:
   - `workspace.capabilities`
@@ -952,7 +958,7 @@ git diff --check
   - `workspace.move`
   - `workspace.delete`
   这些都是泛用文件操作,带 preview/apply;没有引入 project/asset 概念。
-- `src/ui/data/fileBrowser.js` 实现中性的 `aiditor.ui.fileBrowser`;`aiditor.ui.assetBrowser` 是同一份通用合同的别名,不引入第二套 asset 模型。
+- `src/ui/data/collectionBrowser.js` 实现无领域语义的 `aiditor.ui.collectionBrowser`:完整投影 key 校验、受控选择、固定尺寸二维虚拟化、键盘/框选、Context Menu,并且只适配现有 `dragsource/dropzone`。`src/ui/data/fileBrowser.js` 是它的薄文件预设。Selection 只有 writable `selected` Signal 一个 owner;自定义 renderer 只有 `renderItem(itemSignal,ctx)` 只读 Signal 合同,不保留 callback-controlled selection、旧 value/index renderer 或 `assetBrowser` 别名。
 - 文档已对齐:
   - `doc/workspace.md`
   - `doc/resource-versioning.md`

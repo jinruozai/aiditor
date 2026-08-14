@@ -170,7 +170,7 @@ The lightweight standalone slices can be loaded directly:
 ```
 
 `aiditor-mini` excludes Inspector, schema-driven forms, arrays/structs,
-Tree/Table/FileBrowser, advanced editors, built-in panels, and the editor
+Tree/Table/CollectionBrowser/FileBrowser, advanced editors, built-in panels, and the editor
 component palette/registry. Its controls are used directly through
 `aiditor.ui.*`.
 `aiditor-editor` includes those generic editor widgets. Both are standalone
@@ -222,6 +222,7 @@ ctx.dock.panels()
 ctx.dock.activeId()
 ctx.dock.addPanel({ component: 'example.panel', title: 'New' })
 ctx.dock.activatePanel(panelId)
+ctx.dock.requestClosePanel(panelId, 'close')
 ctx.dock.toggleFocus()
 
 ctx.bus.emit('topic', payload)
@@ -240,7 +241,9 @@ items contributed by the active panel receive both.
 
 ```js
 layout.addPanel(dockIdOrName, partialPanel, opts)
-layout.removePanel(panelId)
+layout.requestClosePanel(panelId, 'close')
+layout.requestClosePanels(panelIds, 'close-all')
+layout.removePanel(panelId) // forced cleanup; bypasses the close-request hook
 layout.activatePanel(panelId)
 layout.promotePanel(panelId)
 layout.movePanel(panelId, targetDockIdOrName, targetIndex)
@@ -251,6 +254,15 @@ layout.setTree(nextTree)
 layout.subscribe(function (tree) {})
 layout.destroy()
 ```
+
+User-initiated close actions route through `hooks.onPanelCloseRequest`. The hook
+receives one atomic batch `{ reason, panelIds, panels }` and may resolve `true`
+to allow it or `false` to cancel it. Save prompts and dirty policy belong to the
+host. A hook may save a dirty panel before resolving: the close remains valid
+only when an original `dirty:true` panel becomes `dirty:false` and every other
+PanelData field is unchanged. Clean-to-dirty, re-dirty, replacement, and other
+PanelData changes invalidate the whole close batch. Runtime teardown, extension
+uninstall, and migration cleanup use the separate forced `removePanel()` path.
 
 The same immutable tree helpers are also available as pure functions:
 
@@ -289,7 +301,8 @@ sync/async `jump`, `undo`, and `redo`, and the built-in `history` panel binds to
 named history instances without owning project saved state. Workspace is a
 bounded file primitive layer: text/blob IO, stat/version checks, preview/apply,
 snapshots, object URL leases, permission recovery, and optional desktop
-`revealInSystem`.
+`revealInSystem`, plus bounded save-target selection where the adapter supports
+it.
 
 ### UI Library
 

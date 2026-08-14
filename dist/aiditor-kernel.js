@@ -2681,6 +2681,80 @@
     return i >= 0 ? name.slice(i) : ''
   }
 
+  function normalizeSaveTargetOptions(opts) {
+    const input = opts || {}
+    const extensions = []
+    if (input.extensions != null && !Array.isArray(input.extensions)) {
+      throw workspaceError('INVALID_EXTENSIONS', 'workspace.pickSaveTarget: extensions must be an array')
+    }
+    for (let i = 0; i < (input.extensions || []).length; i++) {
+      let ext = String(input.extensions[i] || '').trim().toLowerCase()
+      if (!ext) continue
+      if (ext[0] !== '.') ext = '.' + ext
+      if (!/^\.[a-z0-9][a-z0-9._+-]*$/i.test(ext)) {
+        throw workspaceError('INVALID_EXTENSION', 'workspace.pickSaveTarget: invalid extension: ' + ext)
+      }
+      if (extensions.indexOf(ext) < 0) extensions.push(ext)
+    }
+
+    let suggestedName = String(input.suggestedName || '')
+    if (suggestedName && /[\\/]/.test(suggestedName)) {
+      throw workspaceError('INVALID_SUGGESTED_NAME', 'workspace.pickSaveTarget: suggestedName must be a file name')
+    }
+    if (suggestedName && extensions.length) {
+      const ext = extensionOf(suggestedName)
+      if (!ext) suggestedName += extensions[0]
+      else if (!matchesSaveExtension(suggestedName, extensions)) {
+        throw workspaceError('INVALID_EXTENSION', 'workspace.pickSaveTarget: suggestedName does not match extensions')
+      }
+    }
+
+    return {
+      suggestedName: suggestedName,
+      extensions: extensions,
+      description: String(input.description || ''),
+      mimeType: String(input.mimeType || 'application/octet-stream'),
+    }
+  }
+
+  function matchesSaveExtension(path, extensions) {
+    const name = fileName(normalizePath(path)).toLowerCase()
+    for (let i = 0; i < extensions.length; i++) {
+      if (name.slice(-extensions[i].length) === extensions[i]) return true
+    }
+    return false
+  }
+
+  function normalizeSaveTargetPath(path, extensions) {
+    const raw = String(path || '')
+    if (!raw || /^[\\/]/.test(raw) || /^[a-z]:[\\/]/i.test(raw)) {
+      throw workspaceError('OUTSIDE_WORKSPACE', 'workspace.pickSaveTarget: target is outside the workspace')
+    }
+    const normalized = normalizePath(raw)
+    if (!normalized) throw workspaceError('INVALID_TARGET', 'workspace.pickSaveTarget: target file is required')
+    if (extensions.length && !matchesSaveExtension(normalized, extensions)) {
+      throw workspaceError('INVALID_EXTENSION', 'workspace.pickSaveTarget: target extension is not allowed: ' + normalized)
+    }
+    return normalized
+  }
+
+  function nativeSavePickerOptions(rootHandle, opts) {
+    const out = { startIn: rootHandle }
+    if (opts.suggestedName) out.suggestedName = opts.suggestedName
+    if (opts.extensions.length) {
+      out.types = [{
+        description: opts.description || opts.extensions.join(', '),
+        accept: (function () {
+          const accept = {}
+          accept[opts.mimeType] = opts.extensions.slice()
+          return accept
+        })(),
+      }]
+      out.excludeAcceptAllOption = true
+    }
+    return out
+  }
+
   function hasTruncationMarker(text) {
     return String(text || '').indexOf('...[truncated]') >= 0
   }
@@ -3016,6 +3090,7 @@
     if (key === 'objectUrl') return typeof URL !== 'undefined' && !!URL.createObjectURL && !!adapter.readBlob
     if (key === 'permissionRecovery') return !!adapter.recoverPermission
     if (key === 'revealInSystem') return !!adapter.__aiditorRevealInSystemSupported
+    if (key === 'pickSaveTarget') return !!adapter.__aiditorPickSaveTargetSupported
     if (key === 'previewOperation' || key === 'applyOperation') return true
     if (key === 'snapshot') return !!adapter.stat && !!adapter.readBlob && !!adapter.writeBlob
     return !!adapter[key]
@@ -3026,7 +3101,7 @@
       'list', 'search', 'readText', 'writeText', 'readBlob', 'writeBlob',
       'mkdir', 'move', 'copy', 'delete', 'recursiveDelete', 'stat',
       'objectUrl', 'snapshot', 'previewOperation', 'applyOperation',
-      'revealInSystem', 'permissionRecovery', 'watch',
+      'revealInSystem', 'pickSaveTarget', 'permissionRecovery', 'watch',
     ]
     const out = {}
     keys.forEach(function (key) { out[key] = capabilityValue(adapter, key) })
@@ -3085,7 +3160,9 @@
     const api = adapter
     const adapterCapabilities = api.capabilities
     const adapterRevealInSystem = api.revealInSystem
+    const adapterPickSaveTarget = api.pickSaveTarget
     api.__aiditorRevealInSystemSupported = typeof adapterRevealInSystem === 'function'
+    api.__aiditorPickSaveTargetSupported = typeof adapterPickSaveTarget === 'function'
 
     if (!api.search && api.list && api.readText) {
       api.search = function (query, opts) { return boundedTextSearch(api, query, opts || {}) }
@@ -3095,7 +3172,26 @@
       const caps = adapterCapabilities ? adapterCapabilities.call(api) : defaultCapabilities(api)
       caps.search = !!api.search
       if (caps.revealInSystem == null) caps.revealInSystem = !!api.__aiditorRevealInSystemSupported
+      caps.pickSaveTarget = !!api.__aiditorPickSaveTargetSupported
       return caps
+    }
+
+    api.pickSaveTarget = async function (opts) {
+      if (!api.__aiditorPickSaveTargetSupported) {
+        throw workspaceError('UNSUPPORTED', 'workspace.pickSaveTarget: save picker is not supported', {
+          op: 'pickSaveTarget', reason: 'unsupported',
+        })
+      }
+      const options = normalizeSaveTargetOptions(opts)
+      let path
+      try {
+        path = await adapterPickSaveTarget.call(api, options)
+      } catch (err) {
+        if (err && err.name === 'AbortError') return null
+        throw err
+      }
+      if (path == null) return null
+      return normalizeSaveTargetPath(path, options.extensions)
     }
 
     api.revealInSystem = async function (path, opts) {
@@ -4025,6 +4121,29 @@
         const mode = typeof options === 'string' ? options : options && options.mode || 'readwrite'
         return await rootHandle.requestPermission({ mode: mode }) === 'granted'
       },
+    }
+    if (typeof window.showSaveFilePicker === 'function' && typeof rootHandle.resolve === 'function') {
+      api.pickSaveTarget = async function (opts) {
+        let handle
+        try {
+          handle = await window.showSaveFilePicker(nativeSavePickerOptions(rootHandle, opts))
+        } catch (err) {
+          if (err && err.name === 'AbortError') return null
+          throw structuredWorkspaceError('pickSaveTarget', '', err)
+        }
+        let parts
+        try {
+          parts = await rootHandle.resolve(handle)
+        } catch (err) {
+          throw structuredWorkspaceError('pickSaveTarget', '', err)
+        }
+        if (!parts || !parts.length) {
+          throw workspaceError('OUTSIDE_WORKSPACE', 'workspace.pickSaveTarget: target is outside the workspace', {
+            op: 'pickSaveTarget', reason: 'outside_workspace',
+          })
+        }
+        return parts.join('/')
+      }
     }
     return enhanceWorkspace(api)
   }
@@ -4986,7 +5105,7 @@
       canCollapse: scopedDerived(runtime, function () { return aiditor.canCollapseDock(treeSig(), dockIdSig()) }),
 
       activatePanel: function (id) { layout.activatePanel(id) },
-      removePanel:   function (id) { layout.removePanel(id) },
+      requestClosePanel: function (id, reason) { return layout.requestClosePanels([id], reason) },
       // Return shape matches the public LayoutHandle (§ 4.9 Layer 1):
       // `{ panelId }`, never a bare string. One operation, one shape.
       addPanel:      function (partial) { return { panelId: layout.addPanel(dockIdSig(), partial) } },
@@ -5026,7 +5145,7 @@
       },
 
       promote: function () { layout.promotePanel(panelId) },
-      close:   function () { layout.removePanel(panelId) },
+      close:   function (reason) { return layout.requestClosePanels([panelId], reason) },
       popOut:  function () {
         if (aiditor._dock.popOutPanel) aiditor._dock.popOutPanel(panelId, layout)
       },
@@ -5106,15 +5225,73 @@
       maybeEvictLRU(layout)
     }
 
-    layout.removePanel = function (panelId) {
+    layout.removePanels = function (panelIds) {
       if (layout.disposed) return
-      const dr = findOwningDockRuntime(layout, panelId)
-      const pr = dr && dr.panelRuntimes.get(panelId)
-      layout.setTree(aiditor.removePanel(treeSig.peek(), panelId))
-      if (pr) {
-        disposePanelRuntime(pr)
-        dr.panelRuntimes.delete(panelId)
+      const ids = uniquePanelIds(panelIds)
+      const runtimes = []
+      let next = treeSig.peek()
+      for (let i = 0; i < ids.length; i++) {
+        const dr = findOwningDockRuntime(layout, ids[i])
+        const pr = dr && dr.panelRuntimes.get(ids[i])
+        if (pr) runtimes.push({ dock: dr, panel: pr, id: ids[i] })
+        next = aiditor.removePanel(next, ids[i])
       }
+      layout.setTree(next)
+      for (let i = 0; i < runtimes.length; i++) {
+        const item = runtimes[i]
+        if (item.dock.panelRuntimes.get(item.id) !== item.panel) continue
+        disposePanelRuntime(item.panel)
+        item.dock.panelRuntimes.delete(item.id)
+      }
+    }
+
+    layout.removePanel = function (panelId) {
+      layout.removePanels([panelId])
+    }
+
+    layout.requestClosePanels = async function (panelIds, reason) {
+      if (layout.disposed) return false
+      const ids = uniquePanelIds(panelIds)
+      const panels = []
+      const guards = []
+      const liveIds = []
+      const current = treeSig.peek()
+      for (let i = 0; i < ids.length; i++) {
+        const found = aiditor.findPanel(current, ids[i])
+        if (!found) continue
+        liveIds.push(ids[i])
+        panels.push(found.panel)
+        guards.push(createPanelCloseGuard(found.panel))
+      }
+      if (!panels.length) return false
+
+      const hook = layout.hooks.onPanelCloseRequest
+      if (hook) {
+        let allowed
+        try {
+          allowed = await hook({
+            reason: reason || 'close',
+            panelIds: liveIds.slice(),
+            panels: panels.slice(),
+          })
+        } catch (err) {
+          aiditor.reportError({ scope: 'dock', action: 'panel-close-request' }, err)
+          return false
+        }
+        if (allowed !== true) return false
+      }
+
+      const closingIds = []
+      const latest = treeSig.peek()
+      for (let i = 0; i < liveIds.length; i++) {
+        const found = aiditor.findPanel(latest, liveIds[i])
+        if (!found) continue
+        if (!isPanelCloseGuardCurrent(guards[i], found.panel)) return false
+        closingIds.push(liveIds[i])
+      }
+      if (!closingIds.length) return false
+      layout.removePanels(closingIds)
+      return true
     }
 
     // Single authoritative mutation path for adding panels. Every caller
@@ -5188,6 +5365,42 @@
     }
 
     return layout
+  }
+
+  function uniquePanelIds(panelIds) {
+    const ids = []
+    const seen = {}
+    for (let i = 0; i < (panelIds || []).length; i++) {
+      const id = String(panelIds[i] || '')
+      if (!id || seen[id]) continue
+      seen[id] = true
+      ids.push(id)
+    }
+    return ids
+  }
+
+  function createPanelCloseGuard(panel) {
+    const keys = Object.keys(panel)
+    const values = new Array(keys.length)
+    for (let i = 0; i < keys.length; i++) values[i] = panel[keys[i]]
+    return { panel: panel, keys: keys, values: values, dirty: panel.dirty }
+  }
+
+  function isPanelCloseGuardCurrent(guard, panel) {
+    if (panel === guard.panel) return sameGuardFields(guard, panel, false)
+    return guard.dirty === true && panel.dirty === false && sameGuardFields(guard, panel, true)
+  }
+
+  function sameGuardFields(guard, panel, ignoreDirty) {
+    const keys = Object.keys(panel)
+    if (keys.length !== guard.keys.length) return false
+    for (let i = 0; i < guard.keys.length; i++) {
+      const key = guard.keys[i]
+      if (!Object.prototype.hasOwnProperty.call(panel, key)) return false
+      if (ignoreDirty && key === 'dirty') continue
+      if (!Object.is(panel[key], guard.values[i])) return false
+    }
+    return true
   }
 
   // ── DockRuntime ───────────────────────────────────────
@@ -5846,7 +6059,7 @@
     commands.register('aiditor.dock.closeActivePanel', {
       title: 'Close Active',
       icon: 'x',
-      run: function (_, ctx) { if (ctx.activeId) ctx.layout.removePanel(ctx.activeId) },
+      run: function (_, ctx) { return ctx.activeId ? ctx.layout.requestClosePanels([ctx.activeId], 'close') : false },
     }, { owner: OWNER, layer: 'core' })
     commands.register('aiditor.dock.closeOtherPanels', {
       title: 'Close Others',
@@ -6020,20 +6233,20 @@
   }
 
   function closeOtherPanels(dockId, activeId, layout) {
-    if (!activeId) return
+    if (!activeId) return false
     const dock = findDock(layout.treeSig.peek(), dockId)
-    if (!dock) return
+    if (!dock) return false
     const ids = dock.node.panels
       .filter(function (p) { return p.id !== activeId })
       .map(function (p) { return p.id })
-    for (let i = 0; i < ids.length; i++) layout.removePanel(ids[i])
+    return layout.requestClosePanels(ids, 'close-others')
   }
 
   function closeAllPanels(dockId, layout) {
     const dock = findDock(layout.treeSig.peek(), dockId)
-    if (!dock) return
+    if (!dock) return false
     const ids = dock.node.panels.map(function (p) { return p.id })
-    for (let i = 0; i < ids.length; i++) layout.removePanel(ids[i])
+    return layout.requestClosePanels(ids, 'close-all')
   }
 
   function openAddPanelMenu(pos, dockId, layout) {
@@ -7474,6 +7687,8 @@
       replacePanel:  function (panelId, partial, opts)       { return { panelId: layout.replacePanel(panelId, partial, opts) } },
       reloadPanel:   function (panelId)                      { return { panelId: layout.reloadPanel(panelId) } },
       removePanel:   function (panelId)                      { layout.removePanel(panelId) },
+      requestClosePanel: function (panelId, reason)          { return layout.requestClosePanels([panelId], reason) },
+      requestClosePanels: function (panelIds, reason)        { return layout.requestClosePanels(panelIds, reason) },
       activatePanel: function (panelId)                      { layout.activatePanel(panelId) },
       promotePanel:  function (panelId)                      { layout.promotePanel(panelId) },
       movePanel:     function (panelId, dstDockId, dstIndex) { layout.movePanel(panelId, dstDockId, dstIndex) },

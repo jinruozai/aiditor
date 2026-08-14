@@ -101,6 +101,7 @@ workspace.createUrlBundle(paths, options)
 workspace.revokeObjectUrl(url)
 workspace.releaseObjectUrls(owner)
 workspace.revealInSystem(path, options)
+workspace.pickSaveTarget(options)
 workspace.mkdir(path)
 workspace.copy(from, to, options)
 workspace.move(from, to, options)
@@ -217,6 +218,25 @@ capability is true, and should handle failures through their own log or UI.
 This API is not a mutation, not a preview/apply operation, and not editor
 history. It is also distinct from editor-internal reveal behavior such as
 selecting a file in an application tree.
+
+## Save Target Picker
+
+File System Access workspaces can select a save target without exposing the
+selected handle:
+
+```js
+const path = await workspace.pickSaveTarget({
+  suggestedName: 'table.csv',
+  extensions: ['.csv'],
+  description: 'CSV file',
+  mimeType: 'text/csv',
+})
+```
+
+The picker starts in the workspace root. The adapter resolves the chosen handle
+back through that root, rejects targets outside it or outside `extensions`, and
+returns a normalized relative path. Cancellation returns `null`. This selects a
+path only; callers still save through Workspace preview/apply and CAS.
 
 ## Snapshots
 

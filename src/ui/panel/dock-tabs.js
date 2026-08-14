@@ -49,7 +49,7 @@
         }
       },
       onClose: function (id) {
-        ctx.dock.removePanel(id)
+        return ctx.dock.requestClosePanel(id, 'close')
       },
       onAdd: function () {
         if (!addPanel || !addPanel.component) return

@@ -198,6 +198,80 @@
     return i >= 0 ? name.slice(i) : ''
   }
 
+  function normalizeSaveTargetOptions(opts) {
+    const input = opts || {}
+    const extensions = []
+    if (input.extensions != null && !Array.isArray(input.extensions)) {
+      throw workspaceError('INVALID_EXTENSIONS', 'workspace.pickSaveTarget: extensions must be an array')
+    }
+    for (let i = 0; i < (input.extensions || []).length; i++) {
+      let ext = String(input.extensions[i] || '').trim().toLowerCase()
+      if (!ext) continue
+      if (ext[0] !== '.') ext = '.' + ext
+      if (!/^\.[a-z0-9][a-z0-9._+-]*$/i.test(ext)) {
+        throw workspaceError('INVALID_EXTENSION', 'workspace.pickSaveTarget: invalid extension: ' + ext)
+      }
+      if (extensions.indexOf(ext) < 0) extensions.push(ext)
+    }
+
+    let suggestedName = String(input.suggestedName || '')
+    if (suggestedName && /[\\/]/.test(suggestedName)) {
+      throw workspaceError('INVALID_SUGGESTED_NAME', 'workspace.pickSaveTarget: suggestedName must be a file name')
+    }
+    if (suggestedName && extensions.length) {
+      const ext = extensionOf(suggestedName)
+      if (!ext) suggestedName += extensions[0]
+      else if (!matchesSaveExtension(suggestedName, extensions)) {
+        throw workspaceError('INVALID_EXTENSION', 'workspace.pickSaveTarget: suggestedName does not match extensions')
+      }
+    }
+
+    return {
+      suggestedName: suggestedName,
+      extensions: extensions,
+      description: String(input.description || ''),
+      mimeType: String(input.mimeType || 'application/octet-stream'),
+    }
+  }
+
+  function matchesSaveExtension(path, extensions) {
+    const name = fileName(normalizePath(path)).toLowerCase()
+    for (let i = 0; i < extensions.length; i++) {
+      if (name.slice(-extensions[i].length) === extensions[i]) return true
+    }
+    return false
+  }
+
+  function normalizeSaveTargetPath(path, extensions) {
+    const raw = String(path || '')
+    if (!raw || /^[\\/]/.test(raw) || /^[a-z]:[\\/]/i.test(raw)) {
+      throw workspaceError('OUTSIDE_WORKSPACE', 'workspace.pickSaveTarget: target is outside the workspace')
+    }
+    const normalized = normalizePath(raw)
+    if (!normalized) throw workspaceError('INVALID_TARGET', 'workspace.pickSaveTarget: target file is required')
+    if (extensions.length && !matchesSaveExtension(normalized, extensions)) {
+      throw workspaceError('INVALID_EXTENSION', 'workspace.pickSaveTarget: target extension is not allowed: ' + normalized)
+    }
+    return normalized
+  }
+
+  function nativeSavePickerOptions(rootHandle, opts) {
+    const out = { startIn: rootHandle }
+    if (opts.suggestedName) out.suggestedName = opts.suggestedName
+    if (opts.extensions.length) {
+      out.types = [{
+        description: opts.description || opts.extensions.join(', '),
+        accept: (function () {
+          const accept = {}
+          accept[opts.mimeType] = opts.extensions.slice()
+          return accept
+        })(),
+      }]
+      out.excludeAcceptAllOption = true
+    }
+    return out
+  }
+
   function hasTruncationMarker(text) {
     return String(text || '').indexOf('...[truncated]') >= 0
   }
@@ -533,6 +607,7 @@
     if (key === 'objectUrl') return typeof URL !== 'undefined' && !!URL.createObjectURL && !!adapter.readBlob
     if (key === 'permissionRecovery') return !!adapter.recoverPermission
     if (key === 'revealInSystem') return !!adapter.__aiditorRevealInSystemSupported
+    if (key === 'pickSaveTarget') return !!adapter.__aiditorPickSaveTargetSupported
     if (key === 'previewOperation' || key === 'applyOperation') return true
     if (key === 'snapshot') return !!adapter.stat && !!adapter.readBlob && !!adapter.writeBlob
     return !!adapter[key]
@@ -543,7 +618,7 @@
       'list', 'search', 'readText', 'writeText', 'readBlob', 'writeBlob',
       'mkdir', 'move', 'copy', 'delete', 'recursiveDelete', 'stat',
       'objectUrl', 'snapshot', 'previewOperation', 'applyOperation',
-      'revealInSystem', 'permissionRecovery', 'watch',
+      'revealInSystem', 'pickSaveTarget', 'permissionRecovery', 'watch',
     ]
     const out = {}
     keys.forEach(function (key) { out[key] = capabilityValue(adapter, key) })
@@ -602,7 +677,9 @@
     const api = adapter
     const adapterCapabilities = api.capabilities
     const adapterRevealInSystem = api.revealInSystem
+    const adapterPickSaveTarget = api.pickSaveTarget
     api.__aiditorRevealInSystemSupported = typeof adapterRevealInSystem === 'function'
+    api.__aiditorPickSaveTargetSupported = typeof adapterPickSaveTarget === 'function'
 
     if (!api.search && api.list && api.readText) {
       api.search = function (query, opts) { return boundedTextSearch(api, query, opts || {}) }
@@ -612,7 +689,26 @@
       const caps = adapterCapabilities ? adapterCapabilities.call(api) : defaultCapabilities(api)
       caps.search = !!api.search
       if (caps.revealInSystem == null) caps.revealInSystem = !!api.__aiditorRevealInSystemSupported
+      caps.pickSaveTarget = !!api.__aiditorPickSaveTargetSupported
       return caps
+    }
+
+    api.pickSaveTarget = async function (opts) {
+      if (!api.__aiditorPickSaveTargetSupported) {
+        throw workspaceError('UNSUPPORTED', 'workspace.pickSaveTarget: save picker is not supported', {
+          op: 'pickSaveTarget', reason: 'unsupported',
+        })
+      }
+      const options = normalizeSaveTargetOptions(opts)
+      let path
+      try {
+        path = await adapterPickSaveTarget.call(api, options)
+      } catch (err) {
+        if (err && err.name === 'AbortError') return null
+        throw err
+      }
+      if (path == null) return null
+      return normalizeSaveTargetPath(path, options.extensions)
     }
 
     api.revealInSystem = async function (path, opts) {
@@ -1542,6 +1638,29 @@
         const mode = typeof options === 'string' ? options : options && options.mode || 'readwrite'
         return await rootHandle.requestPermission({ mode: mode }) === 'granted'
       },
+    }
+    if (typeof window.showSaveFilePicker === 'function' && typeof rootHandle.resolve === 'function') {
+      api.pickSaveTarget = async function (opts) {
+        let handle
+        try {
+          handle = await window.showSaveFilePicker(nativeSavePickerOptions(rootHandle, opts))
+        } catch (err) {
+          if (err && err.name === 'AbortError') return null
+          throw structuredWorkspaceError('pickSaveTarget', '', err)
+        }
+        let parts
+        try {
+          parts = await rootHandle.resolve(handle)
+        } catch (err) {
+          throw structuredWorkspaceError('pickSaveTarget', '', err)
+        }
+        if (!parts || !parts.length) {
+          throw workspaceError('OUTSIDE_WORKSPACE', 'workspace.pickSaveTarget: target is outside the workspace', {
+            op: 'pickSaveTarget', reason: 'outside_workspace',
+          })
+        }
+        return parts.join('/')
+      }
     }
     return enhanceWorkspace(api)
   }
