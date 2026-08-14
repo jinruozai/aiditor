@@ -251,7 +251,9 @@ const approvalMessage = ai.findAgent(approvalAgent.id).messages.find(function (m
 })
 const approvalCall = approvalMessage.toolCalls[0]
 assert.equal(approvalCall.actor, approvalAgent.id)
+assert.equal(approvalCall.approvalPhase, 'apply')
 assert.equal(ai.applyToolCall(approvalAgent.id, approvalCall.id, 'user').status, 'applied')
+assert.equal(ai.findToolCall(approvalAgent.id, approvalCall.id).toolCall.approvalPhase, null)
 const resumed = ai.resumeAgent(approvalAgent.id)
 await resumed.promise
 assert.equal(ai.findAgent(approvalAgent.id).status, 'idle')
@@ -297,8 +299,12 @@ assert.equal(ai.findAgent(approvalRunAgent.id).messages.some(function (message) 
 }), true)
 
 let fullAccessRequests = 0
+let releaseFullAccessPreview
+const fullAccessPreview = new Promise(function (resolve) { releaseFullAccessPreview = resolve })
 registerTool('full-access-edit', {
-  preview: function (args) { return { before: args.before, after: args.after } },
+  preview: function (args) {
+    return fullAccessPreview.then(function () { return { before: args.before, after: args.after } })
+  },
   apply: function (preview) { return { applied: true, preview: preview } },
 })
 ai.registerTransport('full-access-flow', {
@@ -318,6 +324,13 @@ ai.registerTransport('full-access-flow', {
 ai.registerConnection('full-access-flow', { auth: { type: 'none' }, transport: { type: 'full-access-flow' }, configDefaults: {} })
 const fullAccessAgent = ai.createAgent({ name: 'Full Access', parentAgentId: parent.id, connection: 'full-access-flow', permissionMode: 'full', skillRefs: skillRefs(['full-access-edit']) })
 const fullAccessRun = ai.message.send(fullAccessAgent.id, { content: 'apply without asking' })
+await flush(3)
+const previewingFullAccessCall = ai.findAgent(fullAccessAgent.id).messages.find(function (message) {
+  return message.toolCalls && message.toolCalls.length
+}).toolCalls[0]
+assert.equal(previewingFullAccessCall.status, 'previewing')
+assert.equal(previewingFullAccessCall.approvalPhase, null)
+releaseFullAccessPreview()
 await fullAccessRun.promise
 assert.equal(ai.findAgent(fullAccessAgent.id).status, 'idle')
 assert.equal(fullAccessRequests, 2)
@@ -328,6 +341,39 @@ assert.equal(fullAccessMessage.toolCalls[0].status, 'applied')
 assert.equal(ai.findAgent(fullAccessAgent.id).messages.some(function (message) {
   return message.content === 'full access continued'
 }), true)
+
+let permissionHintRequests = 0
+ai.registerTransport('permission-hint-flow', {
+  toolProtocol: 'native',
+  send: function () {
+    permissionHintRequests++
+    if (permissionHintRequests > 1) return { role: 'assistant', content: 'permission failures handled' }
+    return {
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        { toolId: 'agent.read', args: { agentId: sibling.id } },
+        { toolId: 'agent.stop', args: { agentId: sibling.id } },
+      ],
+    }
+  },
+})
+ai.registerConnection('permission-hint-flow', { auth: { type: 'none' }, transport: { type: 'permission-hint-flow' }, configDefaults: {} })
+const permissionHintAgent = ai.createAgent({
+  name: 'Permission Hint',
+  parentAgentId: parent.id,
+  connection: 'permission-hint-flow',
+  permissionMode: 'full',
+  skillRefs: skillRefs(['agent.read', 'agent.stop']),
+})
+await ai.message.send(permissionHintAgent.id, { content: 'try inaccessible agent controls' }).promise
+const permissionHintCalls = ai.findAgent(permissionHintAgent.id).messages.find(function (message) {
+  return message.toolCalls && message.toolCalls.length === 2
+}).toolCalls
+assert.deepEqual(permissionHintCalls.map(function (call) { return call.errorDetails.code }), ['PERMISSION_DENIED', 'PERMISSION_DENIED'])
+assert.match(permissionHintCalls[0].errorDetails.hint, /descendant tree/)
+assert.match(permissionHintCalls[1].errorDetails.hint, /quest\.cancel/)
+assert.equal(permissionHintCalls.some(function (call) { return /alternate write paths/.test(call.errorDetails.hint) }), false)
 
 let cappedRequests = 0
 registerTool('capped-read', {

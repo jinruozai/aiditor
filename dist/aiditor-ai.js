@@ -5411,6 +5411,8 @@
         throw new Error('ai.tools.register: resolveModelSpecs must be a function for "' + name + '"')
       if (tool.permissionTargets != null && typeof tool.permissionTargets !== 'function')
         throw new Error('ai.tools.register: permissionTargets must be a function for "' + name + '"')
+      if (tool.permissionDeniedHint != null && typeof tool.permissionDeniedHint !== 'string')
+        throw new Error('ai.tools.register: permissionDeniedHint must be a string for "' + name + '"')
       if (tool.isConcurrencySafe != null && typeof tool.isConcurrencySafe !== 'function')
         throw new Error('ai.tools.register: isConcurrencySafe must be a function for "' + name + '"')
       if (tool.timeoutMs != null && (!Number.isFinite(tool.timeoutMs) || tool.timeoutMs <= 0))
@@ -5841,6 +5843,7 @@
       executorArgs: Object.prototype.hasOwnProperty.call(spec, 'executorArgs') ? spec.executorArgs : null,
       status: spec.status || 'proposed',
       executionId: spec.executionId || null,
+      approvalPhase: spec.approvalPhase || null,
       actor: actor || spec.actor || 'user',
       messageId: spec.messageId || null,
       preview: spec.preview || null,
@@ -5992,7 +5995,7 @@
 
   function beginToolExecution(agentId, callId, status) {
     const executionId = 'texec_' + Date.now().toString(36) + '_' + nextToolExecutionId++
-    const call = updateToolCall(agentId, callId, { status: status, executionId: executionId })
+    const call = updateToolCall(agentId, callId, { status: status, executionId: executionId, approvalPhase: null })
     return { call: call, executionId: executionId }
   }
 
@@ -6025,13 +6028,18 @@
     return 'TOOL_FAILED'
   }
 
-  function recoverHint(code) {
+  function recoverHint(code, toolId) {
     if (code === 'BASE_HASH_MISMATCH') return 'Read the current resource again, then retry with the new hash.'
     if (code === 'WORKSPACE_REQUIRED') return 'Ask the user to open or select a workspace before writing files.'
     if (code === 'FILE_NOT_FOUND') return 'Check the path with list/search tools, then retry with an existing path or create the file first.'
     if (code === 'INVALID_JSON') return 'Fix the JSON syntax and retry.'
     if (code === 'INVALID_JAVASCRIPT') return 'Fix the JavaScript syntax and retry.'
-    if (code === 'PERMISSION_DENIED') return 'Stop or ask the user for permission instead of trying alternate write paths.'
+    if (code === 'PERMISSION_DENIED') {
+      const tool = ai.tools && ai.tools.get(toolId)
+      return tool && tool.permissionDeniedHint
+        ? tool.permissionDeniedHint
+        : 'Stop and ask the user or owning agent for the required permission; do not retry equivalent actions through another Tool.'
+    }
     return ''
   }
 
@@ -6047,7 +6055,7 @@
       phase: phase || 'run',
       recoverable: code !== 'PERMISSION_DENIED' && code !== 'TOOL_CANCELLED',
     }
-    const hint = value && value.hint ? String(value.hint) : recoverHint(code)
+    const hint = value && value.hint ? String(value.hint) : recoverHint(code, toolId)
     if (hint) out.hint = hint
     if (value && typeof value === 'object') out.details = value
     return out
@@ -6231,6 +6239,7 @@
     return updateToolCall(agentId, callId, {
       status: 'failed',
       executionId: null,
+      approvalPhase: null,
       error: envelope.message,
       errorDetails: envelope,
       result: phase === 'apply' ? found.toolCall.result : envelope,
@@ -6275,15 +6284,19 @@
   function approveToolCall(agentId, callId, actor) {
     const state = getToolCallActionState(agentId, callId, actor || 'user')
     return state && state.canApprove
-      ? updateToolCall(agentId, callId, { status: 'approved' })
+      ? updateToolCall(agentId, callId, { status: 'approved', approvalPhase: null })
       : null
   }
 
   function rejectToolCall(agentId, callId, reason, actor) {
     const state = getToolCallActionState(agentId, callId, actor || 'user')
     return state && state.canReject
-      ? updateToolCall(agentId, callId, { status: 'rejected', error: reason || null })
+      ? updateToolCall(agentId, callId, { status: 'rejected', approvalPhase: null, error: reason || null })
       : null
+  }
+
+  function requestToolCallApproval(agentId, callId, phase) {
+    return updateToolCall(agentId, callId, { approvalPhase: phase === 'apply' ? 'apply' : 'run' })
   }
 
   function runToolCall(agentId, callId, actor, options) {
@@ -6353,6 +6366,7 @@
           return Object.assign({}, call, {
             status: 'failed',
             executionId: null,
+            approvalPhase: null,
             error: error,
             errorDetails: failureEnvelope(call.toolId, 'run', { code: 'TOOL_CANCELLED', message: error }),
             updatedAt: Date.now(),
@@ -6391,6 +6405,7 @@
   ai.previewToolCall = previewToolCall
   ai.approveToolCall = approveToolCall
   ai.rejectToolCall = rejectToolCall
+  ai.requestToolCallApproval = requestToolCallApproval
   ai.runToolCall = runToolCall
   ai.applyToolCall = applyToolCall
   ai.getToolCallActionState = getToolCallActionState
@@ -13840,6 +13855,7 @@
       },
     },
     permissions: ['tool.call'],
+    permissionDeniedHint: 'Read only this agent or agents in its descendant tree; ask the user or owning parent agent when broader visibility is required.',
     permissionTargets: agentTarget,
     isConcurrencySafe: function () { return true },
     run: readAgent,
@@ -14048,6 +14064,7 @@
     description: 'Emergency-stop the agent current run. Returns outcome stopped or not_running; use quest.cancel when a specific delegated quest is known.',
     schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call'],
+    permissionDeniedHint: 'Stop only this agent or a descendant it manages; use quest.cancel for a known delegated quest, or ask the user or owning parent agent.',
     permissionTargets: mutableAgentTarget,
     run: stopAgent,
   }, META)
@@ -16009,8 +16026,11 @@
     return Promise.resolve({ waiting: false })
   }
 
-  function isWaitingForUser(state) {
-    return !!(state && ((state.runDecision && state.runDecision.decision === 'ask') || (state.applyDecision && state.applyDecision.decision === 'ask')))
+  function approvalPhase(state) {
+    if (!state) return null
+    if (state.runDecision && state.runDecision.decision === 'ask') return 'run'
+    if (state.applyDecision && state.applyDecision.decision === 'ask') return 'apply'
+    return null
   }
 
   function permissionFailure(call, decision) {
@@ -16052,7 +16072,9 @@
             return result
           })
         }
-        if (isWaitingForUser(state)) {
+        const pendingApproval = approvalPhase(state)
+        if (pendingApproval) {
+          ai.requestToolCallApproval(agentId, call.id, pendingApproval)
           trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
           return { waiting: true }
         }
@@ -16066,6 +16088,7 @@
     }
     const state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
     if (state && state.runDecision && state.runDecision.decision === 'ask') {
+      ai.requestToolCallApproval(agentId, call.id, 'run')
       trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
       return Promise.resolve({ waiting: true })
     }
@@ -21555,6 +21578,7 @@
   }
 
   function renderToolActions(card, agentId, call, viewState) {
+    if (!call.approvalPhase) return
     const state = aiditor.ai.getToolCallActionState
       ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
       : null
@@ -21661,6 +21685,7 @@
 
   function actionableToolCalls(agentId, calls) {
     return (calls || []).filter(function (call) {
+      if (!call.approvalPhase) return false
       const state = aiditor.ai.getToolCallActionState
         ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
         : null

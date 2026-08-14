@@ -34,6 +34,8 @@
         throw new Error('ai.tools.register: resolveModelSpecs must be a function for "' + name + '"')
       if (tool.permissionTargets != null && typeof tool.permissionTargets !== 'function')
         throw new Error('ai.tools.register: permissionTargets must be a function for "' + name + '"')
+      if (tool.permissionDeniedHint != null && typeof tool.permissionDeniedHint !== 'string')
+        throw new Error('ai.tools.register: permissionDeniedHint must be a string for "' + name + '"')
       if (tool.isConcurrencySafe != null && typeof tool.isConcurrencySafe !== 'function')
         throw new Error('ai.tools.register: isConcurrencySafe must be a function for "' + name + '"')
       if (tool.timeoutMs != null && (!Number.isFinite(tool.timeoutMs) || tool.timeoutMs <= 0))

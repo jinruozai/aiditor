@@ -573,6 +573,7 @@
   }
 
   function renderToolActions(card, agentId, call, viewState) {
+    if (!call.approvalPhase) return
     const state = aiditor.ai.getToolCallActionState
       ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
       : null
@@ -679,6 +680,7 @@
 
   function actionableToolCalls(agentId, calls) {
     return (calls || []).filter(function (call) {
+      if (!call.approvalPhase) return false
       const state = aiditor.ai.getToolCallActionState
         ? aiditor.ai.getToolCallActionState(agentId, call.id, 'user')
         : null

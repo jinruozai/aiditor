@@ -100,6 +100,12 @@ call is an exclusive barrier. `tool/runtime.js` remains the only ToolCall state
 owner. Execution ids prevent a timed-out or cancelled promise from settling a
 newer or terminal ToolCall.
 
+Policy `allow` continues directly through preview, run, and apply without
+publishing review controls. Only `ask` creates an explicit ToolCall
+`approvalPhase` (`run` or `apply`), and Transcript actions render solely from
+that state. Tools may declare a semantic `permissionDeniedHint`; it only guides
+recovery and never changes the centralized Policy decision.
+
 ## Context and references
 
 Context providers capture small current facts, such as active editor identity

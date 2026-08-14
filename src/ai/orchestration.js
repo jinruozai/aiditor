@@ -503,6 +503,7 @@
       },
     },
     permissions: ['tool.call'],
+    permissionDeniedHint: 'Read only this agent or agents in its descendant tree; ask the user or owning parent agent when broader visibility is required.',
     permissionTargets: agentTarget,
     isConcurrencySafe: function () { return true },
     run: readAgent,
@@ -711,6 +712,7 @@
     description: 'Emergency-stop the agent current run. Returns outcome stopped or not_running; use quest.cancel when a specific delegated quest is known.',
     schema: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string' } } },
     permissions: ['tool.call'],
+    permissionDeniedHint: 'Stop only this agent or a descendant it manages; use quest.cancel for a known delegated quest, or ask the user or owning parent agent.',
     permissionTargets: mutableAgentTarget,
     run: stopAgent,
   }, META)

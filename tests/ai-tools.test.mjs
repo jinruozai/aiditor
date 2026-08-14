@@ -40,6 +40,9 @@ function registerSkill(name, spec, meta) { return ai.skills.register(name, spec,
 function registerContext(name, spec, meta) { return ai.context.register(name, spec, meta || TEST_META) }
 
 assert.throws(function () { ai.tools.register('owner.missing', {}) }, /owner is required/)
+assert.throws(function () {
+  registerTool('invalid.permission-hint', { permissionDeniedHint: function () {}, run: function () {} })
+}, /permissionDeniedHint must be a string/)
 assert.throws(function () { ai.skills.register('owner.missing', {}) }, /owner is required/)
 assert.throws(function () { ai.context.register('owner.missing', {}) }, /owner is required/)
 

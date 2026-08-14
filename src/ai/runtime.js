@@ -1008,8 +1008,11 @@
     return Promise.resolve({ waiting: false })
   }
 
-  function isWaitingForUser(state) {
-    return !!(state && ((state.runDecision && state.runDecision.decision === 'ask') || (state.applyDecision && state.applyDecision.decision === 'ask')))
+  function approvalPhase(state) {
+    if (!state) return null
+    if (state.runDecision && state.runDecision.decision === 'ask') return 'run'
+    if (state.applyDecision && state.applyDecision.decision === 'ask') return 'apply'
+    return null
   }
 
   function permissionFailure(call, decision) {
@@ -1051,7 +1054,9 @@
             return result
           })
         }
-        if (isWaitingForUser(state)) {
+        const pendingApproval = approvalPhase(state)
+        if (pendingApproval) {
+          ai.requestToolCallApproval(agentId, call.id, pendingApproval)
           trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
           return { waiting: true }
         }
@@ -1065,6 +1070,7 @@
     }
     const state = ai.getToolCallActionState ? ai.getToolCallActionState(agentId, call.id, actor) : null
     if (state && state.runDecision && state.runDecision.decision === 'ask') {
+      ai.requestToolCallApproval(agentId, call.id, 'run')
       trace(Object.assign(toolTraceBase(agentId, call), { type: 'tool_waiting_approval', status: 'waiting_approval', summary: toolCallName(call) }))
       return Promise.resolve({ waiting: true })
     }

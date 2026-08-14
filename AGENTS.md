@@ -251,6 +251,7 @@ aiditor/
 **AI Host(可选层)**:
 - `src/ai/permission.js` 是统一 Policy owner。四态 `allow/deny/ask/unavailable`、模式语义、精确 target/contract grant、audit 和 path rule 全部只在这里维护。Tools、References、Operations、ChangeSet、Workspace、Extension 和 host adapter 不得另建许可模型。
 - Tool 审批里的 `Remember` 是走 `aiditor.i18n` 的通用文案,只记录本次审批意图;仅 ToolCall 成功 apply 后写入精确 grant,Reject 或执行失败不得留下授权。批量审批只提供逐项操作入口,不承诺事务或回滚。
+- Tool Runtime 只有在 Policy 返回 `ask` 时才在 ToolCall 上发布 `approvalPhase:run|apply`;Transcript 只为这个明确状态显示 Apply/Reject/Remember。`allow` 直接继续 preview/run/apply,不得短暂渲染伪审批按钮。Tool 可用 `permissionDeniedHint` 提供领域恢复提示,但不能借此改变 Policy 决策。
 - AI chat 的环境状态直接读取当前 Workspace、Git、Verify owner 的真实响应式能力,不得维护第二份 capability 状态。
 - AI contributions 分为 `tool/registry.js`、`context/registry.js`、`skill/registry.js`;`contribution-registry.js` 只提供必须 owner 的精确生命周期。Dotted name 只负责命名/发现,不能用于卸载。
 - `src/ai/tool/runtime.js` 只负责 tool-call lifecycle 和 run context helper。

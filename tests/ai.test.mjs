@@ -874,8 +874,18 @@ async function assertGdePatchPreviewRendering() {
     preview: function () { return { ok: true } },
     apply: function () { return { applied: true } },
   }, { owner: 'test:transcript-actions' })
+  const automaticAgent = ai.createAgent({ name: 'Automatic Approval', permissionMode: 'full' })
+  ai.createToolCall(automaticAgent.id, { toolId: 'test.remember-approval', args: {} }, automaticAgent.id)
+  ai.activeAgentId.set(automaticAgent.id)
+  const automaticRoot = components['ai-messages'].factory(null, {})
+  assert.equal(automaticRoot.querySelector('.aiditor-ui-switch'), null)
+  assert.equal(elementsWithClass(automaticRoot, 'aiditor-ui-btn').some(function (button) {
+    return collectText(button).trim() === 'Apply' || collectText(button).trim() === 'Reject'
+  }), false)
+
   const rememberAgent = ai.createAgent({ name: 'Remember Approval', permissionMode: 'auto' })
   const rememberCall = ai.createToolCall(rememberAgent.id, { toolId: 'test.remember-approval', args: {} }, rememberAgent.id)
+  ai.requestToolCallApproval(rememberAgent.id, rememberCall.id, 'apply')
   ai.activeAgentId.set(rememberAgent.id)
   const rememberRoot = components['ai-messages'].factory(null, {})
   const rememberSwitch = rememberRoot.querySelector('.aiditor-ui-switch')
@@ -897,6 +907,7 @@ async function assertGdePatchPreviewRendering() {
   }, { owner: 'test:transcript-actions' })
   const rejectAgent = ai.createAgent({ name: 'Reject Remember', permissionMode: 'auto' })
   const rejectCall = ai.createToolCall(rejectAgent.id, { toolId: 'test.reject-remember', args: {} }, rejectAgent.id)
+  ai.requestToolCallApproval(rejectAgent.id, rejectCall.id, 'apply')
   ai.activeAgentId.set(rejectAgent.id)
   const rejectRoot = components['ai-messages'].factory(null, {})
   const rejectSwitch = rejectRoot.querySelector('.aiditor-ui-switch')
@@ -912,6 +923,7 @@ async function assertGdePatchPreviewRendering() {
     { toolId: 'test.remember-approval', args: {} },
     { toolId: 'test.reject-remember', args: {} },
   ], batchAgent.id)
+  for (const call of batchCalls) ai.requestToolCallApproval(batchAgent.id, call.id, 'apply')
   ai.activeAgentId.set(batchAgent.id)
   const batchRoot = components['ai-messages'].factory(null, {})
   assert.match(collectText(batchRoot.querySelector('.aiditor-ai-tool-batch-count')), /2 pending actions/)
