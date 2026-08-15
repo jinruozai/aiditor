@@ -190,6 +190,14 @@ assert.match(neonBlock, /--aiditor-button-bg:\s*linear-gradient\(180deg, #125bff
 assert.match(neonBlock, /--aiditor-button-active-bg:\s*#facf01/)
 assert.match(neonBlock, /--aiditor-button-active-fg:\s*#171000/)
 
+const darkBlock = themeBlock('dark')
+assert.match(darkBlock, /--aiditor-property-section-accent:\s*var\(--aiditor-accent\)/)
+assert.match(darkBlock, /--aiditor-property-section-border:\s*color-mix\(/)
+assert.match(darkBlock, /--aiditor-property-section-bg:\s*color-mix\(/)
+assert.match(darkBlock, /--aiditor-property-section-body-bg:\s*var\(--aiditor-property-section-bg\)/)
+assert.match(darkBlock, /--aiditor-property-section-head-bg:\s*color-mix\(/)
+assert.match(darkBlock, /--aiditor-property-section-spacing:\s*2px/)
+
 const toyboxPurpleBlock = themeBlock('toybox-purple')
 assert.match(toyboxPurpleBlock, /--aiditor-surface-canvas:\s*#f6f4fb/)
 assert.match(toyboxPurpleBlock, /--aiditor-brand:\s*#6b4de6/)
@@ -207,8 +215,14 @@ assert.match(toyboxPurpleBlock, /--aiditor-button-hover-bg:\s*linear-gradient\(1
 assert.match(toyboxPurpleBlock, /--aiditor-button-active-bg:\s*#ddd4f6/)
 assert.match(toyboxPurpleBlock, /--aiditor-stroke-hover:\s*#8e73ff/)
 assert.match(toyboxPurpleBlock, /--aiditor-shadow-control:[\s\S]*0 2px 0 #d8d2e1/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-accent:\s*#ffaa17/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-border:\s*#c87506/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-bg:\s*color-mix\(/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-body-bg:\s*color-mix\(/)
 assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-bg:\s*linear-gradient\(180deg, #ffd43b 0%, #ffaa17 100%\)/)
-assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-shadow:[\s\S]*0 2px 0 #c87506/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-shadow:[^;]*inset 0 -1px 0/)
+assert.doesNotMatch(toyboxPurpleBlock, /--aiditor-property-section-head-shadow:[^;]*0 2px 0 #c87506/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-spacing:\s*2px/)
 assert.match(componentCss, /\.aiditor-toolbar\s*\{[\s\S]*color:\s*var\(--aiditor-toolbar-fg\);[\s\S]*box-shadow:\s*var\(--aiditor-toolbar-shadow\);/)
 assert.match(uiBaseCss, /\.aiditor-ui-btn-primary\s*\{[\s\S]*box-shadow:\s*var\(--aiditor-button-primary-shadow\);/)
 assert.match(uiBaseCss, /\.aiditor-ui-btn:focus-visible\s*\{[\s\S]*var\(--aiditor-focus-ring\)/)
@@ -217,35 +231,39 @@ assert.match(uiContainerCss, /\.aiditor-ui-section-head:hover\s*\{\s*background:
 assert.doesNotMatch(uiContainerCss, /\.aiditor-ui-section-toggle:hover\s*\{[^}]*background:/)
 assert.match(uiPropertyCss, /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-head\s*\{[\s\S]*background:\s*var\(--aiditor-property-section-head-bg\);[\s\S]*box-shadow:\s*var\(--aiditor-property-section-head-shadow\);/)
 assert.match(
-  toyboxPurpleSource,
-  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form\s*\{[^}]*gap:\s*2px;/s,
-  'Toybox Purple Inspector Property Form should own a uniform 2px section gap'
+  uiPropertyCss,
+  /\.aiditor-ui-section\.aiditor-ui-property-section\s*\{[^}]*border:\s*var\(--aiditor-surface-border-w\) solid var\(--aiditor-property-section-border\);[^}]*background:\s*var\(--aiditor-property-section-bg\);[^}]*box-shadow:\s*none;/s,
+  'Property Sections should render as one token-driven card without elevation'
 )
 assert.match(
-  toyboxPurpleSource,
-  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form > \.aiditor-ui-property-form-root\s*\{[^}]*gap:\s*2px;/s,
-  'Toybox Purple stable field-tree root should preserve the 2px section gap'
-)
-assert.doesNotMatch(
-  toyboxPurpleSource,
-  /\.aiditor-ui-property-section[^}]*\{[^}]*margin(?:-\w+)?:/s,
-  'Toybox Purple property sections should not create spacing with margins'
+  uiPropertyCss,
+  /\.aiditor-ui-property-form\s*\{[^}]*gap:\s*var\(--aiditor-property-section-spacing\);/s,
+  'Property Form should use the shared compact section rhythm'
 )
 assert.match(
-  toyboxPurpleSource,
-  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form \.aiditor-ui-property-section:not\(\.aiditor-ui-section-collapsed\)\s*>\s*\.aiditor-ui-section-head[^{]*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\) var\(--aiditor-radius-surface\) 0 0;/s,
-  'expanded Toybox Purple property section headers should connect squarely to their body'
+  uiPropertyCss,
+  /\.aiditor-ui-property-form \.aiditor-ui-property-form-root\s*\{[^}]*gap:\s*var\(--aiditor-property-section-spacing\);/s,
+  'Property Form root should preserve the compact section rhythm'
 )
 assert.match(
-  toyboxPurpleSource,
-  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form \.aiditor-ui-property-section\.aiditor-ui-section-collapsed\s*>\s*\.aiditor-ui-section-head[^{]*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\);/s,
-  'collapsed Toybox Purple property section headers should keep all four corners rounded'
+  uiPropertyCss,
+  /\.aiditor-ui-property-section:not\(\.aiditor-ui-section-collapsed\)\s*>\s*\.aiditor-ui-section-head\s*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\) var\(--aiditor-radius-surface\) 0 0;/s,
+  'expanded Property Section headers should connect squarely to their body'
 )
 assert.match(
-  toyboxPurpleSource,
-  /data-aiditor-theme="toybox-purple"[^}]*\.aiditor-inspector \.aiditor-ui-property-form \.aiditor-ui-property-form-struct \.aiditor-ui-struct-input-cell\s*>\s*\.aiditor-ui-slot\s*>\s*\.aiditor-ui-struct-input[^{]*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s,
-  'nested Toybox Purple property composites should not render a second surface edge'
+  uiPropertyCss,
+  /\.aiditor-ui-property-section\.aiditor-ui-section-collapsed\s*>\s*\.aiditor-ui-section-head\s*\{[^}]*border-radius:\s*var\(--aiditor-radius-surface\);/s,
+  'collapsed Property Section headers should keep all four corners rounded'
 )
+assert.match(
+  uiPropertyCss,
+  /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-body\s*\{[^}]*padding:\s*var\(--aiditor-property-section-spacing\);[^}]*background:\s*var\(--aiditor-property-section-body-bg\);/s,
+  'Property Section bodies should share the card hue and compact inset'
+)
+assert.match(uiPropertyCss, /\.aiditor-ui-property-form \.aiditor-ui-property-form-struct \.aiditor-ui-struct-input-cell\s*>\s*\.aiditor-ui-slot\s*>\s*\.aiditor-ui-struct-input\s*\{[^}]*border:\s*0;[^}]*padding:\s*0;[^}]*box-shadow:\s*none;/s)
+assert.match(uiPropertyCss, /\.aiditor-ui-property-form\[inert\][^{]*\.aiditor-ui-section-head:hover\s*\{[^}]*background:\s*var\(--aiditor-property-section-head-bg\);/s)
+assert.doesNotMatch(toyboxPurpleSource, /\.aiditor-inspector \.aiditor-ui-property-form/, 'theme files should provide tokens, not Property Form structure')
+assert.doesNotMatch(uiPropertyCss, /\.aiditor-ui-property-section[^}]*\{[^}]*margin(?:-\w+)?:/s, 'Property Sections should not create spacing with margins')
 
 function themeBlock(mode) {
   const marker = '.aiditor-root[data-aiditor-theme="' + mode + '"] {'

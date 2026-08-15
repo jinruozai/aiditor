@@ -218,14 +218,19 @@
   --aiditor-section-head-hover-bg: linear-gradient(180deg, #ffffff 0%, #e9e3f9 100%);
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: inset 0 1px 0 rgba(255,255,255,.9);
+  --aiditor-property-section-accent: #ffaa17;
+  --aiditor-property-section-border: #c87506;
+  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 10%, var(--aiditor-bg-1));
+  --aiditor-property-section-body-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 8%, var(--aiditor-bg-1));
   --aiditor-property-section-head-bg: linear-gradient(180deg, #ffd43b 0%, #ffaa17 100%);
   --aiditor-property-section-head-hover-bg: linear-gradient(180deg, #ffe16b 0%, #ffb729 100%);
   --aiditor-property-section-head-fg: #202535;
   --aiditor-property-section-head-hover-fg: #202535;
   --aiditor-property-section-head-arrow-fg: #6b4de6;
   --aiditor-property-section-head-shadow:
-    0 2px 0 #c87506,
-    inset 0 1px 0 rgba(255,255,255,.42);
+    inset 0 1px 0 rgba(255,255,255,.42),
+    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
+  --aiditor-property-section-spacing: 2px;
 
   --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 62%, transparent);
   --aiditor-highlight-strong: color-mix(in srgb, #ffffff 86%, transparent);
@@ -237,32 +242,4 @@
     0 3px 0 #d2cbde,
     0 7px 14px rgba(49,37,79,.10),
     inset 0 1px 0 rgba(255,255,255,.94);
-}
-
-/* Property groups share one compact rhythm without adding section margins. */
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form {
-  gap: 2px;
-}
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form > .aiditor-ui-property-form-root,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form > .aiditor-ui-property-form-root {
-  gap: 2px;
-}
-
-/* Open group headers connect to their body; collapsed groups remain complete. */
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head {
-  border-radius: var(--aiditor-radius-surface) var(--aiditor-radius-surface) 0 0;
-}
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
-  border-radius: var(--aiditor-radius-surface);
-}
-
-/* Nested composites are content rather than another raised clay surface. */
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }

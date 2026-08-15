@@ -441,12 +441,19 @@
   --aiditor-section-head-hover-bg: color-mix(in srgb, var(--aiditor-bg-1) 82%, var(--aiditor-hover));
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: none;
-  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-bg-2) 76%, var(--aiditor-bg-3));
-  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-bg-2) 62%, var(--aiditor-hover));
-  --aiditor-property-section-head-fg: var(--aiditor-fg-1);
-  --aiditor-property-section-head-hover-fg: var(--aiditor-fg-0);
-  --aiditor-property-section-head-arrow-fg: var(--aiditor-fg-3);
-  --aiditor-property-section-head-shadow: none;
+  --aiditor-property-section-accent: var(--aiditor-accent);
+  --aiditor-property-section-border: color-mix(in srgb, var(--aiditor-property-section-accent) 44%, var(--aiditor-border));
+  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 7%, var(--aiditor-bg-1));
+  --aiditor-property-section-body-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 72%, var(--aiditor-bg-2));
+  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 82%, var(--aiditor-bg-3));
+  --aiditor-property-section-head-fg: var(--aiditor-accent-fg);
+  --aiditor-property-section-head-hover-fg: var(--aiditor-accent-fg);
+  --aiditor-property-section-head-arrow-fg: color-mix(in srgb, var(--aiditor-accent-fg) 82%, transparent);
+  --aiditor-property-section-head-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent-fg) 18%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
+  --aiditor-property-section-spacing: 2px;
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */
@@ -1137,14 +1144,19 @@
   --aiditor-section-head-hover-bg: linear-gradient(180deg, #ffffff 0%, #e9e3f9 100%);
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: inset 0 1px 0 rgba(255,255,255,.9);
+  --aiditor-property-section-accent: #ffaa17;
+  --aiditor-property-section-border: #c87506;
+  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 10%, var(--aiditor-bg-1));
+  --aiditor-property-section-body-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 8%, var(--aiditor-bg-1));
   --aiditor-property-section-head-bg: linear-gradient(180deg, #ffd43b 0%, #ffaa17 100%);
   --aiditor-property-section-head-hover-bg: linear-gradient(180deg, #ffe16b 0%, #ffb729 100%);
   --aiditor-property-section-head-fg: #202535;
   --aiditor-property-section-head-hover-fg: #202535;
   --aiditor-property-section-head-arrow-fg: #6b4de6;
   --aiditor-property-section-head-shadow:
-    0 2px 0 #c87506,
-    inset 0 1px 0 rgba(255,255,255,.42);
+    inset 0 1px 0 rgba(255,255,255,.42),
+    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
+  --aiditor-property-section-spacing: 2px;
 
   --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 62%, transparent);
   --aiditor-highlight-strong: color-mix(in srgb, #ffffff 86%, transparent);
@@ -1156,34 +1168,6 @@
     0 3px 0 #d2cbde,
     0 7px 14px rgba(49,37,79,.10),
     inset 0 1px 0 rgba(255,255,255,.94);
-}
-
-/* Property groups share one compact rhythm without adding section margins. */
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form {
-  gap: 2px;
-}
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form > .aiditor-ui-property-form-root,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form > .aiditor-ui-property-form-root {
-  gap: 2px;
-}
-
-/* Open group headers connect to their body; collapsed groups remain complete. */
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head {
-  border-radius: var(--aiditor-radius-surface) var(--aiditor-radius-surface) 0 0;
-}
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
-  border-radius: var(--aiditor-radius-surface);
-}
-
-/* Nested composites are content rather than another raised clay surface. */
-:root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
-.aiditor-root[data-aiditor-theme="toybox-purple"] .aiditor-inspector .aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 /* ---- style/themes/abyss.css ---- */
@@ -4376,7 +4360,12 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   box-shadow: 0 0 0 2px var(--aiditor-error-bg);
 }
 
-.aiditor-ui-property-form { display: flex; flex-direction: column; min-width: 0; }
+.aiditor-ui-property-form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--aiditor-property-section-spacing);
+}
 /* Strip struct-input chrome inside the panel — both the unnamed top bucket
    (rendered flat) and the bodies of property sections share the same row
    layout: a fixed-ish label column + 1fr editor column. Nested structInputs
@@ -4393,6 +4382,7 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   flex-direction: column;
   min-width: 0;
   padding: 0;
+  gap: var(--aiditor-property-section-spacing);
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row {
   grid-template-columns: minmax(64px, 76px) minmax(0, 1fr);
@@ -4444,8 +4434,8 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block,
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section {
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
-  padding: var(--aiditor-space-1) 0 var(--aiditor-space-2);
+  gap: var(--aiditor-property-section-spacing);
+  padding: 0;
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
@@ -4460,13 +4450,25 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell {
   grid-column: 1 / -1;
 }
-/* Section-wrapped groups: section provides the collapsible header; we
-   keep a small inset so rows and nested composite editors do not touch edges. */
-.aiditor-ui-property-section {
+
+.aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input {
   border: 0;
   border-radius: 0;
-  overflow: visible;
+  padding: 0;
   background: transparent;
+  box-shadow: none;
+}
+
+/* Property sections keep ui.section's generic behavior while owning one
+   continuous, themeable card surface for the header and body. */
+.aiditor-ui-section.aiditor-ui-property-section {
+  box-sizing: border-box;
+  max-width: 100%;
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-property-section-border);
+  border-radius: var(--aiditor-radius-surface);
+  overflow: hidden;
+  background: var(--aiditor-property-section-bg);
+  box-shadow: none;
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head {
   flex-basis: 24px;
@@ -4479,8 +4481,20 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   font: 700 var(--aiditor-fs-xs) var(--aiditor-font-ui);
   box-shadow: var(--aiditor-property-section-head-shadow);
 }
+.aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head {
+  border-radius: var(--aiditor-radius-surface) var(--aiditor-radius-surface) 0 0;
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
+  border-radius: var(--aiditor-radius-surface);
+}
 .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
   background: var(--aiditor-property-section-head-hover-bg);
+  color: var(--aiditor-property-section-head-hover-fg);
+}
+.aiditor-ui-property-section > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-head-fg);
+}
+.aiditor-ui-property-section > .aiditor-ui-section-head:hover > .aiditor-ui-section-toggle {
   color: var(--aiditor-property-section-head-hover-fg);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head .aiditor-ui-section-arrow {
@@ -4490,9 +4504,18 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   min-width: 22px;
 }
 .aiditor-ui-property-section > .aiditor-ui-section-body {
-  padding: var(--aiditor-space-1) var(--aiditor-space-1) var(--aiditor-space-2);
+  padding: var(--aiditor-property-section-spacing);
   gap: 0;
-  background: transparent;
+  border-radius: 0 0 var(--aiditor-radius-surface) var(--aiditor-radius-surface);
+  background: var(--aiditor-property-section-body-bg);
+}
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
+  background: var(--aiditor-property-section-head-bg);
+  color: var(--aiditor-property-section-head-fg);
+}
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-head-fg);
+  cursor: default;
 }
 
 .aiditor-ui-property-list {

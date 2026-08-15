@@ -2146,7 +2146,12 @@
   box-shadow: 0 0 0 2px var(--aiditor-error-bg);
 }
 
-.aiditor-ui-property-form { display: flex; flex-direction: column; min-width: 0; }
+.aiditor-ui-property-form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--aiditor-property-section-spacing);
+}
 /* Strip struct-input chrome inside the panel — both the unnamed top bucket
    (rendered flat) and the bodies of property sections share the same row
    layout: a fixed-ish label column + 1fr editor column. Nested structInputs
@@ -2163,6 +2168,7 @@
   flex-direction: column;
   min-width: 0;
   padding: 0;
+  gap: var(--aiditor-property-section-spacing);
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row {
   grid-template-columns: minmax(64px, 76px) minmax(0, 1fr);
@@ -2214,8 +2220,8 @@
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block,
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section {
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
-  padding: var(--aiditor-space-1) 0 var(--aiditor-space-2);
+  gap: var(--aiditor-property-section-spacing);
+  padding: 0;
 }
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-block.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty),
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section.aiditor-ui-struct-input-row-has-actions:not(.aiditor-ui-struct-input-row-actions-empty) {
@@ -2230,13 +2236,25 @@
 .aiditor-ui-property-form .aiditor-ui-property-form-struct > .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell {
   grid-column: 1 / -1;
 }
-/* Section-wrapped groups: section provides the collapsible header; we
-   keep a small inset so rows and nested composite editors do not touch edges. */
-.aiditor-ui-property-section {
+
+.aiditor-ui-property-form .aiditor-ui-property-form-struct .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input {
   border: 0;
   border-radius: 0;
-  overflow: visible;
+  padding: 0;
   background: transparent;
+  box-shadow: none;
+}
+
+/* Property sections keep ui.section's generic behavior while owning one
+   continuous, themeable card surface for the header and body. */
+.aiditor-ui-section.aiditor-ui-property-section {
+  box-sizing: border-box;
+  max-width: 100%;
+  border: var(--aiditor-surface-border-w) solid var(--aiditor-property-section-border);
+  border-radius: var(--aiditor-radius-surface);
+  overflow: hidden;
+  background: var(--aiditor-property-section-bg);
+  box-shadow: none;
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head {
   flex-basis: 24px;
@@ -2249,8 +2267,20 @@
   font: 700 var(--aiditor-fs-xs) var(--aiditor-font-ui);
   box-shadow: var(--aiditor-property-section-head-shadow);
 }
+.aiditor-ui-property-section:not(.aiditor-ui-section-collapsed) > .aiditor-ui-section-head {
+  border-radius: var(--aiditor-radius-surface) var(--aiditor-radius-surface) 0 0;
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
+  border-radius: var(--aiditor-radius-surface);
+}
 .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
   background: var(--aiditor-property-section-head-hover-bg);
+  color: var(--aiditor-property-section-head-hover-fg);
+}
+.aiditor-ui-property-section > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-head-fg);
+}
+.aiditor-ui-property-section > .aiditor-ui-section-head:hover > .aiditor-ui-section-toggle {
   color: var(--aiditor-property-section-head-hover-fg);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head .aiditor-ui-section-arrow {
@@ -2260,9 +2290,18 @@
   min-width: 22px;
 }
 .aiditor-ui-property-section > .aiditor-ui-section-body {
-  padding: var(--aiditor-space-1) var(--aiditor-space-1) var(--aiditor-space-2);
+  padding: var(--aiditor-property-section-spacing);
   gap: 0;
-  background: transparent;
+  border-radius: 0 0 var(--aiditor-radius-surface) var(--aiditor-radius-surface);
+  background: var(--aiditor-property-section-body-bg);
+}
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
+  background: var(--aiditor-property-section-head-bg);
+  color: var(--aiditor-property-section-head-fg);
+}
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-head-fg);
+  cursor: default;
 }
 
 .aiditor-ui-property-list {

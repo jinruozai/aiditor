@@ -373,12 +373,19 @@
   --aiditor-section-head-hover-bg: color-mix(in srgb, var(--aiditor-bg-1) 82%, var(--aiditor-hover));
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: none;
-  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-bg-2) 76%, var(--aiditor-bg-3));
-  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-bg-2) 62%, var(--aiditor-hover));
-  --aiditor-property-section-head-fg: var(--aiditor-fg-1);
-  --aiditor-property-section-head-hover-fg: var(--aiditor-fg-0);
-  --aiditor-property-section-head-arrow-fg: var(--aiditor-fg-3);
-  --aiditor-property-section-head-shadow: none;
+  --aiditor-property-section-accent: var(--aiditor-accent);
+  --aiditor-property-section-border: color-mix(in srgb, var(--aiditor-property-section-accent) 44%, var(--aiditor-border));
+  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 7%, var(--aiditor-bg-1));
+  --aiditor-property-section-body-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 72%, var(--aiditor-bg-2));
+  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 82%, var(--aiditor-bg-3));
+  --aiditor-property-section-head-fg: var(--aiditor-accent-fg);
+  --aiditor-property-section-head-hover-fg: var(--aiditor-accent-fg);
+  --aiditor-property-section-head-arrow-fg: color-mix(in srgb, var(--aiditor-accent-fg) 82%, transparent);
+  --aiditor-property-section-head-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent-fg) 18%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
+  --aiditor-property-section-spacing: 2px;
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */
