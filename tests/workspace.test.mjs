@@ -7,6 +7,7 @@ global.window = { aiditor: {} }
 for (const file of [
   'src/core/signal.js',
   'src/core/workspace.js',
+  'src/core/workspace-watch.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }

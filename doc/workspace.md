@@ -110,8 +110,13 @@ workspace.stat(path)
 workspace.recoverPermission(options)
 ```
 
-`watch(path, handler)` may exist when the backend can support it, but the rest of
-the system must not require watching.
+`watch(path, handler)` exists only when `capabilities().watch` is true. Browser
+File System Access workspaces verify native observer hints against a shared
+snapshot and fall back to foreground polling/focus scans when the native
+observer is unavailable. It returns an idempotent cancellation function; the
+Workspace owns and disposes the observer, snapshot, timers, and listeners. See
+[workspace-v2.md](./workspace-v2.md#external-change-observation) for the batch
+contract. The rest of the system must still tolerate adapters without watch.
 
 `capabilities()` is the adapter truth table. Hosts and panels can inspect it
 before enabling commands such as duplicate, import, recursive delete, or binary

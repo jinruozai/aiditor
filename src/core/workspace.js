@@ -688,6 +688,7 @@
     api.capabilities = function () {
       const caps = adapterCapabilities ? adapterCapabilities.call(api) : defaultCapabilities(api)
       caps.search = !!api.search
+      caps.watch = typeof api.watch === 'function' && caps.watch !== false
       if (caps.revealInSystem == null) caps.revealInSystem = !!api.__aiditorRevealInSystemSupported
       caps.pickSaveTarget = !!api.__aiditorPickSaveTargetSupported
       return caps
@@ -1200,7 +1201,7 @@
           mkdir: true, move: true, copy: true, delete: true, recursiveDelete: true, stat: true,
           objectUrl: typeof URL !== 'undefined' && !!URL.createObjectURL, snapshot: true,
           previewOperation: true, applyOperation: true, revealInSystem: false,
-          permissionRecovery: true, watch: true,
+          permissionRecovery: true, watch: false,
         }
       },
       list: function (path) {
@@ -1361,7 +1362,6 @@
         if (isDir(path)) return Promise.resolve({ path: path, name: fileName(path), kind: 'directory', size: null, hash: null, mtime: mtimes[path] || null, mime: null })
         throw new Error('workspace.stat: path not found: ' + path)
       },
-      watch: function () { return function () {} },
       resolveUrl: function (path) { return normalizePath(path) },
       recoverPermission: function () { return Promise.resolve(true) },
       _files: function () { return Object.assign({}, data) },
@@ -1631,7 +1631,6 @@
           throw structuredWorkspaceError('stat', path, err)
         }
       },
-      watch: function () { return function () {} },
       resolveUrl: function (path) { return normalizePath(path) },
       recoverPermission: async function (options) {
         if (!rootHandle.requestPermission) return true
@@ -1662,6 +1661,9 @@
         return parts.join('/')
       }
     }
+    const watcher = workspace._watch.create(rootHandle, api)
+    api.watch = watcher.watch
+    api.dispose = watcher.dispose
     return enhanceWorkspace(api)
   }
 

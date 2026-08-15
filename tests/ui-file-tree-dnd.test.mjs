@@ -212,6 +212,20 @@ await flush()
 assert.deepEqual(flatIds(ownershipTree), ['lazy-leaf', 'lazy-empty', 'fresh-lazy-child'])
 ui.dispose(ownershipTree)
 
+const slotlessTree = ui.tree({
+  items: aiditor.signal([{ id: 'slotless', label: 'Slotless' }]),
+})
+const slotlessRow = slotlessTree.__aiditorTree.getRowEl('slotless')
+const slotlessArrow = slotlessRow.querySelector('.aiditor-ui-tree-arrow')
+assert.equal(slotlessRow.children[0], slotlessArrow)
+assert.equal(slotlessRow.querySelector('.aiditor-ui-tree-leading').hidden, true)
+assert.equal(slotlessRow.querySelector('.aiditor-ui-tree-trailing').hidden, true)
+assert.equal(slotlessRow.querySelector('.aiditor-ui-tree-actions').hidden, true)
+const treeCss = readFileSync('src/style/ui-data.css', 'utf8')
+assert.match(treeCss, /\.aiditor-ui-tree-leading\[hidden\],\s*\.aiditor-ui-tree-trailing\[hidden\],\s*\.aiditor-ui-tree-actions\[hidden\]\s*\{\s*display:\s*none;\s*\}/)
+assert.match(treeCss, /\.aiditor-ui-tree-arrow\s*\{[^}]*width:\s*16px;\s*height:\s*16px;/s)
+ui.dispose(slotlessTree)
+
 const stableItems = aiditor.signal([
   { id: 'a', label: 'A', icon: 'file-a' },
   { id: 'b', label: 'B', icon: 'file-b' },

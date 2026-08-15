@@ -129,6 +129,9 @@
   margin-left: auto;
   transition: opacity var(--aiditor-dur-fast, 80ms);
 }
+.aiditor-ui-tree-leading[hidden],
+.aiditor-ui-tree-trailing[hidden],
+.aiditor-ui-tree-actions[hidden] { display: none; }
 .aiditor-ui-tree-actions[data-visibility="hover"] { opacity: 0; }
 .aiditor-ui-tree-row:hover .aiditor-ui-tree-actions[data-visibility="hover"] { opacity: 1; }
 .aiditor-ui-tree-actions[data-visibility="selected"] { opacity: 0; }

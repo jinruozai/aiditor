@@ -39,6 +39,7 @@ const JS_ORDER = [
   'core/settings.js',
   'core/commands.js',
   'core/workspace.js',
+  'core/workspace-watch.js',
 
   // Layer 1 - tree (pure data)
   'tree/tree.js',
@@ -360,6 +361,7 @@ const EDITOR_RUNTIME_JS_ORDER = [
   'core/i18n.js',
   'core/commands.js',
   'core/workspace.js',
+  'core/workspace-watch.js',
   'core/registry.js',
 ]
 

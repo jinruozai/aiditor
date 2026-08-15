@@ -148,6 +148,8 @@ aiditor/
       log.js                       # aiditor.log signal + reportError + safeCall + 全局 window 兜底
       runtime.js                   # runtime script loader + owner-scoped contribution cleanup
       bus.js                       # aiditor.bus pub/sub + auto-unsubscribe
+      workspace.js                 # Workspace V2 bounded filesystem adapters
+      workspace-watch.js           # Browser FSA verified change owner + fallback
       registry.js                  # registerComponent / resolveComponent / componentDefaults
       context.js                   # ComponentContext 工厂(panel + dock + bus + signals)
     tree/
@@ -228,7 +230,7 @@ aiditor/
 - Component 注册表 + ComponentContext 工厂(§ 4.8 / § 4.9)
 - Runtime loader `aiditor.runtime.loadScript` + owner-scoped cleanup。AI 新写 workspace panel 文件时,`aiditor.addPanelToDock({ component, dock, path })` 会先加载 `path` 注册 component,再放入 dock。
 - History 支持同步/异步 apply;`jump/undo/redo` 返回 Promise,apply 失败时 index 不前移/后移。内置 `history` panel 是通用交互 primitive,只绑定 `aiditor.history` 实例,不接项目 saved/file journal 语义。
-- Workspace v2 bounded contract:`readText/writeText`、二进制 blob IO、mkdir/copy/move/rename/delete、capabilities、稳定 stat(hash/mtime/size/kind)、object URL lease、bundle URL lease、snapshot/restore、可选 `revealInSystem` 平台能力和 `pickSaveTarget()` 受限保存目标选择。FSA/adapter IO 错误带稳定 `path/op/reason/code` 和 permission recovery 建议。它仍然只是文件边界,不是 project/asset 数据模型。
+- Workspace v2 bounded contract:`readText/writeText`、二进制 blob IO、mkdir/copy/move/rename/delete、capabilities、稳定 stat(hash/mtime/size/kind)、object URL lease、bundle URL lease、snapshot/restore、可选 `revealInSystem` 平台能力和 `pickSaveTarget()` 受限保存目标选择。Browser FSA 外部变化由单一 Workspace watcher owner 负责:递归 `FileSystemObserver` 事件只作失效提示,统一快照核验与批次发布,并提供前台轮询/focus fallback、权限失效和完整 dispose。FSA/adapter IO 错误带稳定 `path/op/reason/code` 和 permission recovery 建议。它仍然只是文件边界,不是 project/asset 数据模型。
 - Workspace 文本搜索使用统一 bounded walker:memory/FSA 直接复用,bridge adapter 在缺少 `search` 但具备 `list + readText` 时自动增强。结果统一返回 matches、部分错误、扫描统计和 limitHit,文件数/单文件大小/结果数均有界。
 - `aiditor.shortcuts.dispatchKey(input, surface?)` 允许桌面/原生宿主直接派发结构化按键快照;DOM keydown 与宿主输入共用同一套归一化、context/scope、优先级、用户 override 和 command 路由,不模拟 KeyboardEvent,不维护残留修饰键状态。
 - Dock 多 panel + detached DOM activate(§ 4.3)+ LRU dispose(§ 4.3)

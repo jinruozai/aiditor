@@ -21,6 +21,7 @@ preserved or deliberately replaced.
 | `src/core/commands.js` | [core.md](./core.md) | Commands, menus, owner cleanup, and dotted-prefix helpers. |
 | `src/core/shortcuts.js` | [core.md](./core.md), [shortcuts.md](./shortcuts.md) | Shortcut runtime: key normalization, context resolution, command routing, diagnostics, user overrides, and panel surfaces. |
 | `src/core/workspace.js` | [workspace.md](./workspace.md), [workspace-v2.md](./workspace-v2.md), [workspace-precise-editing.md](./workspace-precise-editing.md), [host-file-workflow.md](./host-file-workflow.md), [csv-editor.md](./csv-editor.md) | Workspace adapters, runtime adapter bindings, path safety, text/blob IO, path operations, operation review target, URL leases, snapshots, search, and exact text edit helpers. Host FileIndex/reference/journal policy stays above this file. |
+| `src/core/workspace-watch.js` | [workspace.md](./workspace.md), [workspace-v2.md](./workspace-v2.md) | Single-owner browser FSA observer, verified shared snapshot diff, merged change batches, permission suspension, and focus/poll fallback. |
 
 ## UI
 

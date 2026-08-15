@@ -15,6 +15,7 @@ It owns:
 - snapshot storage primitive
 - object URL leases
 - permission recovery
+- verified external-change observation
 
 It does not own:
 
@@ -164,6 +165,46 @@ it must not invent facts.
 `search` follows the same rule. An adapter with `list + readText` receives the
 framework bounded text-search implementation, so `capabilities().search` reports
 the effective enhanced adapter rather than only the raw bridge methods.
+
+## External Change Observation
+
+`workspace.watch(path, handler)` subscribes to verified changes at `path` or
+below it and returns an idempotent cancellation function. The handler receives
+one merged batch:
+
+```js
+{
+  changes: [{
+    type: 'created' | 'modified' | 'deleted' | 'moved' | 'unavailable',
+    path: string,
+    fromPath?: string,
+    kind: 'file' | 'directory',
+    reason?: 'permission_lost',
+  }],
+  source: 'observer' | 'poll' | 'focus' | 'permission',
+  time: number,
+}
+```
+
+For browser File System Access workspaces, the Workspace is the only owner of
+the recursive observer, shared metadata snapshot, fallback timer, listeners,
+and publication queue. Native `FileSystemObserver` records are invalidation
+hints rather than authoritative changes: affected paths are read again, then a
+deduplicated snapshot diff is published. `unknown` invalidates its affected
+directory. A move is emitted only when the old and new handles identify the
+same entry; otherwise it remains a delete plus create.
+
+When `FileSystemObserver` is absent or stops working, the same snapshot engine
+uses visible-page low-frequency polling of watched scopes and a rescan on focus
+or foreground return. This fallback is available on both HTTPS and `file://`;
+the implementation relies on feature detection, not origin string checks.
+Permission loss publishes one `unavailable` change and suspends background
+work until a foreground permission check succeeds. The last cancellation and
+`workspace.dispose()` release every observer, timer, and page listener.
+
+`capabilities().watch` is true only for a real implementation. In-memory
+workspaces therefore report false; bridge adapters report their actual bridge
+capability.
 
 ## Bounded Text Search
 
