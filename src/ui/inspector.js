@@ -27,7 +27,7 @@
    * @signature aiditor.inspector.registerProvider(type, provider, meta?)
    * @summary Register the editor-owned provider that turns selected targets of one type into an inspector schema, values, and write handlers.
    * @param {string} type - Target type matched against target.type or target.kind.
-   * @param {object} provider - Provider with inspect(targets, ctx), plus optional accept(targets).
+   * @param {object} provider - Provider with inspect(targets, ctx), plus optional accept(targets) and targetId(primary, targets) for stable per-primary UI state.
    * @param {object} meta - Optional owner/layer metadata; pass { replace: true } only when intentionally replacing an existing provider.
    * @returns {Function} unregister callback.
    * @example
@@ -415,7 +415,7 @@
    * @signature aiditor.inspector.select(targets, meta?)
    * @summary Set the ordered inspector selection. The first target is primary; multi-edit uses only fields present and writable on every target.
    * @param {object|object[]} targets - One target or ordered targets; each target should include type or kind.
-   * @param {object} meta - Optional selection metadata for the host/editor.
+   * @param {object} meta - Optional selection metadata for the host/editor; workspaceId scopes persisted Inspector UI state.
    * @returns {void} No return value.
    * @example
    * aiditor.inspector.select([
@@ -424,8 +424,10 @@
    * @related aiditor.inspector.registerProvider,aiditor.inspector.refresh
    */
   function select(targets, meta) {
-    selectionSig.set(cloneTargets(targets))
-    metaSig.set(meta || {})
+    aiditor.batch(function () {
+      selectionSig.set(cloneTargets(targets))
+      metaSig.set(meta || {})
+    })
     emitSelection()
   }
 

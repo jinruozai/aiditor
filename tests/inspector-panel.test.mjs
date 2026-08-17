@@ -102,6 +102,7 @@ window.HTMLElement = FakeEl
 
 for (const file of [
   'src/core/signal.js',
+  'src/core/workspace-state.js',
   'src/core/log.js',
   'src/core/bus.js',
   'src/core/names.js',
@@ -136,6 +137,7 @@ for (const file of [
   'src/ui/form/typeconfig.js',
   'src/ui/form/schema.js',
   'src/ui/inspector.js',
+  'src/ui/inspector-folding.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -160,6 +162,7 @@ const inspectorWrites = []
 const fieldMessages = aiditor.signal({ name: [{ kind: 'info', message: 'Current display name.' }] })
 
 aiditor.inspector.registerProvider('case.light', {
+  targetId(target) { return 'stable:' + target.id },
   inspect() {
     return {
       title: 'Meta',
@@ -207,8 +210,15 @@ const ctx = {
   bus: aiditor.bus,
   onCleanup(fn) { cleanups.push(fn) },
 }
-aiditor.inspector.select({ type: 'case.light', id: 'fill_light' })
+aiditor.inspector.select({ type: 'case.light', id: 'fill_light' }, { workspaceId: 'project-a' })
 const root = aiditor.resolveComponent('inspector').factory(aiditor.signal({}), ctx)
+assert.deepEqual(formOptions.foldingScope.peek(), {
+  workspaceId: 'project-a',
+  providerType: 'case.light',
+  primaryId: 'stable:fill_light',
+  persistent: true,
+})
+assert.equal(formOptions.foldingState, aiditor.inspector.foldingState)
 
 const titleLine = root.querySelector('.aiditor-inspector-title-line')
 const title = root.querySelector('.aiditor-inspector-title')

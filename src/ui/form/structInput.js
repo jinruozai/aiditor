@@ -25,6 +25,9 @@
 //   groupActions? / groupActionCtx?                       group action adapters
 //   searchQuery?: string|signal<string>                   display-only filter
 //   searchAncestorMatch?: boolean|signal<boolean>         inherited recursive match
+//   foldingState?: InspectorFoldingStateStore             shared Section state owner
+//   foldingScope?: object|signal<object>                  full Inspector identity
+//   fieldPath?: string                                    parent schema field path
 //   ctx?:     any                                           forwarded to editor()
 //
 // Per-slot reactivity: each slot gets `fieldSig = derived(() => value()[key])`.
@@ -66,6 +69,9 @@
     const groupActionCtx = typeof o.groupActionCtx === 'function' ? o.groupActionCtx : null
     const searchQuery = ui.asSig(o.searchQuery != null ? o.searchQuery : '')
     const searchAncestorMatch = ui.asSig(o.searchAncestorMatch != null ? o.searchAncestorMatch : false)
+    const foldingState = o.foldingState || null
+    const foldingScope = o.foldingScope || null
+    const parentFieldPath = String(o.fieldPath || '')
 
     const root = ui.h('div', 'aiditor-ui-struct-input')
     let fieldMenu = null
@@ -83,9 +89,29 @@
         return !!normalizedSearch(searchQuery())
       })
       ui.collect(root, forceExpanded.dispose)
-      const label = layout === 'section'
-        ? sectionLabel(root, row, f, forceExpanded)
-        : fieldLabelEl(f)
+      const sectionPath = layout === 'section' && foldingState
+        ? aiditor.inspector.foldingPath.field(childFieldPath(parentFieldPath, f.key))
+        : null
+      // A headerEditor takes over the section header line (Godot-style
+      // resource rows): the label renders as plain text without the fold
+      // toggle, and the editor owns the expand interaction via header.toggle.
+      const headerEditor = layout === 'section' && f.fieldDef && f.fieldDef.type_agv
+        && typeof f.fieldDef.type_agv.headerEditor === 'function'
+        ? f.fieldDef.type_agv.headerEditor : null
+      // type_agv.sectionAccent (color string): app-supplied accent for the
+      // expanded header section. The collapsed row stays flat; CSS frames
+      // the expanded row around --aiditor-struct-accent.
+      const sectionAccent = headerEditor && f.fieldDef.type_agv.sectionAccent != null
+        ? String(f.fieldDef.type_agv.sectionAccent)
+        : null
+      if (sectionAccent) {
+        row.classList.add('aiditor-ui-struct-input-row-accented')
+        row.style.setProperty('--aiditor-struct-accent', sectionAccent)
+      }
+      const sectionInfo = layout === 'section'
+        ? sectionLabel(root, row, f, forceExpanded, foldingState, foldingScope, sectionPath, !!headerEditor)
+        : null
+      const label = sectionInfo ? sectionInfo.el : fieldLabelEl(f)
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
@@ -140,6 +166,13 @@
       ui.collect(root, function () { ui.dispose(editor) })
       if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
 
+      if (headerEditor) {
+        const headerHost = ui.h('span', 'aiditor-ui-struct-input-section-header')
+        headerHost.appendChild(headerEditor(f.fieldDef, fieldSig, writeSlot, editorCtx, sectionInfo.header))
+        label.appendChild(headerHost)
+        ui.collect(root, function () { ui.dispose(headerHost) })
+      }
+
       if (f.labelActions) {
         const labelActions = ui.h('div', 'aiditor-ui-struct-input-label-actions')
         labelActions.appendChild(ui.actionBar({ actions: f.labelActions, ctx: f.labelActionCtx || ctx || {}, density: 'compact' }))
@@ -188,7 +221,8 @@
       })
     })
 
-    mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx)
+    mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx,
+      foldingState, foldingScope, parentFieldPath)
 
     return root
 
@@ -207,7 +241,8 @@
     }
   }
 
-  function mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx) {
+  function mountGroups(root, records, value, groups, groupActions, groupActionCtx, searchQuery, ctx,
+    foldingState, foldingScope, parentFieldPath) {
     const initialGroups = groups.peek ? groups.peek() : groups()
     const enabledRecords = Object.create(null)
     Object.keys(initialGroups || {}).forEach(function (groupId) {
@@ -228,14 +263,23 @@
         for (let j = 0; j < bucket.records.length; j++) root.appendChild(bucket.records[j].row)
         continue
       }
-      mountGroup(root, bucket, enabledRecords[bucket.id], value, groups, groupActions, groupActionCtx, searchQuery, ctx)
+      mountGroup(root, bucket, enabledRecords[bucket.id], value, groups, groupActions, groupActionCtx, searchQuery, ctx,
+        foldingState, foldingScope, parentFieldPath)
     }
   }
 
-  function mountGroup(root, bucket, enabledRecord, value, groups, groupActions, groupActionCtx, searchQuery, ctx) {
+  function mountGroup(root, bucket, enabledRecord, value, groups, groupActions, groupActionCtx, searchQuery, ctx,
+    foldingState, foldingScope, parentFieldPath) {
     const groupId = bucket.id
     const initial = groupConfig(groups, groupId, false)
-    const collapsed = aiditor.signal(!!initial.defaultCollapsed)
+    const controlled = initial.collapsed != null || typeof initial.onToggle === 'function'
+    const collapsed = ui.asSig(initial.collapsed != null ? initial.collapsed : !!initial.defaultCollapsed)
+    const sectionPath = foldingState
+      ? aiditor.inspector.foldingPath.group(parentFieldPath, groupId)
+      : null
+    const storedExpanded = !controlled && foldingState
+      ? foldingState.bind(foldingScope, sectionPath)
+      : null
     const title = aiditor.derived(function () {
       const config = groupConfig(groups, groupId, true)
       return config.label || (ui.PROP_GROUP_LABELS && ui.PROP_GROUP_LABELS[groupId]) || groupId
@@ -272,7 +316,8 @@
       return false
     })
     const effectiveCollapsed = aiditor.derived(function () {
-      return normalizedSearch(searchQuery()) && visible() ? false : collapsed()
+      if (normalizedSearch(searchQuery()) && visible()) return false
+      return storedExpanded ? !storedExpanded() : collapsed()
     })
     const children = bucket.records.map(function (record) { return record.row })
     const trailing = enabledRecord ? enabledRecord.cell : null
@@ -280,7 +325,17 @@
     const section = ui.section({
       title: title,
       collapsed: effectiveCollapsed,
-      onToggle: function (next) { collapsed.set(next) },
+      onToggle: function (next) {
+        if (normalizedSearch(searchQuery.peek ? searchQuery.peek() : searchQuery())) return
+        if (controlled) {
+          if (typeof initial.onToggle === 'function') {
+            aiditor.safeCall({ scope: 'ui.structInput', action: 'toggleGroupSection', group: groupId }, function () {
+              initial.onToggle(next)
+            })
+          } else collapsed.set(next)
+        } else if (storedExpanded) storedExpanded.set(!next)
+        else collapsed.set(next)
+      },
       trailing: trailing,
       actions: actions,
       actionCtx: actionCtx,
@@ -300,6 +355,7 @@
     ui.collect(root, actions.dispose)
     ui.collect(root, visible.dispose)
     ui.collect(root, effectiveCollapsed.dispose)
+    if (storedExpanded) ui.collect(root, storedExpanded.dispose)
     ui.collect(root, function () { ui.dispose(section) })
   }
 
@@ -484,30 +540,63 @@
     return layout === 'block' || layout === 'section' ? layout : 'row'
   }
 
-  function sectionLabel(root, row, f, forceExpanded) {
+  function childFieldPath(parent, key) {
+    const parts = parent ? aiditor.inspector.parseFieldPath(parent) : []
+    parts.push(key)
+    return aiditor.inspector.formatFieldPath(parts)
+  }
+
+  function sectionLabel(root, row, f, forceExpanded, foldingState, foldingScope, sectionPath, hasHeaderEditor) {
+    const controlled = f.collapsed != null || typeof f.onToggle === 'function'
     const collapsed = ui.asSig(f.collapsed != null ? f.collapsed : !!f.defaultCollapsed)
+    const storedExpanded = !controlled && foldingState
+      ? foldingState.bind(foldingScope, sectionPath)
+      : null
     const writeCollapsed = function (next) {
-      if (typeof f.onToggle === 'function') {
+      if (forceExpanded.peek()) return
+      if (controlled && typeof f.onToggle === 'function') {
         aiditor.safeCall({ scope: 'ui.structInput', action: 'toggleFieldSection', field: f.key }, function () { f.onToggle(next) })
       }
+      else if (controlled && typeof collapsed.set === 'function') collapsed.set(next)
+      else if (storedExpanded) storedExpanded.set(!next)
       else if (typeof collapsed.set === 'function') collapsed.set(next)
     }
+    const isCollapsed = aiditor.derived(function () {
+      return forceExpanded() ? false : (storedExpanded ? !storedExpanded() : collapsed())
+    })
+    const toggleCollapsed = function () {
+      writeCollapsed(storedExpanded ? storedExpanded.peek() : !collapsed.peek())
+    }
     const wrap = ui.h('div', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-label')
-    const btn = ui.h('button', 'aiditor-ui-struct-input-section-toggle', { type: 'button' })
-    const arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
-    arrow.classList.add('aiditor-ui-struct-input-section-arrow')
-    btn.appendChild(arrow)
-    btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
-    wrap.appendChild(btn)
-    btn.addEventListener('click', function () { writeCollapsed(!collapsed.peek()) })
+    let btn = null
+    let arrow = null
+    if (hasHeaderEditor) {
+      // Plain label text: the header editor owns the expand interaction.
+      // The marker class lets CSS mirror the normal row's label column so
+      // the editor host starts where regular row editors start.
+      wrap.classList.add('aiditor-ui-struct-input-section-label-has-header')
+      wrap.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+    } else {
+      btn = ui.h('button', 'aiditor-ui-struct-input-section-toggle', { type: 'button' })
+      arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
+      arrow.classList.add('aiditor-ui-struct-input-section-arrow')
+      btn.appendChild(arrow)
+      btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+      wrap.appendChild(btn)
+      btn.addEventListener('click', toggleCollapsed)
+    }
     const stop = aiditor.effect(function () {
-      const v = forceExpanded() ? false : collapsed()
+      const v = isCollapsed()
       row.classList.toggle('aiditor-ui-struct-input-row-collapsed', !!v)
-      btn.setAttribute('aria-expanded', v ? 'false' : 'true')
-      arrow.style.transform = v ? 'rotate(-90deg)' : ''
+      if (btn) {
+        btn.setAttribute('aria-expanded', v ? 'false' : 'true')
+        arrow.style.transform = v ? 'rotate(-90deg)' : ''
+      }
     })
     ui.collect(root, stop)
-    return wrap
+    ui.collect(root, isCollapsed.dispose)
+    if (storedExpanded) ui.collect(root, storedExpanded.dispose)
+    return { el: wrap, header: { collapsed: isCollapsed, toggle: toggleCollapsed } }
   }
 
   function openFieldContextMenu(ev, row, label, field, closeFieldMenu, setFieldMenu, clearFieldMenu) {

@@ -197,6 +197,7 @@ assert.match(darkBlock, /--aiditor-property-section-bg:\s*color-mix\(/)
 assert.match(darkBlock, /--aiditor-property-section-body-bg:\s*var\(--aiditor-property-section-bg\)/)
 assert.match(darkBlock, /--aiditor-property-section-head-bg:\s*color-mix\(/)
 assert.match(darkBlock, /--aiditor-property-section-spacing:\s*2px/)
+assert.match(darkBlock, /--aiditor-property-nested-indent:\s*12px/)
 
 const toyboxPurpleBlock = themeBlock('toybox-purple')
 assert.match(toyboxPurpleBlock, /--aiditor-surface-canvas:\s*#f6f4fb/)
@@ -216,13 +217,18 @@ assert.match(toyboxPurpleBlock, /--aiditor-button-active-bg:\s*#ddd4f6/)
 assert.match(toyboxPurpleBlock, /--aiditor-stroke-hover:\s*#8e73ff/)
 assert.match(toyboxPurpleBlock, /--aiditor-shadow-control:[\s\S]*0 2px 0 #d8d2e1/)
 assert.match(toyboxPurpleBlock, /--aiditor-property-section-accent:\s*#ffaa17/)
-assert.match(toyboxPurpleBlock, /--aiditor-property-section-border:\s*#c87506/)
-assert.match(toyboxPurpleBlock, /--aiditor-property-section-bg:\s*color-mix\(/)
-assert.match(toyboxPurpleBlock, /--aiditor-property-section-body-bg:\s*color-mix\(/)
-assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-bg:\s*linear-gradient\(180deg, #ffd43b 0%, #ffaa17 100%\)/)
-assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-shadow:[^;]*inset 0 -1px 0/)
-assert.doesNotMatch(toyboxPurpleBlock, /--aiditor-property-section-head-shadow:[^;]*0 2px 0 #c87506/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-border:\s*color-mix\(in srgb, var\(--aiditor-property-section-accent\) 78%, transparent\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-bg:\s*color-mix\(in srgb, var\(--aiditor-property-section-accent\) 18%, var\(--aiditor-bg-1\)\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-body-bg:\s*var\(--aiditor-property-section-bg\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-bg:\s*color-mix\(in srgb, var\(--aiditor-property-section-accent\) 78%, transparent\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-head-shadow:\s*none/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-inset-bar:\s*inset 2px 0 0 var\(--aiditor-property-section-accent\)/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-collapsed-border:\s*transparent/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-collapsed-bg:\s*transparent/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-collapsed-head-bg:\s*transparent/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-section-collapsed-head-hover-bg:\s*color-mix\(/)
 assert.match(toyboxPurpleBlock, /--aiditor-property-section-spacing:\s*2px/)
+assert.match(toyboxPurpleBlock, /--aiditor-property-nested-indent:\s*12px/)
 assert.match(componentCss, /\.aiditor-toolbar\s*\{[\s\S]*color:\s*var\(--aiditor-toolbar-fg\);[\s\S]*box-shadow:\s*var\(--aiditor-toolbar-shadow\);/)
 assert.match(uiBaseCss, /\.aiditor-ui-btn-primary\s*\{[\s\S]*box-shadow:\s*var\(--aiditor-button-primary-shadow\);/)
 assert.match(uiBaseCss, /\.aiditor-ui-btn:focus-visible\s*\{[\s\S]*var\(--aiditor-focus-ring\)/)
@@ -232,8 +238,13 @@ assert.doesNotMatch(uiContainerCss, /\.aiditor-ui-section-toggle:hover\s*\{[^}]*
 assert.match(uiPropertyCss, /\.aiditor-ui-property-section\s*>\s*\.aiditor-ui-section-head\s*\{[\s\S]*background:\s*var\(--aiditor-property-section-head-bg\);[\s\S]*box-shadow:\s*var\(--aiditor-property-section-head-shadow\);/)
 assert.match(
   uiPropertyCss,
-  /\.aiditor-ui-section\.aiditor-ui-property-section\s*\{[^}]*border:\s*var\(--aiditor-surface-border-w\) solid var\(--aiditor-property-section-border\);[^}]*background:\s*var\(--aiditor-property-section-bg\);[^}]*box-shadow:\s*none;/s,
-  'Property Sections should render as one token-driven card without elevation'
+  /\.aiditor-ui-section\.aiditor-ui-property-section\s*\{[^}]*border:\s*var\(--aiditor-surface-border-w\) solid var\(--aiditor-property-section-border\);[^}]*background:\s*var\(--aiditor-property-section-bg\);[^}]*box-shadow:\s*var\(--aiditor-property-section-inset-bar\);/s,
+  'Property Sections should render as one token-driven card with a themeable inset bar'
+)
+assert.match(
+  uiPropertyCss,
+  /\.aiditor-ui-section\.aiditor-ui-property-section\.aiditor-ui-section-collapsed\s*\{[^}]*border-color:\s*var\(--aiditor-property-section-collapsed-border\);[^}]*background:\s*var\(--aiditor-property-section-collapsed-bg\);/s,
+  'collapsed Property Sections should consume the collapsed skin tokens'
 )
 assert.match(
   uiPropertyCss,

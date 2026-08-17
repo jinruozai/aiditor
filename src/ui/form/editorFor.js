@@ -236,6 +236,9 @@
       groups: a.fieldDef.groups || {},
       searchQuery: a.ctx && a.ctx.searchQuery,
       searchAncestorMatch: a.ctx && a.ctx.searchAncestorMatch,
+      foldingState: a.ctx && a.ctx.foldingState,
+      foldingScope: a.ctx && a.ctx.foldingScope,
+      fieldPath: readFieldPath(a.ctx) || '',
       onChange: function (_nextRecord, key, nv, meta) {
         const next = writeTupleMember(asPlain(a.sig), fields, key, nv)
         if (next) a.write(next, meta)

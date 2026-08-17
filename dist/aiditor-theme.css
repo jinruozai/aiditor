@@ -454,6 +454,20 @@
     inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent-fg) 18%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
   --aiditor-property-section-spacing: 2px;
+  --aiditor-property-nested-indent: 12px;
+
+  /* Collapsed-state property-section skin. Defaults mirror the expanded
+     values so themes keep one continuous card unless they opt into a
+     flat-collapsed / framed-expanded look (see toybox-purple). */
+  --aiditor-property-section-collapsed-border: var(--aiditor-property-section-border);
+  --aiditor-property-section-collapsed-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-collapsed-head-bg: var(--aiditor-property-section-head-bg);
+  --aiditor-property-section-collapsed-head-hover-bg: var(--aiditor-property-section-head-hover-bg);
+  --aiditor-property-section-collapsed-head-fg: var(--aiditor-property-section-head-fg);
+  --aiditor-property-section-collapsed-head-hover-fg: var(--aiditor-property-section-head-hover-fg);
+  --aiditor-property-section-collapsed-head-arrow-fg: var(--aiditor-property-section-head-arrow-fg);
+  --aiditor-property-section-collapsed-head-shadow: var(--aiditor-property-section-head-shadow);
+  --aiditor-property-section-inset-bar: none;
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */
@@ -1145,18 +1159,30 @@
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: inset 0 1px 0 rgba(255,255,255,.9);
   --aiditor-property-section-accent: #ffaa17;
-  --aiditor-property-section-border: #c87506;
-  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 10%, var(--aiditor-bg-1));
-  --aiditor-property-section-body-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 8%, var(--aiditor-bg-1));
-  --aiditor-property-section-head-bg: linear-gradient(180deg, #ffd43b 0%, #ffaa17 100%);
-  --aiditor-property-section-head-hover-bg: linear-gradient(180deg, #ffe16b 0%, #ffb729 100%);
+  /* Expanded skin: framed accent card (mors resource-card look) —
+     accent-tinted frame, tinted body, tinted head strip, left accent bar. */
+  --aiditor-property-section-border: color-mix(in srgb, var(--aiditor-property-section-accent) 78%, transparent);
+  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 18%, var(--aiditor-bg-1));
+  --aiditor-property-section-body-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 78%, transparent);
+  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 54%, var(--aiditor-bg-1));
   --aiditor-property-section-head-fg: #202535;
   --aiditor-property-section-head-hover-fg: #202535;
   --aiditor-property-section-head-arrow-fg: #6b4de6;
-  --aiditor-property-section-head-shadow:
-    inset 0 1px 0 rgba(255,255,255,.42),
-    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
+  --aiditor-property-section-head-shadow: none;
+  --aiditor-property-section-inset-bar: inset 2px 0 0 var(--aiditor-property-section-accent);
+  /* Collapsed skin: fully flat strip — no frame, no tint, plain text.
+     Color only appears once the group is expanded. */
+  --aiditor-property-section-collapsed-border: transparent;
+  --aiditor-property-section-collapsed-bg: transparent;
+  --aiditor-property-section-collapsed-head-bg: transparent;
+  --aiditor-property-section-collapsed-head-hover-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 54%, var(--aiditor-bg-1));
+  --aiditor-property-section-collapsed-head-fg: var(--aiditor-fg-1);
+  --aiditor-property-section-collapsed-head-hover-fg: var(--aiditor-fg-0);
+  --aiditor-property-section-collapsed-head-arrow-fg: var(--aiditor-fg-3);
+  --aiditor-property-section-collapsed-head-shadow: none;
   --aiditor-property-section-spacing: 2px;
+  --aiditor-property-nested-indent: 12px;
 
   --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 62%, transparent);
   --aiditor-highlight-strong: color-mix(in srgb, #ffffff 86%, transparent);

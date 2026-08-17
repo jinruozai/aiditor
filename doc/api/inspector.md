@@ -30,6 +30,24 @@ Related: `aiditor.inspector.pathChange`, `aiditor.inspector.literalChange`
 
 Source: `src/ui/inspector.js`
 
+## `aiditor.inspector.createFoldingStateStore`
+
+Create the bounded project/primary folding-state owner used by PropertyForm field Sections, recursive StructInput Sections, and Groups.
+
+```js
+aiditor.inspector.createFoldingStateStore(options?)
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `options` | `object` | Optional persistence, LRU, and throttling configuration. |
+
+Returns: `object` FoldingStateStore with bind(scope,path), flush(), snapshot(workspaceId), and dispose().
+
+Related: `aiditor.ui.propertyForm`, `aiditor.inspector.select`, `aiditor.workspaceState.configure`
+
+Source: `src/ui/inspector-folding.js`
+
 ## `aiditor.inspector.formatFieldPath`
 
 Format string and numeric path segments into the inspector field path syntax.
@@ -152,7 +170,7 @@ aiditor.inspector.registerProvider(type, provider, meta?)
 | Param | Type | Description |
 |---|---|---|
 | `type` | `string` | Target type matched against target.type or target.kind. |
-| `provider` | `object` | Provider with inspect(targets, ctx), plus optional accept(targets). |
+| `provider` | `object` | Provider with inspect(targets, ctx), plus optional accept(targets) and targetId(primary, targets) for stable per-primary UI state. |
 | `meta` | `object` | Optional owner/layer metadata; pass { replace: true } only when intentionally replacing an existing provider. |
 
 Returns: `Function` unregister callback.
@@ -201,7 +219,7 @@ aiditor.inspector.select(targets, meta?)
 | Param | Type | Description |
 |---|---|---|
 | `targets` | `object\|object[]` | One target or ordered targets; each target should include type or kind. |
-| `meta` | `object` | Optional selection metadata for the host/editor. |
+| `meta` | `object` | Optional selection metadata for the host/editor; workspaceId scopes persisted Inspector UI state. |
 
 Returns: `void` No return value.
 

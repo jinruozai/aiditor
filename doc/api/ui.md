@@ -116,6 +116,8 @@ aiditor.ui.propertyForm(opts)
 | `opts.fieldContextActions` | `Function` | Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>. |
 | `opts.filePathActions` | `Function` | Optional UiAction factory appended to file path input menus. |
 | `opts.searchQuery` | `string\|Signal<string>` | Optional display-only recursive field filter. |
+| `opts.foldingState` | `object` | Optional Inspector FoldingStateStore shared by field Sections, recursive Structs, and Groups. |
+| `opts.foldingScope` | `object\|Signal<object>` | Optional workspace/provider/primary identity consumed by foldingState. |
 | `opts.requireAllTargets` | `boolean` | When true, disable fields missing from any target. |
 | `opts.canEdit` | `Function` | Optional field gate: (field, targets, rawField) => boolean. |
 

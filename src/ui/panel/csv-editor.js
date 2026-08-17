@@ -178,7 +178,7 @@
       const doc = document.value.peek()
       if (!selection || !doc) return
       const column = doc.columns[selection.focus.column]
-      aiditor.inspector.select([{ type: 'csv.column', sessionKey: session.key, columnId: column.id, title: column.name, readOnly: readOnlySig.peek() }])
+      aiditor.inspector.select([{ type: 'csv.column', sessionKey: session.key, columnId: column.id, title: column.name, readOnly: readOnlySig.peek() }], { workspaceId: workspaceId })
     } }))
     toolbar.appendChild(ui.h('span', 'aiditor-csv-toolbar-spacer'))
     const status = ui.h('span', 'aiditor-csv-status')
@@ -198,7 +198,7 @@
       const column = doc.columns[selection.focus.column]
       if (!column) return
       if (selection.kind === 'column') {
-        aiditor.inspector.select([{ type: 'csv.column', sessionKey: session.key, columnId: column.id, title: column.name, readOnly: readOnlySig.peek() }])
+        aiditor.inspector.select([{ type: 'csv.column', sessionKey: session.key, columnId: column.id, title: column.name, readOnly: readOnlySig.peek() }], { workspaceId: workspaceId })
         return
       }
       const row = doc.rows[selection.focus.row]
@@ -210,7 +210,7 @@
         columnId: column.id,
         title: column.name + ' / ' + (selection.focus.row + 1),
         readOnly: readOnlySig.peek(),
-      }])
+      }], { workspaceId: workspaceId })
     }
 
     function setSelection(selection) { selectionSig.set(selection) }

@@ -164,6 +164,7 @@ window.URL = global.URL
 
 for (const file of [
   'src/core/signal.js',
+  'src/core/workspace-state.js',
   'src/ui/_internal/_signal.js',
   'src/ui/_internal/_drag.js',
   'src/ui/_internal/_edit-session.js',
@@ -267,6 +268,7 @@ for (const file of [
   'src/ui/container/section.js',
   'src/ui/form/propertyForm.js',
   'src/ui/inspector.js',
+  'src/ui/inspector-folding.js',
   'src/ui/form/propertyList.js',
   'src/ui/editor/codeInput.js',
   'src/ui/editor/filePathInput.js',
@@ -885,6 +887,165 @@ function contextmenu(el, target, extra) {
   assert.equal(row.children[1].classList.contains('aiditor-ui-struct-input-cell'), true)
   assert.ok(row.children[1].querySelector('.aiditor-ui-struct-input'))
   assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
+}
+
+{
+  const targets = aiditor.signal([{
+    transform: [
+      [[1, 2, 3], 1],
+      [4, 5, 6],
+      [1, 1, 1],
+    ],
+  }])
+  const form = ui.propertyForm({
+    targets,
+    schema: {
+      transform: {
+        type: 'struct',
+        label: 'Transform',
+        fieldLayout: 'section',
+        struct_def: {
+          position: {
+            type: 'struct',
+            label: 'Position',
+            fieldLayout: 'section',
+            defaultCollapsed: true,
+            struct_def: {
+              offset: { type: 'vec3' },
+              weight: { type: 'float' },
+            },
+          },
+          rotation: { type: 'vec3' },
+          scale: { type: 'vec3' },
+        },
+      },
+    },
+  })
+  const sectionRows = form.querySelectorAll('.aiditor-ui-struct-input-row-layout-section')
+  const transformRow = sectionRows.find(function (row) { return row.dataset.efFieldKey === 'transform' })
+  const positionRow = sectionRows.find(function (row) { return row.dataset.efFieldKey === 'position' })
+  const transformLabel = transformRow.children[0]
+  const transformCell = transformRow.children[1]
+  const positionCell = positionRow.children[1]
+  assert.equal(sectionRows.length, 2)
+  assert.equal(transformLabel.querySelector('.aiditor-ui-struct-input-section-title').textContent, 'Transform')
+  assert.equal(transformLabel.parentNode, transformRow)
+  assert.equal(transformCell.children[0].classList.contains('aiditor-ui-slot'), true)
+  assert.equal(transformCell.querySelector('.aiditor-ui-struct-input-row-layout-section'), positionRow)
+  assert.equal(positionCell.children[0].classList.contains('aiditor-ui-struct-input'), true)
+  assert.equal(positionCell.querySelectorAll('.aiditor-ui-vec-axis-field').length, 3)
+  assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
+  assert.equal(transformRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(positionRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  positionRow.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  assert.equal(positionRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+}
+
+{
+  const foldingState = aiditor.inspector.createFoldingStateStore({
+    workspaceState: {
+      load: function () { return Promise.resolve(null) },
+      save: function () { return Promise.resolve() },
+      remove: function () { return Promise.resolve() },
+    },
+    throttleMs: 10000,
+  })
+  const foldingScope = aiditor.signal({ workspaceId: 'project-a', providerType: 'case.material', primaryId: 'mat-a' })
+  const searchQuery = aiditor.signal('')
+  const controlledCollapsed = aiditor.signal(false)
+  const form = ui.propertyForm({
+    targets: aiditor.signal([{
+      transform: [[[1, 2, 3], 1], [4, 5, 6]],
+      controlled: [1],
+      glow: 1,
+    }]),
+    schema: {
+      transform: {
+        type: 'struct',
+        label: 'Transform',
+        fieldLayout: 'section',
+        groups: { advanced: { label: 'Advanced' } },
+        struct_def: {
+          position: {
+            type: 'struct',
+            label: 'Position',
+            fieldLayout: 'section',
+            struct_def: { offset: { type: 'vec3' }, weight: { type: 'float' } },
+          },
+          rotation: { type: 'vec3' },
+          roughness: { type: 'float', group: 'advanced' },
+        },
+      },
+      controlled: {
+        type: 'struct',
+        label: 'Controlled',
+        fieldLayout: 'section',
+        collapsed: controlledCollapsed,
+        onToggle: function (next) { controlledCollapsed.set(next) },
+        struct_def: { value: { type: 'float' }, extra: { type: 'float' } },
+      },
+      glow: { type: 'float', group: 'render' },
+    },
+    groups: { render: { label: 'Render' } },
+    searchQuery: searchQuery,
+    foldingState: foldingState,
+    foldingScope: foldingScope,
+  })
+  await Promise.resolve()
+  const rows = form.querySelectorAll('.aiditor-ui-struct-input-row-layout-section')
+  const transform = rows.find(function (row) { return row.dataset.efFieldKey === 'transform' })
+  const position = rows.find(function (row) { return row.dataset.efFieldKey === 'position' })
+  const controlled = rows.find(function (row) { return row.dataset.efFieldKey === 'controlled' })
+  const groups = form.querySelectorAll('.aiditor-ui-struct-group')
+  const nestedGroup = groups.find(function (section) { return section.dataset.efGroup === 'advanced' })
+  const group = groups.find(function (section) { return section.dataset.efGroup === 'render' })
+  assert.equal(transform.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(nestedGroup.classList.contains('aiditor-ui-section-collapsed'), true)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), true)
+  assert.equal(controlled.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+
+  transform.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  position.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  nestedGroup.querySelector('.aiditor-ui-section-toggle').click()
+  group.querySelector('.aiditor-ui-section-toggle').click()
+  assert.deepEqual(foldingState.snapshot('project-a').entries[0].expanded, [
+    JSON.stringify(['field', 'transform']),
+    JSON.stringify(['field', 'transform.position']),
+    JSON.stringify(['group', 'transform', 'advanced']),
+    JSON.stringify(['group', '', 'render']),
+  ])
+
+  foldingScope.set({ workspaceId: 'project-a', providerType: 'case.material', primaryId: 'mat-b' })
+  assert.equal(transform.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(nestedGroup.classList.contains('aiditor-ui-section-collapsed'), true)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), true)
+  foldingScope.set({ workspaceId: 'project-a', providerType: 'case.material', primaryId: 'mat-a' })
+  assert.equal(transform.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(nestedGroup.classList.contains('aiditor-ui-section-collapsed'), false)
+  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), false)
+
+  transform.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  position.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  nestedGroup.querySelector('.aiditor-ui-section-toggle').click()
+  group.querySelector('.aiditor-ui-section-toggle').click()
+  assert.deepEqual(foldingState.snapshot('project-a').entries, [])
+  searchQuery.set('position')
+  assert.equal(transform.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  transform.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  assert.deepEqual(foldingState.snapshot('project-a').entries, [])
+  searchQuery.set('')
+  assert.equal(transform.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+
+  controlled.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  assert.equal(controlled.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.deepEqual(foldingState.snapshot('project-a').entries, [])
+  ui.dispose(form)
+  foldingState.dispose()
 }
 
 {
@@ -1538,8 +1699,38 @@ function contextmenu(el, target, extra) {
   )
   assert.match(
     css,
+    /\.aiditor-ui-property-form \.aiditor-ui-struct-input-row-layout-section > \.aiditor-ui-struct-input-cell > \.aiditor-ui-slot > \.aiditor-ui-struct-input,\s*\.aiditor-ui-property-form \.aiditor-ui-struct-input-row-layout-section > \.aiditor-ui-struct-input-cell > \.aiditor-ui-struct-input\s*{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*padding-inline-start:\s*var\(--aiditor-property-nested-indent\);/s,
+    'propertyForm Section content must restore the themeable logical nested indent'
+  )
+  assert.doesNotMatch(
+    css,
+    /\.aiditor-ui-property-form \.aiditor-ui-struct-input-row-layout-section > \.aiditor-ui-struct-input-cell > \.aiditor-ui-slot > \.aiditor-ui-struct-input,[^{]*{[^}]*padding-left:/s,
+    'propertyForm Section content indent must remain writing-direction aware'
+  )
+  assert.doesNotMatch(
+    css,
+    /\.aiditor-ui-struct-input-section-label\s*{[^}]*padding-inline-start:\s*var\(--aiditor-property-nested-indent\);/s,
+    'propertyForm Section titles must not inherit the content indent'
+  )
+  assert.match(
+    css,
     /\.aiditor-ui-struct-input-row-collapsed > \.aiditor-ui-struct-input-cell\s*{[^}]*display:\s*none;/s,
     'section field rows must hide their editor cell when collapsed'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-slot > \*\s*{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;[^}]*box-sizing:\s*border-box;/s,
+    'indented Property Form editors must size padding inside the available width'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-vec\s*{[^}]*width:\s*100%;[^}]*min-width:\s*0;/s,
+    'Vector editors must shrink inside narrow indented Property Form sections'
+  )
+  assert.match(
+    css,
+    /\.aiditor-ui-vec > \.aiditor-ui-vec-axis-field\s*{[^}]*flex:\s*1 1 0;[^}]*min-width:\s*0;[^}]*width:\s*100%;/s,
+    'Vector axes must not contribute an intrinsic minimum width'
   )
   assert.match(
     css,

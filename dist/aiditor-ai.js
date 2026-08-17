@@ -8748,6 +8748,33 @@
         "source": "src/ui/inspector.js"
       },
       {
+        "id": "aiditor.inspector.createFoldingStateStore",
+        "group": "inspector",
+        "layer": "core-ui",
+        "kind": "js-api",
+        "signature": "aiditor.inspector.createFoldingStateStore(options?)",
+        "summary": "Create the bounded project/primary folding-state owner used by PropertyForm field Sections, recursive StructInput Sections, and Groups.",
+        "params": [
+          {
+            "type": "object",
+            "name": "options",
+            "description": "Optional persistence, LRU, and throttling configuration."
+          }
+        ],
+        "returns": {
+          "type": "object",
+          "description": "FoldingStateStore with bind(scope,path), flush(), snapshot(workspaceId), and dispose()."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.ui.propertyForm",
+          "aiditor.inspector.select",
+          "aiditor.workspaceState.configure"
+        ],
+        "source": "src/ui/inspector-folding.js"
+      },
+      {
         "id": "aiditor.inspector.formatFieldPath",
         "group": "inspector",
         "layer": "core-ui",
@@ -8907,7 +8934,7 @@
           {
             "type": "object",
             "name": "provider",
-            "description": "Provider with inspect(targets, ctx), plus optional accept(targets)."
+            "description": "Provider with inspect(targets, ctx), plus optional accept(targets) and targetId(primary, targets) for stable per-primary UI state."
           },
           {
             "type": "object",
@@ -8948,7 +8975,7 @@
           {
             "type": "object",
             "name": "meta",
-            "description": "Optional selection metadata for the host/editor."
+            "description": "Optional selection metadata for the host/editor; workspaceId scopes persisted Inspector UI state."
           }
         ],
         "returns": {
@@ -9431,6 +9458,16 @@
             "description": "Optional display-only recursive field filter."
           },
           {
+            "type": "object",
+            "name": "opts.foldingState",
+            "description": "Optional Inspector FoldingStateStore shared by field Sections, recursive Structs, and Groups."
+          },
+          {
+            "type": "object|Signal<object>",
+            "name": "opts.foldingScope",
+            "description": "Optional workspace/provider/primary identity consumed by foldingState."
+          },
+          {
             "type": "boolean",
             "name": "opts.requireAllTargets",
             "description": "When true, disable fields missing from any target."
@@ -9531,6 +9568,135 @@
           "aiditor.ui.createTextDocument"
         ],
         "source": "src/core/workspace.js"
+      },
+      {
+        "id": "aiditor.workspaceState.configure",
+        "group": "workspace",
+        "layer": "core",
+        "kind": "js-api",
+        "signature": "aiditor.workspaceState.configure(options)",
+        "summary": "Configure the project-scoped JSON state adapter used for small UI/runtime state; this storage is separate from workspace files.",
+        "params": [
+          {
+            "type": "object",
+            "name": "options",
+            "description": "Adapter options."
+          },
+          {
+            "type": "object",
+            "name": "options.adapter",
+            "description": "Optional adapter with load(workspaceId,key), save(workspaceId,key,value), and remove(workspaceId,key)."
+          }
+        ],
+        "returns": {
+          "type": "object",
+          "description": "Active adapter."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.workspaceState.load",
+          "aiditor.workspaceState.save"
+        ],
+        "source": "src/core/workspace-state.js"
+      },
+      {
+        "id": "aiditor.workspaceState.load",
+        "group": "workspace",
+        "layer": "core",
+        "kind": "js-api",
+        "signature": "aiditor.workspaceState.load(workspaceId, key)",
+        "summary": "Load one JSON-safe state value from an opaque project/workspace namespace.",
+        "params": [
+          {
+            "type": "string",
+            "name": "workspaceId",
+            "description": "Stable host-owned project/workspace identity."
+          },
+          {
+            "type": "string",
+            "name": "key",
+            "description": "State owner key."
+          }
+        ],
+        "returns": {
+          "type": "Promise<*>",
+          "description": "Stored value or null."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.workspaceState.save",
+          "aiditor.workspaceState.remove"
+        ],
+        "source": "src/core/workspace-state.js"
+      },
+      {
+        "id": "aiditor.workspaceState.remove",
+        "group": "workspace",
+        "layer": "core",
+        "kind": "js-api",
+        "signature": "aiditor.workspaceState.remove(workspaceId, key)",
+        "summary": "Enqueue removal of one project-scoped state value through the same serialized write queue as save.",
+        "params": [
+          {
+            "type": "string",
+            "name": "workspaceId",
+            "description": "Stable host-owned project/workspace identity."
+          },
+          {
+            "type": "string",
+            "name": "key",
+            "description": "State owner key."
+          }
+        ],
+        "returns": {
+          "type": "Promise<*>",
+          "description": "Completion of this removal or a newer coalesced operation."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.workspaceState.load",
+          "aiditor.workspaceState.save"
+        ],
+        "source": "src/core/workspace-state.js"
+      },
+      {
+        "id": "aiditor.workspaceState.save",
+        "group": "workspace",
+        "layer": "core",
+        "kind": "js-api",
+        "signature": "aiditor.workspaceState.save(workspaceId, key, value)",
+        "summary": "Enqueue a JSON-safe state write; writes for the same workspaceId and key are serialized and pending snapshots are coalesced to the newest value.",
+        "params": [
+          {
+            "type": "string",
+            "name": "workspaceId",
+            "description": "Stable host-owned project/workspace identity."
+          },
+          {
+            "type": "string",
+            "name": "key",
+            "description": "State owner key."
+          },
+          {
+            "type": "*",
+            "name": "value",
+            "description": "JSON-safe state value."
+          }
+        ],
+        "returns": {
+          "type": "Promise<*>",
+          "description": "Completion of this write or a newer coalesced write."
+        },
+        "examples": [],
+        "wrong": [],
+        "related": [
+          "aiditor.workspaceState.load",
+          "aiditor.workspaceState.remove"
+        ],
+        "source": "src/core/workspace-state.js"
       }
     ]
   }

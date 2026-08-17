@@ -2245,8 +2245,22 @@
   box-shadow: none;
 }
 
+/* Section titles stay on the parent row. Only the nested Struct content is
+   inset; repeating this relationship naturally accumulates for deeper levels. */
+.aiditor-ui-property-form .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
+.aiditor-ui-property-form .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-struct-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-inline-start: var(--aiditor-property-nested-indent);
+}
+
 /* Property sections keep ui.section's generic behavior while owning one
-   continuous, themeable card surface for the header and body. */
+   continuous, themeable card surface for the header and body. The base
+   rules paint the EXPANDED skin; the collapsed block below re-skins the
+   card. Themes that do not define the collapsed tokens get the expanded
+   look in both states (the dark.css defaults mirror one another). */
 .aiditor-ui-section.aiditor-ui-property-section {
   box-sizing: border-box;
   max-width: 100%;
@@ -2254,7 +2268,7 @@
   border-radius: var(--aiditor-radius-surface);
   overflow: hidden;
   background: var(--aiditor-property-section-bg);
-  box-shadow: none;
+  box-shadow: var(--aiditor-property-section-inset-bar);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head {
   flex-basis: 24px;
@@ -2295,12 +2309,47 @@
   border-radius: 0 0 var(--aiditor-radius-surface) var(--aiditor-radius-surface);
   background: var(--aiditor-property-section-body-bg);
 }
+
+/* Collapsed skin — flat by default is a theme decision; the defaults in
+   theme.css mirror the expanded tokens so nothing changes unless a theme
+   opts in (toybox paints a fully flat collapsed strip). */
+.aiditor-ui-section.aiditor-ui-property-section.aiditor-ui-section-collapsed {
+  border-color: var(--aiditor-property-section-collapsed-border);
+  background: var(--aiditor-property-section-collapsed-bg);
+  box-shadow: none;
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
+  background: var(--aiditor-property-section-collapsed-head-bg);
+  color: var(--aiditor-property-section-collapsed-head-fg);
+  box-shadow: var(--aiditor-property-section-collapsed-head-shadow);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head:hover {
+  background: var(--aiditor-property-section-collapsed-head-hover-bg);
+  color: var(--aiditor-property-section-collapsed-head-hover-fg);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-collapsed-head-fg);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head:hover > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-collapsed-head-hover-fg);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head .aiditor-ui-section-arrow {
+  color: var(--aiditor-property-section-collapsed-head-arrow-fg);
+}
 .aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
   background: var(--aiditor-property-section-head-bg);
   color: var(--aiditor-property-section-head-fg);
 }
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head:hover {
+  background: var(--aiditor-property-section-collapsed-head-bg);
+  color: var(--aiditor-property-section-collapsed-head-fg);
+}
 .aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
   color: var(--aiditor-property-section-head-fg);
+  cursor: default;
+}
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-collapsed-head-fg);
   cursor: default;
 }
 

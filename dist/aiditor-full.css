@@ -454,6 +454,20 @@
     inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent-fg) 18%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
   --aiditor-property-section-spacing: 2px;
+  --aiditor-property-nested-indent: 12px;
+
+  /* Collapsed-state property-section skin. Defaults mirror the expanded
+     values so themes keep one continuous card unless they opt into a
+     flat-collapsed / framed-expanded look (see toybox-purple). */
+  --aiditor-property-section-collapsed-border: var(--aiditor-property-section-border);
+  --aiditor-property-section-collapsed-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-collapsed-head-bg: var(--aiditor-property-section-head-bg);
+  --aiditor-property-section-collapsed-head-hover-bg: var(--aiditor-property-section-head-hover-bg);
+  --aiditor-property-section-collapsed-head-fg: var(--aiditor-property-section-head-fg);
+  --aiditor-property-section-collapsed-head-hover-fg: var(--aiditor-property-section-head-hover-fg);
+  --aiditor-property-section-collapsed-head-arrow-fg: var(--aiditor-property-section-head-arrow-fg);
+  --aiditor-property-section-collapsed-head-shadow: var(--aiditor-property-section-head-shadow);
+  --aiditor-property-section-inset-bar: none;
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */
@@ -1145,18 +1159,30 @@
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: inset 0 1px 0 rgba(255,255,255,.9);
   --aiditor-property-section-accent: #ffaa17;
-  --aiditor-property-section-border: #c87506;
-  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 10%, var(--aiditor-bg-1));
-  --aiditor-property-section-body-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 8%, var(--aiditor-bg-1));
-  --aiditor-property-section-head-bg: linear-gradient(180deg, #ffd43b 0%, #ffaa17 100%);
-  --aiditor-property-section-head-hover-bg: linear-gradient(180deg, #ffe16b 0%, #ffb729 100%);
+  /* Expanded skin: framed accent card (mors resource-card look) —
+     accent-tinted frame, tinted body, tinted head strip, left accent bar. */
+  --aiditor-property-section-border: color-mix(in srgb, var(--aiditor-property-section-accent) 78%, transparent);
+  --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 18%, var(--aiditor-bg-1));
+  --aiditor-property-section-body-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-head-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 78%, transparent);
+  --aiditor-property-section-head-hover-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 54%, var(--aiditor-bg-1));
   --aiditor-property-section-head-fg: #202535;
   --aiditor-property-section-head-hover-fg: #202535;
   --aiditor-property-section-head-arrow-fg: #6b4de6;
-  --aiditor-property-section-head-shadow:
-    inset 0 1px 0 rgba(255,255,255,.42),
-    inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
+  --aiditor-property-section-head-shadow: none;
+  --aiditor-property-section-inset-bar: inset 2px 0 0 var(--aiditor-property-section-accent);
+  /* Collapsed skin: fully flat strip — no frame, no tint, plain text.
+     Color only appears once the group is expanded. */
+  --aiditor-property-section-collapsed-border: transparent;
+  --aiditor-property-section-collapsed-bg: transparent;
+  --aiditor-property-section-collapsed-head-bg: transparent;
+  --aiditor-property-section-collapsed-head-hover-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 54%, var(--aiditor-bg-1));
+  --aiditor-property-section-collapsed-head-fg: var(--aiditor-fg-1);
+  --aiditor-property-section-collapsed-head-hover-fg: var(--aiditor-fg-0);
+  --aiditor-property-section-collapsed-head-arrow-fg: var(--aiditor-fg-3);
+  --aiditor-property-section-collapsed-head-shadow: none;
   --aiditor-property-section-spacing: 2px;
+  --aiditor-property-nested-indent: 12px;
 
   --aiditor-highlight-subtle: color-mix(in srgb, #ffffff 62%, transparent);
   --aiditor-highlight-strong: color-mix(in srgb, #ffffff 86%, transparent);
@@ -4459,8 +4485,22 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   box-shadow: none;
 }
 
+/* Section titles stay on the parent row. Only the nested Struct content is
+   inset; repeating this relationship naturally accumulates for deeper levels. */
+.aiditor-ui-property-form .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-slot > .aiditor-ui-struct-input,
+.aiditor-ui-property-form .aiditor-ui-struct-input-row-layout-section > .aiditor-ui-struct-input-cell > .aiditor-ui-struct-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-inline-start: var(--aiditor-property-nested-indent);
+}
+
 /* Property sections keep ui.section's generic behavior while owning one
-   continuous, themeable card surface for the header and body. */
+   continuous, themeable card surface for the header and body. The base
+   rules paint the EXPANDED skin; the collapsed block below re-skins the
+   card. Themes that do not define the collapsed tokens get the expanded
+   look in both states (the dark.css defaults mirror one another). */
 .aiditor-ui-section.aiditor-ui-property-section {
   box-sizing: border-box;
   max-width: 100%;
@@ -4468,7 +4508,7 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   border-radius: var(--aiditor-radius-surface);
   overflow: hidden;
   background: var(--aiditor-property-section-bg);
-  box-shadow: none;
+  box-shadow: var(--aiditor-property-section-inset-bar);
 }
 .aiditor-ui-property-section > .aiditor-ui-section-head {
   flex-basis: 24px;
@@ -4509,12 +4549,47 @@ body.aiditor-dragging-vertical,   body.aiditor-dragging-vertical *   { cursor: n
   border-radius: 0 0 var(--aiditor-radius-surface) var(--aiditor-radius-surface);
   background: var(--aiditor-property-section-body-bg);
 }
+
+/* Collapsed skin — flat by default is a theme decision; the defaults in
+   theme.css mirror the expanded tokens so nothing changes unless a theme
+   opts in (toybox paints a fully flat collapsed strip). */
+.aiditor-ui-section.aiditor-ui-property-section.aiditor-ui-section-collapsed {
+  border-color: var(--aiditor-property-section-collapsed-border);
+  background: var(--aiditor-property-section-collapsed-bg);
+  box-shadow: none;
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head {
+  background: var(--aiditor-property-section-collapsed-head-bg);
+  color: var(--aiditor-property-section-collapsed-head-fg);
+  box-shadow: var(--aiditor-property-section-collapsed-head-shadow);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head:hover {
+  background: var(--aiditor-property-section-collapsed-head-hover-bg);
+  color: var(--aiditor-property-section-collapsed-head-hover-fg);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-collapsed-head-fg);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head:hover > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-collapsed-head-hover-fg);
+}
+.aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head .aiditor-ui-section-arrow {
+  color: var(--aiditor-property-section-collapsed-head-arrow-fg);
+}
 .aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head:hover {
   background: var(--aiditor-property-section-head-bg);
   color: var(--aiditor-property-section-head-fg);
 }
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head:hover {
+  background: var(--aiditor-property-section-collapsed-head-bg);
+  color: var(--aiditor-property-section-collapsed-head-fg);
+}
 .aiditor-ui-property-form[inert] .aiditor-ui-property-section > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
   color: var(--aiditor-property-section-head-fg);
+  cursor: default;
+}
+.aiditor-ui-property-form[inert] .aiditor-ui-property-section.aiditor-ui-section-collapsed > .aiditor-ui-section-head > .aiditor-ui-section-toggle {
+  color: var(--aiditor-property-section-collapsed-head-fg);
   cursor: default;
 }
 

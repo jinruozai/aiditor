@@ -39,6 +39,7 @@ const JS_ORDER = [
   'core/settings.js',
   'core/commands.js',
   'core/workspace.js',
+  'core/workspace-state.js',
   'core/workspace-watch.js',
 
   // Layer 1 - tree (pure data)
@@ -173,6 +174,7 @@ const JS_ORDER = [
   'ui/form/propertyForm.js',
   'ui/form/propertyList.js',
   'ui/inspector.js',
+  'ui/inspector-folding.js',
 
   // Layer 8 - UI library: editor specials
   'ui/editor/gradientInput.js',
@@ -361,6 +363,7 @@ const EDITOR_RUNTIME_JS_ORDER = [
   'core/i18n.js',
   'core/commands.js',
   'core/workspace.js',
+  'core/workspace-state.js',
   'core/workspace-watch.js',
   'core/registry.js',
 ]

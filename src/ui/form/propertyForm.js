@@ -22,6 +22,8 @@
 //   filePathActions?:(fieldCtx) => UiAction[]          optional extra actions for
 //                                                     filepath/img/snd editors
 //   searchQuery?:signal<string>|string                 display-only recursive filter
+//   foldingState?:InspectorFoldingStateStore           optional Section state owner
+//   foldingScope?:signal<object>|object                workspace/provider/primary identity
 //   requireAllTargets?:boolean                        disables a field when any target lacks it
 //   canEdit?:(field, targets, rawField) => boolean     extra per-field edit gate
 //   ctx?:     any                                     forwarded to editorFor
@@ -62,6 +64,8 @@
    * @param {Function} opts.fieldContextActions - Optional field context-menu UiAction factory. May return UiAction[] or Promise<UiAction[]>.
    * @param {Function} opts.filePathActions - Optional UiAction factory appended to file path input menus.
    * @param {string|Signal<string>} opts.searchQuery - Optional display-only recursive field filter.
+   * @param {object} opts.foldingState - Optional Inspector FoldingStateStore shared by field Sections, recursive Structs, and Groups.
+   * @param {object|Signal<object>} opts.foldingScope - Optional workspace/provider/primary identity consumed by foldingState.
    * @param {boolean} opts.requireAllTargets - When true, disable fields missing from any target.
    * @param {Function} opts.canEdit - Optional field gate: (field, targets, rawField) => boolean.
    * @returns {HTMLElement} Property form root element.
@@ -89,6 +93,8 @@
     const requireAllTargets = !!o.requireAllTargets
     const canEdit = typeof o.canEdit === 'function' ? o.canEdit : null
     const searchQuery = ui.asSig(o.searchQuery != null ? o.searchQuery : '')
+    const foldingState = o.foldingState || null
+    const foldingScope = o.foldingScope || null
     const ctx       = o.ctx
 
     const root = ui.h('div', 'aiditor-ui-property-form')
@@ -154,6 +160,7 @@
           const messages = messagesForPath(fieldMessages, fname)
           fields.push({
             key:     fname,
+            fieldDef: subFd,
             group:   raw && raw.group,
             label:   label.value,
             labelMode: label.mode,
@@ -172,7 +179,8 @@
             contextCtx: action.ctx,
             messages: messages,
             editor:  function (slotSig, write, innerCtx) {
-              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions, fieldMessages), subFd,
+              return slotEditor(slotSig, write, editorFieldCtx(innerCtx, fname, label, raw, subFd, action.filePathActions, fieldMessages,
+                foldingState, foldingScope), subFd,
                 fieldDisabled(targets, requireAllTargets, canEdit, fname, raw))
             },
           })
@@ -192,6 +200,9 @@
           return groupActionCtx ? groupActionCtx(enriched) || enriched : enriched
         },
         searchQuery: searchQuery,
+        foldingState: foldingState,
+        foldingScope: foldingScope,
+        fieldPath: '',
         onChange: function (_next, key, nv, meta) { fanOut(key, nv, meta) },
         ctx: ctx,
       })
@@ -332,13 +343,15 @@
     return out
   }
 
-  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions, fieldMessages) {
+  function editorFieldCtx(ctx, field, label, raw, resolved, filePathActions, fieldMessages, foldingState, foldingScope) {
     const out = fieldCtx(ctx, field)
     out.field = field
     out.label = label && label.value || field
     out.rawField = raw
     out.resolvedField = resolved
     out.fieldMessages = fieldMessages
+    if (foldingState) out.foldingState = foldingState
+    if (foldingScope) out.foldingScope = foldingScope
     if (filePathActions) out.filePathActions = filePathActions
     return out
   }

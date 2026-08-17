@@ -46,6 +46,29 @@ is resolved only when IO runs. The returned disposer removes the binding only
 if it still points at the same adapter, so replacing a host binding cannot be
 undone by an older owner cleanup.
 
+## Workspace State
+
+`aiditor.workspaceState` is a separate project-scoped persistence surface for
+small JSON-safe UI/runtime state. It does not read or write workspace files and
+does not add project semantics to the bounded filesystem adapter.
+
+```js
+aiditor.workspaceState.configure({ adapter })
+await aiditor.workspaceState.load(workspaceId, key)
+await aiditor.workspaceState.save(workspaceId, key, value)
+await aiditor.workspaceState.remove(workspaceId, key)
+```
+
+The browser default uses `localStorage`; native hosts may configure an adapter
+whose `load`, `save`, and `remove` methods are synchronous or asynchronous.
+The public API always returns a Promise. Operations for one
+`workspaceId + key` are serialized, and pending writes are coalesced so the
+newest queued snapshot is the final value written. Different workspace ids are
+fully isolated.
+
+Inspector folding state uses this surface. Other project UI owners must use
+their own stable state key rather than sharing or editing Inspector's envelope.
+
 `restoreDirectory(key, options)` restores a remembered File System Access
 directory handle. It never calls `showDirectoryPicker` and never exposes the raw
 `FileSystemDirectoryHandle`.

@@ -63,6 +63,8 @@
     const valuesSig = aiditor.signal([])
     const disabledSig = aiditor.signal(false)
     const fieldMessagesSig = aiditor.signal({})
+    const foldingScopeSig = aiditor.signal(null)
+    const foldingState = aiditor.inspector.foldingState
     let currentInspection = null
     let currentDispose = null
     let currentTargets = []
@@ -210,6 +212,8 @@
           fieldMessages: fieldMessagesSig,
           groups: groupsSig,
           searchQuery: querySig,
+          foldingState: foldingState,
+          foldingScope: foldingScopeSig,
           groupActions: function (groupCtx) {
             const fn = currentInspection && currentInspection.groupActions
             return typeof fn === 'function' ? fn(groupCtx) : null
@@ -327,9 +331,11 @@
 
     function refresh() {
       const targets = aiditor.inspector.selection()
+      const selectionMeta = aiditor.inspector.meta()
       if (!targets.length) {
         currentInspection = null
         currentTargets = []
+        foldingScopeSig.set(null)
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
@@ -341,6 +347,7 @@
       if (!inspection) {
         currentInspection = null
         currentTargets = targets
+        foldingScopeSig.set(null)
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
@@ -356,9 +363,11 @@
       setHeaderActions(inspection, targets)
       setSubscription(inspection, targets)
       if (inspection.render) {
+        foldingScopeSig.set(null)
         setBeforeForm(null, targets)
         mountCustom(inspection, targets)
       } else {
+        foldingScopeSig.set(aiditor.inspector.foldingScope(inspection, targets, selectionMeta))
         setBeforeForm(inspection, targets)
         mountForm(inspection, targets)
       }
@@ -373,6 +382,7 @@
       fieldMessageController = null
       currentSubKey = ''
       currentSubscribe = null
+      foldingScopeSig.set(null)
       setBeforeForm(null, [])
       clearBody()
     })

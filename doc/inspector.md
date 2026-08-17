@@ -48,6 +48,21 @@ aiditor.inspector.select([
 
 Target shape is intentionally open. The required field is `type` (or `kind` for
 host compatibility). Providers decide how to resolve `id`, `uri`, and `meta`.
+Persisted Inspector UI state uses `primary.id`, or the value returned by the
+provider's optional `targetId(primary, targets)` hook. This identity must remain
+stable when the project is reopened. `name`, `title`, and object reference are
+never treated as durable identities.
+
+Project-scoped UI state receives its opaque workspace identity from selection
+metadata:
+
+```js
+aiditor.inspector.select(targets, { workspaceId: 'project-a' })
+```
+
+`select()` batches the ordered selection and its metadata atomically. Inspector
+panels reactively read both, so a new primary can never be rendered briefly
+under the previous workspace namespace.
 
 Call `aiditor.inspector.refresh()` when the selected object changed outside the
 form and no provider `subscribe(refresh)` hook exists. It re-runs the current
@@ -57,6 +72,7 @@ selection through the active provider without changing selection.
 
 ```js
 aiditor.inspector.registerProvider('game.achievement', {
+  targetId: function (primary) { return primary.id },
   accept: function (targets) {
     return targets.every(function (target) { return target.type === 'game.achievement' })
   },
@@ -572,6 +588,42 @@ disappear. Clearing the query restores the previous collapsed state. The full
 schema and every field editor remain mounted throughout. Custom `render(ctx)`
 inspections own their entire body UI and are not filtered by this property
 search.
+
+### Folding state
+
+The built-in Inspector uses one shared `FoldingStateStore` for PropertyForm
+field Sections, recursive StructInput Sections, and Group Sections. Its full
+identity is:
+
+```text
+workspaceId + providerType + primaryId + sectionPath
+```
+
+Single- and multi-selection use the same rule: `targets[0]` is always primary,
+and secondary targets never participate in the folding key. Section paths are
+collision-free structured strings:
+
+```js
+JSON.stringify(['field', fieldPath])
+JSON.stringify(['group', parentFieldPath, groupId])
+```
+
+The store records only expanded paths in a `Set`. A missing path is therefore
+collapsed by default. Explicitly controlled `collapsed/onToggle` fields and
+groups remain caller-owned and are not registered with the store. Generic
+`ui.section` and standalone forms without a FoldingStateStore keep their normal
+defaults.
+
+Search expansion is a presentation overlay and never mutates stored state.
+Matching ancestors are temporarily expanded, toggle writes are ignored while
+search is forcing the Section open, and clearing the query reveals the exact
+previous state.
+
+State is isolated per workspace, throttled through `aiditor.workspaceState`,
+and stored as a versioned LRU envelope containing at most 512 non-empty primary
+records. Removing the last expanded path removes that primary immediately.
+Bindings include the complete scope and can therefore keep multiple Inspector
+panels synchronized without a global "current target" slot.
 
 `renderBeforeForm(ctx)` contributes one compact provider-owned element between
 that search field and the standard property form. It does not replace or wrap

@@ -386,6 +386,20 @@
     inset 0 1px 0 color-mix(in srgb, var(--aiditor-accent-fg) 18%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--aiditor-property-section-border) 72%, transparent);
   --aiditor-property-section-spacing: 2px;
+  --aiditor-property-nested-indent: 12px;
+
+  /* Collapsed-state property-section skin. Defaults mirror the expanded
+     values so themes keep one continuous card unless they opt into a
+     flat-collapsed / framed-expanded look (see toybox-purple). */
+  --aiditor-property-section-collapsed-border: var(--aiditor-property-section-border);
+  --aiditor-property-section-collapsed-bg: var(--aiditor-property-section-bg);
+  --aiditor-property-section-collapsed-head-bg: var(--aiditor-property-section-head-bg);
+  --aiditor-property-section-collapsed-head-hover-bg: var(--aiditor-property-section-head-hover-bg);
+  --aiditor-property-section-collapsed-head-fg: var(--aiditor-property-section-head-fg);
+  --aiditor-property-section-collapsed-head-hover-fg: var(--aiditor-property-section-head-hover-fg);
+  --aiditor-property-section-collapsed-head-arrow-fg: var(--aiditor-property-section-head-arrow-fg);
+  --aiditor-property-section-collapsed-head-shadow: var(--aiditor-property-section-head-shadow);
+  --aiditor-property-section-inset-bar: none;
 
   /* ── Layer 3 — Interaction thresholds (JS reads via ui.readNum) ── */
   --aiditor-drag-threshold: 6;       /* px before a pointerdown becomes a drag */

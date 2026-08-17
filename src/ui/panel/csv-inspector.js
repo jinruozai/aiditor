@@ -26,6 +26,9 @@
   }
 
   aiditor.inspector.registerProvider('csv.cell', {
+    targetId: function (target) {
+      return target.sessionKey + ':row:' + target.rowId + ':column:' + target.columnId
+    },
     inspect: function (targets) {
       const active = locate(targets[0])
       if (!active || active.row < 0 || active.column < 0) return null
@@ -75,6 +78,9 @@
   }
 
   aiditor.inspector.registerProvider('csv.column', {
+    targetId: function (target) {
+      return target.sessionKey + ':column:' + target.columnId
+    },
     inspect: function (targets) {
       const first = locate(targets[0])
       if (!first || first.column < 0) return null

@@ -131,6 +131,7 @@ window.HTMLElement = FakeEl
 
 for (const file of [
   'src/core/signal.js',
+  'src/core/workspace-state.js',
   'src/core/log.js',
   'src/core/bus.js',
   'src/core/names.js',
@@ -170,6 +171,7 @@ for (const file of [
   'src/ui/container/section.js',
   'src/ui/form/propertyForm.js',
   'src/ui/inspector.js',
+  'src/ui/inspector-folding.js',
   'src/ui/panel/inspector.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })

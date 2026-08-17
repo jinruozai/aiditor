@@ -46,6 +46,16 @@ const targets = [
 ]
 aiditor.inspector.select(targets)
 assert.deepEqual(aiditor.inspector.selection.peek().map(function (target) { return target.id }), ['a', 'b'])
+const atomicStates = []
+const stopAtomic = aiditor.effect(function () {
+  const selection = aiditor.inspector.selection()
+  const meta = aiditor.inspector.meta()
+  atomicStates.push({ primary: selection[0] && selection[0].id, workspaceId: meta.workspaceId || '' })
+})
+aiditor.inspector.select(targets, { workspaceId: 'project-a' })
+assert.deepEqual(atomicStates.slice(-1), [{ primary: 'a', workspaceId: 'project-a' }])
+assert.equal(atomicStates.length, 2)
+stopAtomic()
 let refreshed = 0
 const stopRefresh = aiditor.effect(function () {
   aiditor.inspector.selection()
