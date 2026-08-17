@@ -954,8 +954,8 @@
 
   --aiditor-text-primary:  #1c2944;
   --aiditor-text-body:     #2d3953;
-  --aiditor-text-label:    #4e5b73;
-  --aiditor-text-muted:    #69758c;
+  --aiditor-text-label:    #414e68;
+  --aiditor-text-muted:    #5a6679;
   --aiditor-text-disabled: #929aac;
 
   --aiditor-stroke-subtle: #e4dfed;
@@ -1042,7 +1042,7 @@
     system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
   --aiditor-radius-control: 7px;
-  --aiditor-radius-surface: 10px;
+  --aiditor-radius-surface: 8px;
   --aiditor-radius-overlay: 12px;
   --aiditor-radius-tab: 8px;
   --aiditor-radius-chip: 8px;

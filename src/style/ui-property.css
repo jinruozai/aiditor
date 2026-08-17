@@ -255,7 +255,7 @@
 .aiditor-ui-struct-input-row-accented.aiditor-ui-struct-input-row-layout-section:not(.aiditor-ui-struct-input-row-collapsed) > .aiditor-ui-struct-input-label {
   background: color-mix(in srgb, var(--aiditor-struct-accent) 62%, #fff);
   color: #141820;
-  padding-inline: var(--aiditor-space-1);
+  padding: 0 8px 0 var(--aiditor-space-1);
 }
 /* The head padding shifts the label grid; shrink the title column so the
    editor host keeps its column start. */

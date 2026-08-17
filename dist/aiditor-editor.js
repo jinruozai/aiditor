@@ -2753,6 +2753,10 @@
     return !!err && (err.name === 'NotFoundError' || err.code === 'ENOENT')
   }
 
+  function typeMismatch(err) {
+    return !!err && (err.name === 'TypeMismatchError' || err.code === 'EISDIR' || err.code === 'ENOTDIR')
+  }
+
   function permissionError(err) {
     return !!err && (err.name === 'NotAllowedError' || err.name === 'SecurityError'
       || err.code === 'EACCES' || err.code === 'EPERM')
@@ -2807,7 +2811,7 @@
         try {
           handle = await handle.getDirectoryHandle(parts[i])
         } catch (err) {
-          if (!missing(err)) throw err
+          if (!missing(err) && !typeMismatch(err)) throw err
           handle = await handle.getFileHandle(parts[i])
         }
       }
@@ -8418,9 +8422,26 @@
       const sectionPath = layout === 'section' && foldingState
         ? aiditor.inspector.foldingPath.field(childFieldPath(parentFieldPath, f.key))
         : null
-      const label = layout === 'section'
-        ? sectionLabel(root, row, f, forceExpanded, foldingState, foldingScope, sectionPath)
-        : fieldLabelEl(f)
+      // A headerEditor takes over the section header line (Godot-style
+      // resource rows): the label renders as plain text without the fold
+      // toggle, and the editor owns the expand interaction via header.toggle.
+      const headerEditor = layout === 'section' && f.fieldDef && f.fieldDef.type_agv
+        && typeof f.fieldDef.type_agv.headerEditor === 'function'
+        ? f.fieldDef.type_agv.headerEditor : null
+      // type_agv.sectionAccent (color string): app-supplied accent for the
+      // expanded header section. The collapsed row stays flat; CSS frames
+      // the expanded row around --aiditor-struct-accent.
+      const sectionAccent = headerEditor && f.fieldDef.type_agv.sectionAccent != null
+        ? String(f.fieldDef.type_agv.sectionAccent)
+        : null
+      if (sectionAccent) {
+        row.classList.add('aiditor-ui-struct-input-row-accented')
+        row.style.setProperty('--aiditor-struct-accent', sectionAccent)
+      }
+      const sectionInfo = layout === 'section'
+        ? sectionLabel(root, row, f, forceExpanded, foldingState, foldingScope, sectionPath, !!headerEditor)
+        : null
+      const label = sectionInfo ? sectionInfo.el : fieldLabelEl(f)
       label.classList.add('aiditor-ui-struct-input-label-' + labelMode)
       // Tooltip surfaces the field's purpose on hover. The `data-has-tip`
       // marker is a CSS hook for the help cursor; we don't paint that
@@ -8474,6 +8495,13 @@
       cell.appendChild(editor)
       ui.collect(root, function () { ui.dispose(editor) })
       if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
+
+      if (headerEditor) {
+        const headerHost = ui.h('span', 'aiditor-ui-struct-input-section-header')
+        headerHost.appendChild(headerEditor(f.fieldDef, fieldSig, writeSlot, editorCtx, sectionInfo.header))
+        label.appendChild(headerHost)
+        ui.collect(root, function () { ui.dispose(headerHost) })
+      }
 
       if (f.labelActions) {
         const labelActions = ui.h('div', 'aiditor-ui-struct-input-label-actions')
@@ -8848,7 +8876,7 @@
     return aiditor.inspector.formatFieldPath(parts)
   }
 
-  function sectionLabel(root, row, f, forceExpanded, foldingState, foldingScope, sectionPath) {
+  function sectionLabel(root, row, f, forceExpanded, foldingState, foldingScope, sectionPath, hasHeaderEditor) {
     const controlled = f.collapsed != null || typeof f.onToggle === 'function'
     const collapsed = ui.asSig(f.collapsed != null ? f.collapsed : !!f.defaultCollapsed)
     const storedExpanded = !controlled && foldingState
@@ -8863,25 +8891,42 @@
       else if (storedExpanded) storedExpanded.set(!next)
       else if (typeof collapsed.set === 'function') collapsed.set(next)
     }
-    const wrap = ui.h('div', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-label')
-    const btn = ui.h('button', 'aiditor-ui-struct-input-section-toggle', { type: 'button' })
-    const arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
-    arrow.classList.add('aiditor-ui-struct-input-section-arrow')
-    btn.appendChild(arrow)
-    btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
-    wrap.appendChild(btn)
-    btn.addEventListener('click', function () {
-      writeCollapsed(storedExpanded ? storedExpanded.peek() : !collapsed.peek())
+    const isCollapsed = aiditor.derived(function () {
+      return forceExpanded() ? false : (storedExpanded ? !storedExpanded() : collapsed())
     })
+    const toggleCollapsed = function () {
+      writeCollapsed(storedExpanded ? storedExpanded.peek() : !collapsed.peek())
+    }
+    const wrap = ui.h('div', 'aiditor-ui-struct-input-label aiditor-ui-struct-input-section-label')
+    let btn = null
+    let arrow = null
+    if (hasHeaderEditor) {
+      // Plain label text: the header editor owns the expand interaction.
+      // The marker class lets CSS mirror the normal row's label column so
+      // the editor host starts where regular row editors start.
+      wrap.classList.add('aiditor-ui-struct-input-section-label-has-header')
+      wrap.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+    } else {
+      btn = ui.h('button', 'aiditor-ui-struct-input-section-toggle', { type: 'button' })
+      arrow = ui.icon({ name: 'chevron-down', size: 'sm' })
+      arrow.classList.add('aiditor-ui-struct-input-section-arrow')
+      btn.appendChild(arrow)
+      btn.appendChild(ui.h('span', 'aiditor-ui-struct-input-section-title', { text: fieldLabel(f) }))
+      wrap.appendChild(btn)
+      btn.addEventListener('click', toggleCollapsed)
+    }
     const stop = aiditor.effect(function () {
-      const v = forceExpanded() ? false : (storedExpanded ? !storedExpanded() : collapsed())
+      const v = isCollapsed()
       row.classList.toggle('aiditor-ui-struct-input-row-collapsed', !!v)
-      btn.setAttribute('aria-expanded', v ? 'false' : 'true')
-      arrow.style.transform = v ? 'rotate(-90deg)' : ''
+      if (btn) {
+        btn.setAttribute('aria-expanded', v ? 'false' : 'true')
+        arrow.style.transform = v ? 'rotate(-90deg)' : ''
+      }
     })
     ui.collect(root, stop)
+    ui.collect(root, isCollapsed.dispose)
     if (storedExpanded) ui.collect(root, storedExpanded.dispose)
-    return wrap
+    return { el: wrap, header: { collapsed: isCollapsed, toggle: toggleCollapsed } }
   }
 
   function openFieldContextMenu(ev, row, label, field, closeFieldMenu, setFieldMenu, clearFieldMenu) {
@@ -10845,6 +10890,7 @@
           const messages = messagesForPath(fieldMessages, fname)
           fields.push({
             key:     fname,
+            fieldDef: subFd,
             group:   raw && raw.group,
             label:   label.value,
             labelMode: label.mode,

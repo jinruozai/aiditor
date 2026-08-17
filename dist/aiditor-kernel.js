@@ -4381,6 +4381,10 @@
     return !!err && (err.name === 'NotFoundError' || err.code === 'ENOENT')
   }
 
+  function typeMismatch(err) {
+    return !!err && (err.name === 'TypeMismatchError' || err.code === 'EISDIR' || err.code === 'ENOTDIR')
+  }
+
   function permissionError(err) {
     return !!err && (err.name === 'NotAllowedError' || err.name === 'SecurityError'
       || err.code === 'EACCES' || err.code === 'EPERM')
@@ -4435,7 +4439,7 @@
         try {
           handle = await handle.getDirectoryHandle(parts[i])
         } catch (err) {
-          if (!missing(err)) throw err
+          if (!missing(err) && !typeMismatch(err)) throw err
           handle = await handle.getFileHandle(parts[i])
         }
       }

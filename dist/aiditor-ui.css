@@ -1828,6 +1828,49 @@
 .aiditor-ui-struct-input-section-label {
   width: 100%;
 }
+/* Header-editor mode: plain title (no toggle button) occupies the label
+   column so the editor host starts exactly where regular row editors
+   start, and fills the rest of the header line. */
+.aiditor-ui-struct-input-section-label-has-header {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px;
+}
+.aiditor-ui-struct-input-section-label-has-header > .aiditor-ui-struct-input-section-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.aiditor-ui-array-editor-cell > .aiditor-ui-struct-input .aiditor-ui-struct-input-section-label-has-header {
+  grid-template-columns: minmax(36px, 48px) minmax(0, 1fr);
+}
+/* Accented header section (type_agv.sectionAccent): the collapsed row stays
+   flat; the expanded row is framed like a property section — accent border
+   and head strip in the selected rule-tag recipe (accent over white, dark
+   text), lighter accent body on the cell. */
+.aiditor-ui-struct-input-row-accented.aiditor-ui-struct-input-row-layout-section:not(.aiditor-ui-struct-input-row-collapsed) {
+  margin: 2px 0;
+  padding: 0;
+  border: var(--aiditor-surface-border-w) solid color-mix(in srgb, var(--aiditor-struct-accent) 84%, transparent);
+  border-radius: var(--aiditor-radius-surface);
+  overflow: hidden;
+  background: light-dark(
+    color-mix(in srgb, var(--aiditor-struct-accent) 5%, var(--aiditor-bg-1)),
+    color-mix(in srgb, var(--aiditor-struct-accent) 8%, var(--aiditor-bg-1))
+  );
+}
+.aiditor-ui-struct-input-row-accented.aiditor-ui-struct-input-row-layout-section:not(.aiditor-ui-struct-input-row-collapsed) > .aiditor-ui-struct-input-label {
+  background: color-mix(in srgb, var(--aiditor-struct-accent) 62%, #fff);
+  color: #141820;
+  padding: 0 8px 0 var(--aiditor-space-1);
+}
+/* The head padding shifts the label grid; shrink the title column so the
+   editor host keeps its column start. */
+.aiditor-ui-struct-input-row-accented.aiditor-ui-struct-input-row-layout-section:not(.aiditor-ui-struct-input-row-collapsed) > .aiditor-ui-struct-input-section-label-has-header {
+  grid-template-columns: calc(56px - var(--aiditor-space-1)) minmax(0, 1fr);
+}
 .aiditor-ui-struct-input-section-toggle {
   display: inline-flex;
   align-items: center;
@@ -1878,7 +1921,7 @@
   box-shadow: none;
 }
 .aiditor-ui-struct-group > .aiditor-ui-section-body {
-  padding: var(--aiditor-space-1) 0;
+  padding: var(--aiditor-space-1) 2px;
   gap: 0;
   background: transparent;
 }
