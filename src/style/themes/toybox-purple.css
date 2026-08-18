@@ -219,7 +219,7 @@
   --aiditor-section-head-fg: var(--aiditor-fg-0);
   --aiditor-section-head-shadow: inset 0 1px 0 rgba(255,255,255,.9);
   --aiditor-property-section-accent: #ffaa17;
-  /* Expanded skin: framed accent card (mors resource-card look) —
+  /* Expanded skin: framed accent card look —
      accent-tinted frame, tinted body, tinted head strip, left accent bar. */
   --aiditor-property-section-border: color-mix(in srgb, var(--aiditor-property-section-accent) 78%, transparent);
   --aiditor-property-section-bg: color-mix(in srgb, var(--aiditor-property-section-accent) 18%, var(--aiditor-bg-1));

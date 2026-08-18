@@ -20,8 +20,8 @@ preserved or deliberately replaced.
 | `src/core/settings.js` | [core.md](./core.md) | Settings sections, schemas, pages, persistence, owner cleanup, and dotted-prefix helpers. |
 | `src/core/commands.js` | [core.md](./core.md) | Commands, menus, owner cleanup, and dotted-prefix helpers. |
 | `src/core/shortcuts.js` | [core.md](./core.md), [shortcuts.md](./shortcuts.md) | Shortcut runtime: key normalization, context resolution, command routing, diagnostics, user overrides, and panel surfaces. |
-| `src/core/workspace.js` | [workspace.md](./workspace.md), [workspace-v2.md](./workspace-v2.md), [workspace-precise-editing.md](./workspace-precise-editing.md), [host-file-workflow.md](./host-file-workflow.md), [csv-editor.md](./csv-editor.md) | Workspace adapters, runtime adapter bindings, path safety, text/blob IO, path operations, operation review target, URL leases, snapshots, search, and exact text edit helpers. Host FileIndex/reference/journal policy stays above this file. |
-| `src/core/workspace-watch.js` | [workspace.md](./workspace.md), [workspace-v2.md](./workspace-v2.md) | Single-owner browser FSA observer, verified shared snapshot diff, merged change batches, permission suspension, and focus/poll fallback. |
+| `src/core/workspace.js` | [workspace.md](./workspace.md), [workspace-precise-editing.md](./workspace-precise-editing.md), [host-file-workflow.md](./host-file-workflow.md), [csv-editor.md](./csv-editor.md) | Workspace adapters, runtime adapter bindings, path safety, text/blob IO, path operations, operation review target, URL leases, snapshots, search, and exact text edit helpers. Host FileIndex/reference/journal policy stays above this file. |
+| `src/core/workspace-watch.js` | [workspace.md](./workspace.md) | Single-owner browser FSA observer, verified shared snapshot diff, merged change batches, permission suspension, and focus/poll fallback. |
 
 ## UI
 
@@ -43,7 +43,7 @@ preserved or deliberately replaced.
 | `src/ui/data/fileBrowser.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Thin file preset over collectionBrowser: breadcrumbs, file projection, metadata rendering, directory activation, and file-shaped contexts. |
 | `src/ui/data/dataGrid.js` | [csv-editor.md](./csv-editor.md), [ui.md](./ui.md) | Controlled spreadsheet interaction surface with virtual rows; no CSV or persistence knowledge. |
 | `src/ui/editor/textDocument.js` | [csv-editor.md](./csv-editor.md), [host-file-workflow.md](./host-file-workflow.md) | Shared format-neutral text file load/save, CAS dirty/stale state, and watch lifecycle. |
-| `src/ui/editor/csv/*.js` | [csv-editor.md](./csv-editor.md), [schema-value-encoding.md](./schema-value-encoding.md) | Shared CSV row grammar, explicit `csv`/`gamecsv` formats, and the immutable typed single-table document. |
+| `src/ui/editor/csv/*.js` | [csv-editor.md](./csv-editor.md), [schema-value-encoding.md](./schema-value-encoding.md) | Shared CSV row grammar, a pluggable CSV-format registry, and the immutable typed single-table document. |
 | `src/ui/panel/csv-*.js` | [csv-editor.md](./csv-editor.md), [inspector.md](./inspector.md) | Shared CSV sessions, commands, compact FieldDef cell projection, Inspector providers, and the one-file `csv-editor` Panel. |
 | `src/ui/data/tree.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Virtualized static/lazy tree with controlled selection/expansion and node-scoped async loading. |
 | `src/ui/_internal/_dnd.js` | [file-browser.md](./file-browser.md), [ui.md](./ui.md) | Generic drag/drop transport plus external file/directory normalization. |
@@ -95,7 +95,7 @@ preserved or deliberately replaced.
 | `src/ai/target.js` | [ai-registries.md](./ai-registries.md) | Add-to-chat targets, drag/drop, file targets. |
 | `src/ai/rich-prompt.js` | [ai-registries.md](./ai-registries.md), [ai-skills.md](./ai-skills.md) | Inline references and explicit Skill tokens in prompt text. |
 | `src/ai/change-set.js` | [ai-registries.md](./ai-registries.md) | Grouped review and apply/reject. |
-| `src/ai/workdir.js` | [workspace.md](./workspace.md), [workspace-v2.md](./workspace-v2.md), [workspace-precise-editing.md](./workspace-precise-editing.md), [agent-workspace-editing.md](./agent-workspace-editing.md) | Workspace module tool contributions; mutating tools should consume Core operation preview/apply instead of defining separate file semantics. |
+| `src/ai/workdir.js` | [workspace.md](./workspace.md), [workspace-precise-editing.md](./workspace-precise-editing.md), [agent-workspace-editing.md](./agent-workspace-editing.md) | Workspace module tool contributions; mutating tools should consume Core operation preview/apply instead of defining separate file semantics. |
 
 ## Outside Framework Bundle
 

@@ -89,7 +89,6 @@
   <script src="./demo/ai-targets.js?v=12"></script>
   <script src="./demo/topbar.js?v=14"></script>
   <script src="./demo/project.js?v=12"></script>
-  <script src="./demo/csv-types.js?v=1"></script>
   <script src="./demo/csv-sample.js?v=1"></script>
 
   <!-- Demo panel components. -->
@@ -156,7 +155,7 @@
           },
           panels: [
             panel({ component: 'ai-chat', title: 'Chat', icon: 'message-circle' }),
-            panel({ component: 'csv-editor', title: 'test.csv', icon: 'table', props: { workspaceId: 'demo.csv', path: 'data/test.csv', format: 'gamecsv' } }),
+            panel({ component: 'csv-editor', title: 'test.csv', icon: 'table', props: { workspaceId: 'demo.csv', path: 'data/test.csv', format: 'csv' } }),
           ],
         }),
       ], [0.24, 0.76])

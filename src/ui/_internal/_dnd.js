@@ -18,7 +18,7 @@
 //   application/aiditor.asset+json        { kind:'image'|'audio'|'file', value, meta? }
 //   application/aiditor.asset.<kind>+json  same payload, hover-readable kind hint
 //   application/aiditor.asset.entry+json   [{ kind, path?, url?, name? }]
-//   application/aiditor.entity+json       { id, pathKey }  — game-entity reference
+//   application/aiditor.entity+json       { id, pathKey }  — host-defined entity reference
 //
 // dropzone unpacks all of the above into a flat `data` object so handlers
 // don't have to know which MIME the source used. dragsource takes a

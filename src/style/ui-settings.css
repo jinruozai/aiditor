@@ -114,7 +114,7 @@
 
 .aiditor-settings-connection-shell {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr);
   gap: var(--aiditor-space-4);
   min-width: 0;
   align-items: start;
@@ -123,80 +123,32 @@
 .aiditor-settings-connection-list {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   min-width: 0;
-  overflow: hidden;
-  border: var(--aiditor-surface-border-w) solid var(--aiditor-border);
-  border-radius: var(--aiditor-radius-surface);
-  background: var(--aiditor-view-bg);
 }
 
-.aiditor-settings-connection-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px var(--aiditor-space-2);
+.aiditor-settings-connection-tabs {
   width: 100%;
-  min-height: 54px;
-  padding: var(--aiditor-space-2) var(--aiditor-space-3);
-  border: 0;
-  border-bottom: 1px solid var(--aiditor-border);
-  background: transparent;
-  color: var(--aiditor-fg-1);
+  flex-direction: column;
+  align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.aiditor-settings-connection-tabs .aiditor-ui-seg-btn {
+  justify-content: flex-start;
   text-align: left;
-  cursor: pointer;
-  box-sizing: border-box;
 }
 
-.aiditor-settings-connection-item:last-child {
-  border-bottom: 0;
+.aiditor-settings-connection-tabs .aiditor-ui-seg-active {
+  box-shadow:
+    inset 3px 0 0 var(--aiditor-accent),
+    0 1px 0 rgba(0, 0, 0, .18);
 }
 
-.aiditor-settings-connection-item:hover {
-  background: var(--aiditor-hover);
-}
-
-.aiditor-settings-connection-item[data-active="true"] {
-  background: var(--aiditor-selected);
-  color: var(--aiditor-fg-0);
-}
-
-.aiditor-settings-connection-item-title {
-  grid-column: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: inherit;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.aiditor-settings-connection-item-meta {
-  grid-column: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--aiditor-fg-3);
-  font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.aiditor-settings-connection-item[data-active="true"] .aiditor-settings-connection-item-meta {
-  color: var(--aiditor-fg-2);
-}
-
-.aiditor-settings-connection-item-status {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
-  max-width: 92px;
-  overflow: hidden;
-  padding: 2px 7px;
-  border: var(--aiditor-control-border-w) solid var(--aiditor-border);
-  border-radius: 999px;
-  background: var(--aiditor-bg-2);
-  color: var(--aiditor-fg-2);
-  font: var(--aiditor-fs-xs) var(--aiditor-font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.aiditor-settings-connection-delete {
+  width: 100%;
+  margin-top: var(--aiditor-space-3);
 }
 
 .aiditor-settings-connection-detail {
@@ -286,14 +238,47 @@
   margin-bottom: var(--aiditor-space-3);
 }
 
-.aiditor-settings-theme-tabs {
+.aiditor-settings-theme-body {
+  display: flex;
+  align-items: stretch;
+  gap: var(--aiditor-space-3);
   flex: 1 1 auto;
-  min-width: 160px;
+  min-height: 0;
+}
+
+.aiditor-settings-theme-nav {
+  flex: 0 0 96px;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.aiditor-settings-theme-tabs {
+  flex: 1 1 0;
+  align-self: stretch;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.aiditor-settings-theme-tabs .aiditor-ui-seg-btn {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0 var(--aiditor-space-2);
+}
+
+.aiditor-settings-theme-tabs .aiditor-ui-seg-active {
+  box-shadow:
+    inset 3px 0 0 var(--aiditor-accent),
+    0 1px 0 rgba(0, 0, 0, .18);
 }
 
 .aiditor-settings-theme-scroll {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 .aiditor-settings-theme-host {

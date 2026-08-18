@@ -90,7 +90,7 @@
       writable(input)
       const active = session(input)
       if (!csv.formats.resolve(active.formatId).supportsColumnSchema) {
-        throw new Error('csv column definitions require the gamecsv format')
+        throw new Error('csv column definitions require a format with column schema support')
       }
       const selected = range(input)
       const doc = active.document.value.peek()

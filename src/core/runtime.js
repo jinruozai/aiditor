@@ -71,7 +71,7 @@
    * aiditor.runtime.loadScript({
    *   path: 'three-scene.js',
    *   source: text,
-   *   owner: 'workspace:game',
+   *   owner: 'workspace:demo',
    *   layer: 'workspace',
    * })
    * @related aiditor.registerComponent,aiditor.addPanelToDock

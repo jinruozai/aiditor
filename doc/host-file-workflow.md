@@ -1,7 +1,7 @@
 # Host File Workflow
 
 This document describes the recommended host-editor pattern on top of
-[workspace-v2.md](./workspace-v2.md). It is not part of Core workspace.
+[workspace.md](./workspace.md). It is not part of Core workspace.
 
 Workspace V2 provides file-system primitives. A host editor owns project policy:
 commands, history grouping, file index refresh, reference updates, conflict UI,

@@ -3622,6 +3622,25 @@
     }
   }
 
+  function deleteCustomConnection(id) {
+    const c = connections[id]
+    if (!c || c.custom !== true) return false
+    const wasActive = activeConnection === id
+    persistCustomConnections(customConnections().filter(function (old) { return old.id !== id }))
+    const prefix = configKey(id, '')
+    if (aiditor.settings && aiditor.settings.values) {
+      const values = aiditor.settings.values()
+      for (const key in values) {
+        if (key.indexOf(prefix) === 0) aiditor.settings.reset(key)
+      }
+    }
+    unregisterConnection(id)
+    if (wasActive && aiditor.settings && aiditor.settings.set) {
+      aiditor.settings.set('ai.defaultConnection', activeConnection || 'mock')
+    }
+    return true
+  }
+
   function slug(text) {
     return String(text || 'custom').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom'
   }
@@ -3935,6 +3954,7 @@
   ai.registerConnection = registerConnection
   ai.unregisterConnection = unregisterConnection
   ai.createCustomConnection = createCustomConnection
+  ai.deleteCustomConnection = deleteCustomConnection
   ai.loadCustomConnections = loadCustomConnections
   ai.getConnection = getConnection
   ai.listConnections = listConnections
@@ -9179,7 +9199,7 @@
           "description": "Load result with ok/id/owner/layer/type."
         },
         "examples": [
-          "aiditor.runtime.loadScript({\n  path: 'three-scene.js',\n  source: text,\n  owner: 'workspace:game',\n  layer: 'workspace',\n})"
+          "aiditor.runtime.loadScript({\n  path: 'three-scene.js',\n  source: text,\n  owner: 'workspace:demo',\n  layer: 'workspace',\n})"
         ],
         "wrong": [],
         "related": [
@@ -22560,22 +22580,18 @@
     const initial = aiditor.settings.get('ai.defaultConnection') || (options[0] && options[0].id) || 'mock'
     const selected = aiditor.signal(initial)
 
-    root.appendChild(pageHead(
-      'AI Connections',
-      'Choose a provider, configure auth, and set the model used by new agents.'
-    ))
+    root.appendChild(pageHead('AI Connections'))
 
     const bar = ui.h('div', 'aiditor-settings-ai-toolbar')
     bar.appendChild(settingSelect({
       key: 'ai.defaultConnection',
-      label: 'Default connection',
-      desc: 'New agents start here. Existing agents keep their own connection.',
+      label: 'Default',
       options: connectionSelectOptions,
       compact: true,
       onChange: function (value) { selected.set(value) },
     }))
     bar.appendChild(ui.button({
-      text: 'Add Connection',
+      text: 'Add',
       icon: 'plus',
       size: 'sm',
       onClick: function () { addCustomConnection(root) },
@@ -22590,11 +22606,10 @@
     root.appendChild(shell)
 
     renderConnectionList(list, selected)
-    renderConnectionDetail(detail, selected)
+    renderConnectionDetail(detail, selected, root)
     ui.collect(root, aiditor.effect(function () {
       selected()
-      renderConnectionDetail(detail, selected)
-      updateConnectionListActive(list, selected.peek())
+      renderConnectionDetail(detail, selected, root)
     }))
 
     return root
@@ -22614,14 +22629,14 @@
   function pageHead(title, desc) {
     const head = ui.h('div', 'aiditor-settings-page-head')
     head.appendChild(ui.h('div', 'aiditor-settings-page-title', { text: title }))
-    head.appendChild(ui.h('div', 'aiditor-settings-page-desc', { text: desc }))
+    if (desc) head.appendChild(ui.h('div', 'aiditor-settings-page-desc', { text: desc }))
     return head
   }
 
   function clear(el) {
     while (el.firstChild) {
       if (ui.dispose) ui.dispose(el.firstChild)
-      el.removeChild(el.firstChild)
+      else el.removeChild(el.firstChild)
     }
   }
 
@@ -22630,35 +22645,15 @@
     const options = connectionOptions()
     const current = selected.peek()
     if (!findConnectionMeta(current, options) && options[0]) selected.set(options[0].id)
-    const active = selected.peek()
-    for (let i = 0; i < options.length; i++) {
-      host.appendChild(connectionListItem(options[i], active, function (id) {
-        selected.set(id)
-      }))
-    }
+    const tabs = ui.segmented({
+      value: selected,
+      options: options.map(function (o) { return { value: o.id, label: o.label || o.id } }),
+    })
+    tabs.classList.add('aiditor-settings-connection-tabs')
+    host.appendChild(tabs)
   }
 
-  function updateConnectionListActive(host, activeId) {
-    const items = host.querySelectorAll('.aiditor-settings-connection-item')
-    for (let i = 0; i < items.length; i++) {
-      items[i].toggleAttribute('data-active', items[i].getAttribute('data-connection-id') === activeId)
-    }
-  }
-
-  function connectionListItem(meta, activeId, onSelect) {
-    const item = ui.h('button', 'aiditor-settings-connection-item', { type: 'button' })
-    item.setAttribute('data-connection-id', meta.id)
-    if (meta.id === activeId) item.setAttribute('data-active', 'true')
-    item.appendChild(ui.h('span', 'aiditor-settings-connection-item-title', { text: meta.label || meta.id }))
-    item.appendChild(ui.h('span', 'aiditor-settings-connection-item-meta', {
-      text: [meta.provider || meta.id, meta.authType || 'none'].join(' / '),
-    }))
-    item.appendChild(ui.h('span', 'aiditor-settings-connection-item-status', { text: connectionStateText(meta.id) }))
-    item.addEventListener('click', function () { onSelect(meta.id) })
-    return item
-  }
-
-  function renderConnectionDetail(host, selected) {
+  function renderConnectionDetail(host, selected, root) {
     clear(host)
     const meta = findConnectionMeta(selected.peek(), connectionOptions())
     if (!meta) {
@@ -22707,6 +22702,17 @@
     host.appendChild(card)
 
     host.appendChild(statusNote(helpTextFor(meta)))
+
+    if (connection && connection.custom === true) {
+      const del = ui.button({
+        text: 'Delete Connection',
+        icon: 'trash',
+        kind: 'danger',
+        onClick: function () { deleteConnection(meta.id, root) },
+      })
+      del.classList.add('aiditor-settings-connection-delete')
+      host.appendChild(del)
+    }
   }
 
   function findConnectionMeta(id, options) {
@@ -23124,6 +23130,22 @@
     const agent = aiditor.ai.getActiveAgent()
     if (!agent || agent.connection !== connectionId) return
     aiditor.ai.updateAgent(agent.id, { model: modelId })
+  }
+
+  function deleteConnection(id, root) {
+    if (!aiditor.ai || !aiditor.ai.deleteCustomConnection) return
+    const meta = findConnectionMeta(id, connectionOptions())
+    ui.confirm({
+      title: 'Delete Connection',
+      message: 'Remove "' + (meta ? meta.label : id) + '"? This clears its saved settings and API key.',
+      okLabel: 'Delete',
+      danger: true,
+    }).then(function (ok) {
+      if (!ok) return
+      aiditor.ai.deleteCustomConnection(id)
+      if (ui.toast) ui.toast({ kind: 'success', message: 'Connection deleted' })
+      refreshSettingsPage(root)
+    })
   }
 
   function addCustomConnection(root) {

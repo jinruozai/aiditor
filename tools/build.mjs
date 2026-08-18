@@ -27,6 +27,7 @@ const DIST = join(ROOT, 'dist')
 
 const JS_ORDER = [
   // Layer 0 - reactivity & log
+  'core/storage.js',
   'core/signal.js',
   'core/log.js',
   'core/names.js',
@@ -187,7 +188,6 @@ const JS_ORDER = [
   'ui/editor/csv/codec.js',
   'ui/editor/csv/format.js',
   'ui/editor/csv/format-csv.js',
-  'ui/editor/csv/format-gamecsv.js',
   'ui/editor/csv/model.js',
 
   // Layer 9 - UI library: containers
@@ -252,11 +252,6 @@ const JS_ORDER = [
     'ui/panel/csv-inspector.js',
     'ui/panel/csv-pan.js',
     'ui/panel/csv-drag.js',
-  'ui/panel/csv-media.js',
-  'ui/panel/csv-reference.js',
-  'ui/panel/csv-enum.js',
-  'ui/panel/csv-range.js',
-  'ui/panel/csv-number.js',
   'ui/panel/csv-cell.js',
   'ui/panel/csv-editor.js',
 

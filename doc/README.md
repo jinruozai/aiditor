@@ -23,12 +23,8 @@ Use documents in this order:
 ```text
 AGENTS.md          current repo state, operating rules, and hard constraints
 doc/README.md      current architecture index and boundary contract
-doc/*.md           current architecture, excluding doc/old
-doc/old/**         archived reference only
+doc/*.md           current architecture
 ```
-
-Do not implement from files under `doc/old/` unless a current document
-explicitly references one.
 
 ## Boundary Summary
 
@@ -74,7 +70,7 @@ LICENSE
 ```
 
 Internal coordination files such as `AGENTS.md` and `CLAUDE.md`, source tests,
-screenshots, tools, demos, and `doc/old/**` are repository material, not npm
+screenshots, tools, demos, and design documents are repository material, not npm
 runtime package contents.
 
 Optional layers must be optional in distribution as well as in architecture. The
@@ -149,7 +145,9 @@ standalone alternatives and must not be combined with Kernel/Core/Full.
 
 ## Document Map
 
-- [architecture.md](./architecture.md): full layer model and naming rules.
+- [architecture.md](./architecture.md)
+- [architecture-decisions.md](./architecture-decisions.md): user-ratified subsystem behavior contracts (dock split/merge, panel runtime, component registry, data model, bus).
+- [architecture-decisions.md](./architecture-decisions.md): user-ratified subsystem behavior contracts (dock split/merge, panel runtime, component registry, data model, bus).: full layer model and naming rules.
 - [core.md](./core.md): core infrastructure that already exists.
 - [ui.md](./ui.md): component registry, dock layout/runtime, toolbar records, and UI library.
 - [quick-pick.md](./quick-pick.md): generic quick filter picker for choosing one opaque item from a bounded collection.
@@ -168,8 +166,7 @@ standalone alternatives and must not be combined with Kernel/Core/Full.
 - [ai-context-compaction.md](./ai-context-compaction.md): context budgeting, semantic compaction, memory, and long-session request assembly.
 - [ai-registries.md](./ai-registries.md): concrete registry APIs and current implementation notes.
 - [provider.md](./provider.md): connection, auth, transport, model, streaming, and reliability contract.
-- [workspace.md](./workspace.md): current bounded file access and workspace tool contribution.
-- [workspace-v2.md](./workspace-v2.md): target design for workspace operation review, strict text/blob IO, snapshots, URL leases, and host/framework boundaries.
+- [workspace.md](./workspace.md): the workspace final model - bounded file access, operation review, strict text/blob IO, snapshots, URL leases, workspace tool contributions, and host/framework boundaries.
 - [host-file-workflow.md](./host-file-workflow.md): recommended host pattern for FileIndex, reference repair, FileOperationJournal, conflict UI, and domain validation on top of Workspace V2.
 - [workspace-precise-editing.md](./workspace-precise-editing.md): search/read/exact-edit workflow for safe code mutation.
 - [resource-versioning.md](./resource-versioning.md): versioned mutation contract, CAS apply, and conflict handling.

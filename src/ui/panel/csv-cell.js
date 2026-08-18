@@ -1,4 +1,4 @@
-// Compact GameCSV cell projection over the shared FieldDef/editor system.
+// Compact typed-cell projection over the shared FieldDef/editor system.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui
@@ -100,34 +100,19 @@
       write: write,
     }
 
-    if (resolved.type_render === 'id' || resolved.type_render === 'ref_id') {
-      return csv.references.render(Object.assign(adapter, {
+    if (format.renderCellEditor) {
+      const custom = format.renderCellEditor(resolved, adapter, {
         document: context.document,
-        format: format,
         workspace: context.workspace,
+        workspaceId: context.workspaceId,
+        path: context.path,
+        rowId: context.rowId,
+        columnId: context.columnId,
         descriptor: function () { return dragDescriptor(fieldDef, valueSig, context) },
         writeDropped: function (raw) { droppedValue(raw, fieldDef, write, context) },
-      }))
+      })
+      if (custom) return custom
     }
-    if (resolved.type_render === 'img' || resolved.type_render === 'snd') {
-      const kind = resolved.type_render
-      return csv.media.render(kind, Object.assign(adapter, {
-        workspace: context.workspace,
-        descriptor: function () { return dragDescriptor(fieldDef, valueSig, context) },
-        attachSource: function (el) {
-          const stop = function (event) { event.stopPropagation() }
-          el.addEventListener('pointerdown', stop)
-          ui.collect(el, function () { el.removeEventListener('pointerdown', stop) })
-          csv.drag.source(el, function () { return dragDescriptor(fieldDef, valueSig, context) })
-        },
-        attachTarget: function (el) {
-          csv.drag.target(el, kind, function (raw) { droppedValue(raw, fieldDef, write, context) })
-        },
-      }))
-    }
-    if (resolved.type_render === 'enum') return csv.enum.render(adapter)
-    if (resolved.type_render === 'range') return csv.range.render(adapter)
-    if (resolved.type_render === 'input_int' || resolved.type_render === 'input_float') return csv.number.render(adapter)
 
     const editor = ui.editorFor(resolved, valueSig, write, context.editorContext)
     editor.classList.add('aiditor-csv-inline-control')
@@ -138,7 +123,7 @@
     const o = options || {}
     const cell = o.cell
     const format = o.format
-    if (format.id === 'csv' || o.readOnly) return staticValue(cell)
+    if (!format.richCells || o.readOnly) return staticValue(cell)
 
     const resolved = resolvedField(format, o.column.fieldDef)
     if (resolved._unknown) return staticValue(cell, resolved.type_render)

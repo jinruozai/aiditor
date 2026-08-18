@@ -25,7 +25,7 @@ Returns: `Promise<object>` Load result with ok/id/owner/layer/type.
 aiditor.runtime.loadScript({
   path: 'three-scene.js',
   source: text,
-  owner: 'workspace:game',
+  owner: 'workspace:demo',
   layer: 'workspace',
 })
 ```

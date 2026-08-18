@@ -3874,17 +3874,11 @@
   }
 
   function readFavorites() {
-    try {
-      const raw = localStorage.getItem(FAVORITES_KEY)
-      if (!raw) return []
-      const parsed = JSON.parse(raw)
-      return Array.isArray(parsed) ? parsed.map(function (v) { return normalizeColor(v, 'hex') }).slice(0, 16) : []
-    } catch (_) {
-      return []
-    }
+    const parsed = aiditor.storage.json(FAVORITES_KEY, [])
+    return Array.isArray(parsed) ? parsed.map(function (v) { return normalizeColor(v, 'hex') }).slice(0, 16) : []
   }
   function saveFavorites(list) {
-    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(list.slice(0, 16))) } catch (_) {}
+    aiditor.storage.setJson(FAVORITES_KEY, list.slice(0, 16))
   }
   function addFavorite(state) {
     const color = state.argb.toUpperCase()

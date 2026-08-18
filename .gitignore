@@ -9,7 +9,6 @@ node_modules/
 # `/temp/*` (not `/temp/`) so individual subdirs can be un-ignored with `!`;
 # git's un-ignore rules won't cross an ignored parent directory.
 /temp/*
-# GameDataEditor is an independent real project kept here only for Codex
-# integration/reference work. Framework source must stay decoupled from it.
-# It is tracked in git but excluded from npm by package.json/.npmignore.
-!/temp/GameDataEditor/
+
+# Local AI-assistant workspace data (memory, session state).
+.workbuddy/

@@ -135,7 +135,7 @@
       scroll: 'hidden',
       className: panelMode ? 'aiditor-theme-config' : 'aiditor-settings-page aiditor-settings-theme-page',
     })
-    if (!panelMode) root.appendChild(pageHead('Theme', 'AIditor appearance and visual density.'))
+    if (!panelMode) root.appendChild(pageHead('Theme'))
 
     const bar = ui.h('div', panelMode ? 'aiditor-theme-config-head' : 'aiditor-settings-theme-bar')
     const tabSig = aiditor.signal('palette')
@@ -177,7 +177,6 @@
         if (ui.toast) ui.toast({ kind: 'info', title: 'CSS copied', message: text })
       },
     })
-    if (!panelMode) bar.appendChild(tabs)
     bar.appendChild(mode)
     bar.appendChild(density)
     bar.appendChild(reset)
@@ -190,11 +189,18 @@
       children: host,
       className: panelMode ? 'aiditor-settings-theme-scroll aiditor-theme-config-scroll' : 'aiditor-settings-theme-scroll',
     })
-    root.appendChild(scroll)
     if (panelMode) {
+      root.appendChild(scroll)
       const foot = ui.h('div', 'aiditor-theme-config-foot')
       foot.appendChild(tabs)
       root.appendChild(foot)
+    } else {
+      const body = ui.h('div', 'aiditor-settings-theme-body')
+      const nav = ui.h('div', 'aiditor-settings-theme-nav')
+      nav.appendChild(tabs)
+      body.appendChild(nav)
+      body.appendChild(scroll)
+      root.appendChild(body)
     }
 
     function track(sig, name, parse, format) {
@@ -222,7 +228,7 @@
     ui.collect(root, aiditor.effect(function () {
       const value = modeSig()
       aiditor.settings.set('theme.mode', value)
-      localStorage.setItem(THEME_MODE_KEY, value)
+      aiditor.storage.setText(THEME_MODE_KEY, value)
       if (aiditor.theme && aiditor.theme.set) aiditor.theme.set(value)
       if (!didMountMode) {
         didMountMode = true
@@ -235,7 +241,7 @@
     ui.collect(root, aiditor.effect(function () {
       const value = densitySig()
       aiditor.settings.set('theme.density', value)
-      localStorage.setItem(THEME_DENSITY_KEY, value)
+      aiditor.storage.setText(THEME_DENSITY_KEY, value)
       if (aiditor.theme && aiditor.theme.setDensity) aiditor.theme.setDensity(value)
     }))
 
@@ -271,7 +277,7 @@
   }
 
   function readThemeOverrides() {
-    try { return JSON.parse(localStorage.getItem(THEME_STORAGE_KEY) || '{}') } catch (_) { return {} }
+    return aiditor.storage.json(THEME_STORAGE_KEY, {})
   }
 
   function migrateStoredThemePreferences() {
@@ -287,7 +293,7 @@
   }
 
   function readStorageText(key) {
-    try { return localStorage.getItem(key) || '' } catch (_) { return '' }
+    return aiditor.storage.text(key) || ''
   }
 
   function applyStoredThemeOverrides() {
@@ -299,13 +305,13 @@
     document.documentElement.style.setProperty(name, value)
     const overrides = readThemeOverrides()
     overrides[name] = value
-    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(overrides))
+    aiditor.storage.setJson(THEME_STORAGE_KEY, overrides)
   }
 
   function clearThemeOverrides() {
     const overrides = readThemeOverrides()
     for (const key in overrides) document.documentElement.style.removeProperty(key)
-    localStorage.removeItem(THEME_STORAGE_KEY)
+    aiditor.storage.remove(THEME_STORAGE_KEY)
   }
 
   function pxNum(s) {
@@ -359,7 +365,7 @@
   function pageHead(title, desc) {
     const head = aiditor.ui.h('div', 'aiditor-settings-page-head')
     head.appendChild(aiditor.ui.h('div', 'aiditor-settings-page-title', { text: title }))
-    head.appendChild(aiditor.ui.h('div', 'aiditor-settings-page-desc', { text: desc }))
+    if (desc) head.appendChild(aiditor.ui.h('div', 'aiditor-settings-page-desc', { text: desc }))
     return head
   }
 

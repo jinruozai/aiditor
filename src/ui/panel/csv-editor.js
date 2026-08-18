@@ -1,4 +1,4 @@
-// Built-in csv-editor panel. One panel is one file/view; format selects CSV or GameCSV.
+// Built-in csv-editor panel. One panel is one file/view; the `format` prop selects a registered CSV format.
 ;(function (aiditor) {
   'use strict'
   const ui = aiditor.ui
@@ -141,7 +141,7 @@
 
     function pasteColumnDefinition(keepName) {
       const manual = function () {
-        return ui.prompt({ title: 'Paste GameCSV column', message: 'Paste a GameCSV column definition.', placeholder: "{'name':'Column','type':'var'}", okLabel: 'Apply' })
+        return ui.prompt({ title: 'Paste column definition', message: 'Paste a column definition.', placeholder: "{'name':'Column','type':'var'}", okLabel: 'Apply' })
       }
       const read = navigator.clipboard && navigator.clipboard.readText
         ? navigator.clipboard.readText().catch(manual)
@@ -150,7 +150,7 @@
         if (text == null) return
         let definition = null
         try { definition = format.parseDefinition(text) } catch (_) {}
-        if (!definition) return ui.alert({ title: 'Invalid column', message: 'The clipboard does not contain a GameCSV column definition.' })
+        if (!definition) return ui.alert({ title: 'Invalid column', message: 'The clipboard does not contain a column definition.' })
         return command('csv.column.applyDefinition', { definition: definition, keepName: keepName })
       })
     }

@@ -152,6 +152,25 @@
     }
   }
 
+  function deleteCustomConnection(id) {
+    const c = connections[id]
+    if (!c || c.custom !== true) return false
+    const wasActive = activeConnection === id
+    persistCustomConnections(customConnections().filter(function (old) { return old.id !== id }))
+    const prefix = configKey(id, '')
+    if (aiditor.settings && aiditor.settings.values) {
+      const values = aiditor.settings.values()
+      for (const key in values) {
+        if (key.indexOf(prefix) === 0) aiditor.settings.reset(key)
+      }
+    }
+    unregisterConnection(id)
+    if (wasActive && aiditor.settings && aiditor.settings.set) {
+      aiditor.settings.set('ai.defaultConnection', activeConnection || 'mock')
+    }
+    return true
+  }
+
   function slug(text) {
     return String(text || 'custom').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom'
   }
@@ -465,6 +484,7 @@
   ai.registerConnection = registerConnection
   ai.unregisterConnection = unregisterConnection
   ai.createCustomConnection = createCustomConnection
+  ai.deleteCustomConnection = deleteCustomConnection
   ai.loadCustomConnections = loadCustomConnections
   ai.getConnection = getConnection
   ai.listConnections = listConnections

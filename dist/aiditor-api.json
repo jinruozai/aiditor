@@ -564,7 +564,7 @@
         "description": "Load result with ok/id/owner/layer/type."
       },
       "examples": [
-        "aiditor.runtime.loadScript({\n  path: 'three-scene.js',\n  source: text,\n  owner: 'workspace:game',\n  layer: 'workspace',\n})"
+        "aiditor.runtime.loadScript({\n  path: 'three-scene.js',\n  source: text,\n  owner: 'workspace:demo',\n  layer: 'workspace',\n})"
       ],
       "wrong": [],
       "related": [
