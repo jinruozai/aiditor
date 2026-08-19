@@ -142,7 +142,7 @@
     }
     if (!tool.permissionTargets) return [base]
     const projected = aiditor.safeCall
-      ? aiditor.safeCall({ scope: 'ai.tool', tool: name, phase: 'permissionTargets' }, function () { return tool.permissionTargets(args, ctx || {}, phase || 'call') })
+      ? aiditor.safeCall({ scope: 'ai.tool', tool: name, phase: 'permissionTargets' }, function () { return tool.permissionTargets(args, ctx || {}, phase || 'call') }, 'warn')
       : tool.permissionTargets(args, ctx || {}, phase || 'call')
     if (projected == null) return [Object.assign({}, base, { unavailable: true, reason: 'Tool permission targets are unavailable.' })]
     const values = Array.isArray(projected) ? projected : [projected]

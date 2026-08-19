@@ -350,6 +350,75 @@
   grid-row: 1;
 }
 
+/* ── AI chat composer: narrow panel (container) adjustments ──────────
+   The .aiditor-ai-panel root is an inline-size container, so we size
+   against the panel itself rather than the viewport. The actions row
+   is laid out as a two-column grid: left group (add/env/permission) at
+   start, right group (meter/model/send) at end. The right column is
+   `auto`, so a narrow panel forces the left group to overflow into
+   the right group and the permission dropdown collides with the model
+   select. Two graduated rules fix this without changing the wide layout. */
+
+/* Moderate narrow: shrink the select labels so both groups still fit
+   on one row without the long model name eating the right side. */
+@container (max-width: 620px) {
+  .aiditor-ai-provider-control .aiditor-ui-select-label,
+  .aiditor-ai-model-control .aiditor-ui-select-label,
+  .aiditor-ai-mode-control .aiditor-ui-select-label {
+    max-width: 96px;
+  }
+  .aiditor-ai-composer-inline .aiditor-ai-chat-input-wrap {
+    min-width: 56px;
+  }
+}
+
+/* Narrow: keep the actions row on a single line and let both groups
+   squeeze. The default grid has a right `auto` track that never shrinks,
+   so the left group overflows into it when the panel gets tight. Flipping
+   the row to a wrapping-free flex lets each group shrink to its content:
+   icon buttons stay fixed, text labels truncate with ellipsis. The two
+   groups never wrap and never overlap — beyond the squeezable minimum the
+   composer clips the overflow on the right edge. */
+@container (max-width: 560px) {
+  .aiditor-ai-composer-standard > .aiditor-ai-chat-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--aiditor-space-1) var(--aiditor-space-2);
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding: var(--aiditor-space-1) var(--aiditor-space-2) var(--aiditor-space-2);
+    background: transparent;
+    border-bottom: 0;
+  }
+  .aiditor-ai-composer-standard .aiditor-ai-chat-actions-left,
+  .aiditor-ai-composer-standard .aiditor-ai-chat-actions-right {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 0;
+  }
+  .aiditor-ai-composer-standard .aiditor-ai-chat-actions .aiditor-ui-icon-btn {
+    flex: 0 0 auto;
+  }
+  .aiditor-ai-chat-actions .aiditor-ui-btn-text {
+    white-space: nowrap;
+  }
+}
+
+/* Inline composer: when both side groups are too wide for the input to
+   keep 56px, just let the input shrink further so nothing gets clipped
+   on the right edge. */
+@container (max-width: 380px) {
+  .aiditor-ai-composer-inline .aiditor-ai-chat-input-wrap {
+    min-width: 40px;
+  }
+  .aiditor-ai-composer-inline .aiditor-ai-chat-actions-left,
+  .aiditor-ai-composer-inline .aiditor-ai-chat-actions-right {
+    min-width: 0;
+  }
+}
+
 .aiditor-ai-provider-control,
 .aiditor-ai-model-control,
 .aiditor-ai-mode-control {

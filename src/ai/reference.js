@@ -152,7 +152,7 @@
     const meta = r && referenceProviderMeta[r.resolver] || {}
     if (provider && provider.permissionTargets) {
       const projected = aiditor.safeCall
-        ? aiditor.safeCall({ scope: 'ai.reference', resolver: r.resolver, method: 'permissionTargets' }, function () { return provider.permissionTargets(r, withRefContext(ctx)) })
+        ? aiditor.safeCall({ scope: 'ai.reference', resolver: r.resolver, method: 'permissionTargets' }, function () { return provider.permissionTargets(r, withRefContext(ctx)) }, 'warn')
         : provider.permissionTargets(r, withRefContext(ctx))
       if (projected == null) return [{
         entry: 'reference:' + r.resolver,
@@ -291,7 +291,7 @@
     }
     if (!spec || !spec.permissionTargets) return [base]
     const projected = aiditor.safeCall
-      ? aiditor.safeCall({ scope: 'ai.operation', operation: op, method: 'permissionTargets' }, function () { return spec.permissionTargets(input || {}, withOperationContext(op, ctx), phase) })
+      ? aiditor.safeCall({ scope: 'ai.operation', operation: op, method: 'permissionTargets' }, function () { return spec.permissionTargets(input || {}, withOperationContext(op, ctx), phase) }, 'warn')
       : spec.permissionTargets(input || {}, withOperationContext(op, ctx), phase)
     if (projected == null) return [Object.assign({}, base, { unavailable: true })]
     const values = Array.isArray(projected) ? projected : [projected]

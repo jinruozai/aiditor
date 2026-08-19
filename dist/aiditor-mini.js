@@ -171,9 +171,15 @@
   // Synchronous try/catch wrapper. Async errors inside fn (setTimeout,
   // Promises, event handlers) are NOT caught here — the global window
   // listeners in dock/layout.js cover those.
-  function safeCall(source, fn) {
+  //
+  // Optional `level` downgrades a caught failure from 'error' to a softer
+  // level (e.g. 'warn'). Use it for best-effort projection hooks (permission
+  // targets, availability, …) whose failure is expected and already handled
+  // by the caller's fallback — those are not bugs, so they must not surface as
+  // errors. Non-error failures omit the error object/stack to keep the log quiet.
+  function safeCall(source, fn, level) {
     try { return fn() }
-    catch (e) { log.push('error', source, e.message || String(e), e); return null }
+    catch (e) { log.push(level || 'error', source, e.message || String(e), level && level !== 'error' ? null : e); return null }
   }
 
   function reportError(source, err) {
