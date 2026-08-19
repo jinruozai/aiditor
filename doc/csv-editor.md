@@ -64,6 +64,39 @@ optionally declare:
 A host installs any dialect with typed headers or specialized cell controls
 through `csv.formats.register`; the CSV module itself stays generic.
 
+### `gamecsv`
+
+A plain header remains a `var` column. A typed header is a single-quoted object
+whose `type`, `type_agv`, `type_render`, `default`, `mem`, `struct_def`, and
+`tag` members map directly to the existing `FieldDef`:
+
+```text
+{'name':'Count','type':'int','width':96,'align':'right'}
+{'name':'Tags','type':'array[string]'}
+```
+
+Scalar values use GameCSV text forms. Arrays and structs use nested tuple
+syntax such as `('a','b')` and `((1001,'Mage'),(1002,'Rogue'))`; the format also
+accepts GameCSV's unwrapped top-level comma sequence. Untouched headers and
+cells retain their original text exactly. Editing produces one deterministic
+canonical representation.
+
+The format asks `ui.resolveFieldDef`, `ui.schema`, and `ui.editorFor` for type
+meaning and presentation. It does not define `id_num`, `music`, project
+references, or any other project alias. A host supplies those through the
+existing TypeConfig overlay:
+
+```js
+aiditor.ui.setTypeOverrides({
+  music: { base_type: 'string', type_render: 'snd' },
+  id_string: {
+    base_type: 'struct',
+    type_render: 'struct',
+    struct_def: { id_string: { id: 'ref_id', text: 'string' } },
+  },
+})
+```
+
 ## Interaction and Lifecycle
 
 `dataGrid` supplies virtual rows, range selection, the fill handle, TSV
