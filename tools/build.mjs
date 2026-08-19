@@ -189,6 +189,7 @@ const JS_ORDER = [
   'ui/editor/csv/format.js',
   'ui/editor/csv/format-csv.js',
   'ui/editor/csv/format-gamecsv.js',
+  'ui/editor/csv/format-gamecsv-cells.js',
   'ui/editor/csv/model.js',
 
   // Layer 9 - UI library: containers

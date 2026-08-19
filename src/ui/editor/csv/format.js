@@ -16,9 +16,15 @@
     return format
   }
 
+  function extend(id, patch) {
+    const format = resolve(id)
+    formats.set(id, Object.freeze(Object.assign({}, format, patch)))
+  }
+
   csv.formats = {
     register: register,
     resolve: resolve,
+    extend: extend,
     ids: function () { return Array.from(formats.keys()) },
   }
 })(window.aiditor = window.aiditor || {})

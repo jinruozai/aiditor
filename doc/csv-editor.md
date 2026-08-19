@@ -45,6 +45,7 @@ A format owns column and cell text conversion and is selected explicitly by
 
 - `register(spec)` — install a format (throws on duplicate id)
 - `resolve(id)` — return the format, or throw when unknown
+- `extend(id, patch)` — merge patch into a registered format (throws when unknown)
 - `ids()` — list installed format ids
 
 The built-in `csv` format treats the first row as literal column names and
