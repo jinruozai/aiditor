@@ -37776,7 +37776,10 @@
   function renderCellEditor(resolved, adapter, ctx) {
     if (resolved.type_render === 'id' || resolved.type_render === 'ref_id') {
       return csv.references.render(Object.assign({}, adapter, {
-        document: function () { return ctx.document },
+        document: function () {
+          const doc = ctx.document
+          return doc && typeof doc.peek === 'function' ? doc.peek() : doc
+        },
         format: format,
         workspace: ctx.workspace,
         descriptor: ctx.descriptor,
@@ -37809,6 +37812,7 @@
     id: 'gamecsv',
     label: 'GameCSV',
     supportsColumnSchema: true,
+    richCells: true,
     parseColumn: parseColumn,
     stringifyColumn: stringifyColumn,
     parseDefinition: parseDefinition,
