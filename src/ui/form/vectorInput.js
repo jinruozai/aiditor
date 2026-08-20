@@ -32,17 +32,13 @@
     for (let i = 0; i < n; i++) {
       const idx = i
       const cs = aiditor.signal(init[idx])
-      let writing = false
-
       // parent → channel
       const stop1 = aiditor.effect(function () {
         const arr = sig()
-        if (cs.peek() !== arr[idx]) { writing = true; cs.set(arr[idx]); writing = false }
+        if (cs.peek() !== arr[idx]) cs.set(arr[idx])
       })
-      // channel → parent
-      const stop2 = aiditor.effect(function () {
-        const v = cs()
-        if (writing) return
+
+      function writeChannel(v, meta) {
         const cur = sig.peek()
         if (cur[idx] === v && (!linked || !linked.peek())) return
         const next = cur.slice()
@@ -53,13 +49,13 @@
         } else {
           next[idx] = v
         }
-        doWrite(next)
-      })
+        cs.set(v)
+        doWrite(next, meta)
+      }
       ui.collect(wrap, stop1)
-      ui.collect(wrap, stop2)
 
       const axis = ui.numberInput({
-        value: cs, label: labels[idx], step: o.step, precision: o.precision,
+        value: cs, onChange: writeChannel, label: labels[idx], step: o.step, precision: o.precision,
       })
       axis.classList.add('aiditor-ui-vec-axis-field')
       wrap.appendChild(axis)

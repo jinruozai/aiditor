@@ -148,6 +148,7 @@ delete global.Demo
 for (const file of [
   'src/core/signal.js',
   'src/core/names.js',
+  'src/core/storage.js',
   'src/core/registry.js',
   'src/style/theme-settings.js',
   'src/ui/panel/panel-list.js',

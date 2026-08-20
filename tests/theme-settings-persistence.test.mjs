@@ -38,6 +38,7 @@ function boot(seed) {
   for (const file of [
     'src/core/signal.js',
     'src/core/names.js',
+    'src/core/storage.js',
     'src/core/settings.js',
     'src/core/theme.js',
     'src/core/registry.js',

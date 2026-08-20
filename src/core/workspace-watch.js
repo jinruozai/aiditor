@@ -4,7 +4,9 @@
 
   const workspace = aiditor.workspace
   const MERGE_DELAY = 60
-  const POLL_INTERVAL = 4000
+  const POLL_INTERVAL = 15000
+  const SCAN_CONCURRENCY = 16
+  const SCAN_SLICE = 32
 
   function normalize(path) { return workspace.normalizePath(path || '') }
 
@@ -55,6 +57,7 @@
     let disposed = false
     let mergeTimer = null
     let pollTimer = null
+    let flushing = false
     let source = 'observer'
     let observerErrored = false
     let permissionLost = false
@@ -101,16 +104,40 @@
       }
     }
 
-    async function scanDirectory(path, handle, out) {
+    async function scanCheckpoint(state) {
+      state.count++
+      if (state.count < SCAN_SLICE) return
+      state.count = 0
+      await new Promise(function (resolve) { setTimeout(resolve, 0) })
+    }
+
+    async function scanDirectory(path, handle, out, state) {
       out.set(path, await entry(path, handle))
+      await scanCheckpoint(state)
+      const directories = []
+      let files = []
       for await (const child of handle.values()) {
         const childPath = path ? path + '/' + child.name : child.name
-        if (child.kind === 'directory') await scanDirectory(childPath, child, out)
-        else out.set(childPath, await entry(childPath, child))
+        if (child.kind === 'directory') directories.push({ path: childPath, handle: child })
+        else files.push({ path: childPath, handle: child })
+      }
+      for (let i = 0; i < directories.length; i++) {
+        await scanDirectory(directories[i].path, directories[i].handle, out, state)
+      }
+      while (files.length) {
+        const batch = files.slice(0, SCAN_CONCURRENCY)
+        files = files.slice(SCAN_CONCURRENCY)
+        const entries = await Promise.all(batch.map(async function (item) {
+          return { path: item.path, value: await entry(item.path, item.handle) }
+        }))
+        for (let i = 0; i < entries.length; i++) {
+          out.set(entries[i].path, entries[i].value)
+          await scanCheckpoint(state)
+        }
       }
     }
 
-    async function scanScope(path) {
+    async function scanScope(path, state) {
       const out = new Map()
       let handle
       try {
@@ -119,8 +146,11 @@
         if (missing(err)) return out
         throw err
       }
-      if (handle.kind === 'directory') await scanDirectory(path, handle, out)
-      else out.set(path, await entry(path, handle))
+      if (handle.kind === 'directory') await scanDirectory(path, handle, out, state)
+      else {
+        out.set(path, await entry(path, handle))
+        await scanCheckpoint(state)
+      }
       return out
     }
 
@@ -131,12 +161,13 @@
         throw err
       }
       const next = new Map(snapshot)
+      const state = { count: 0 }
       for (let i = 0; i < scopes.length; i++) {
         const scope = scopes[i]
         Array.from(next.keys()).forEach(function (path) {
           if (within(path, scope)) next.delete(path)
         })
-        const found = await scanScope(scope)
+        const found = await scanScope(scope, state)
         found.forEach(function (value, path) { next.set(path, value) })
       }
       return next
@@ -282,10 +313,13 @@
     async function flush() {
       mergeTimer = null
       if (!started || disposed || !pendingScopes.size) return
+      if (flushing) return
       if (!ready) {
         mergeTimer = setTimeout(flush, MERGE_DELAY)
         return
       }
+      flushing = true
+      const token = generation
       const scopes = compactScopes(pendingScopes)
       pendingScopes.clear()
       const batchSource = source
@@ -293,6 +327,7 @@
       try {
         const next = await scan(scopes)
         const changes = await changesBetween(snapshot, next)
+        if (!active(token)) return
         snapshot = next
         publish(changes, batchSource)
         permissionLost = false
@@ -305,8 +340,10 @@
         if (permissionError(err)) unavailable('permission_lost')
         else if (aiditor.reportError) aiditor.reportError({ scope: 'workspace-watch', action: 'scan' }, err)
       } finally {
+        flushing = false
         forcedModified.clear()
         hintedMoves.length = 0
+        if (active(token) && ready && pendingScopes.size && !mergeTimer) mergeTimer = setTimeout(flush, MERGE_DELAY)
       }
     }
 
@@ -361,6 +398,7 @@
     }
 
     function poll(sourceName) {
+      if (sourceName === 'poll' && (flushing || pendingScopes.size || mergeTimer)) return
       if (!disposed && listeners.size && typeof document !== 'undefined' && document.visibilityState !== 'hidden') {
         queue(watchedScopes(), sourceName)
       }
@@ -419,11 +457,6 @@
     async function begin(restart, token) {
       if (starting) return starting
       starting = (async function () {
-        if (!restart) {
-          const initial = await scan([''])
-          if (!active(token)) return
-          snapshot = initial
-        }
         if (typeof window.FileSystemObserver === 'function') {
           try {
             if (!await permissionGranted()) {
@@ -439,16 +472,12 @@
               return
             }
             if (!restart) {
-              const verified = await scan([''])
+              const initial = await scan([''])
               if (!active(token)) {
                 stopNative()
                 return
               }
-              const setupChanges = await changesBetween(snapshot, verified)
-              snapshot = verified
-              publish(setupChanges, 'observer')
-              forcedModified.clear()
-              hintedMoves.length = 0
+              snapshot = initial
             }
             ready = true
             stopPolling()
@@ -458,12 +487,22 @@
             if (!active(token)) return
             if (permissionError(err)) unavailable('permission_lost')
             else {
+              if (!restart) {
+                const initial = await scan([''])
+                if (!active(token)) return
+                snapshot = initial
+              }
               ready = true
               startPolling()
             }
           }
         } else {
           if (!active(token)) return
+          if (!restart) {
+            const initial = await scan([''])
+            if (!active(token)) return
+            snapshot = initial
+          }
           ready = true
           startPolling()
         }

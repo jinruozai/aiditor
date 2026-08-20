@@ -179,6 +179,8 @@ for (const file of [
 
 let value = 1
 let inspectCount = 0
+let invalidate = null
+const phases = []
 aiditor.inspector.registerProvider('case.numeric', {
   inspect() {
     inspectCount++
@@ -197,9 +199,15 @@ aiditor.inspector.registerProvider('case.numeric', {
         },
       },
       values: [{ amount: value }],
-      write: function (_field, change) {
+      subscribe: function (notify) {
+        invalidate = notify
+        notify({ kind: 'structure' })
+        return function () { invalidate = null }
+      },
+      write: function (_field, change, context) {
         value = change.value
-        aiditor.inspector.refresh()
+        phases.push(context.edit.phase)
+        invalidate({ kind: 'value', paths: ['amount'], values: [{ amount: value }] })
       },
     }
   },
@@ -220,15 +228,27 @@ num.dispatch('pointerdown', { button: 0, target: num, clientX: 0, pointerId: 4 }
 assert.deepEqual(num.captured, [4])
 num.dispatch('pointermove', { target: num, clientX: 10, pointerId: 4, shiftKey: false, ctrlKey: false, metaKey: false })
 assert.equal(value, 2)
+assert.equal(inspectCount, 1)
 assert.equal(root.querySelector('.aiditor-ui-num'), num)
 assert.equal(root.querySelector('.aiditor-ui-section-body'), body)
 assert.equal(num.parentNode != null, true)
 
 num.dispatch('pointermove', { target: num, clientX: 20, pointerId: 4, shiftKey: false, ctrlKey: false, metaKey: false })
 assert.equal(value, 3)
+assert.equal(inspectCount, 1)
 assert.equal(root.querySelector('.aiditor-ui-num'), num)
 num.dispatch('pointerup', { target: num, pointerId: 4 })
 assert.deepEqual(num.released, [4])
+assert.deepEqual(phases, ['update', 'update', 'commit'])
+
+invalidate({ kind: 'structure' })
+assert.equal(inspectCount, 2)
+assert.equal(root.querySelector('.aiditor-ui-num'), num)
+
+aiditor.inspector.select([])
+assert.equal(root.querySelector('.aiditor-ui-property-form'), null)
+assert.equal(root.querySelector('.aiditor-inspector-empty').textContent, 'Select something to inspect.')
+assert.deepEqual(aiditor.log().filter(function (entry) { return entry.level === 'error' }), [])
 
 cleanups.forEach(function (fn) { fn() })
 

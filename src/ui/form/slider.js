@@ -18,6 +18,7 @@
     const showValue = ui.asSig(o.showValue != null ? o.showValue : false)
     const suffix    = ui.asSig(o.suffix    != null ? o.suffix    : '')
     const doWrite = ui.writer(sig, o.onChange, 'ui.slider')
+    const gesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
 
     const el = ui.h('div', 'aiditor-ui-slider')
     const track = ui.h('div', 'aiditor-ui-slider-track')
@@ -69,8 +70,10 @@
       return quantize(minS.peek() + t * (maxS.peek() - minS.peek()))
     }
     ui.attachDrag(track, {
-      onStart: function (e) { doWrite(fromEvent(e)) },
-      onMove:  function (e) { doWrite(fromEvent(e)) },
+      onStart: function (e) { gesture.begin('slider'); gesture.update(fromEvent(e)) },
+      onMove:  function (e) { gesture.update(fromEvent(e)) },
+      onEnd: gesture.commit,
+      onCancel: gesture.cancel,
     })
 
     return el

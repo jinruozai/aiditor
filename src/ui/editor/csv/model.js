@@ -84,7 +84,7 @@
     }
   }
 
-  function parse(text, formatId) {
+  function parse(text, formatId, hostColumns) {
     const format = csv.formats.resolve(formatId || 'csv')
     const parsed = codec.parseRows(text)
     const sourceRows = parsed.rows
@@ -93,11 +93,16 @@
     for (let row = 1; row < sourceRows.length; row++) width = Math.max(width, sourceRows[row].length)
     width = Math.max(1, width)
 
+    const hostByName = new Map((hostColumns || []).map(function (column) { return [String(column.name), column] }))
     const columns = []
     for (let column = 0; column < width; column++) {
-      columns.push(createColumn(column, column < header.length
+      const parsedColumn = column < header.length
         ? format.parseColumn(header[column], column)
-        : { name: 'Column ' + (column + 1), fieldDef: { type: 'var' } }))
+        : { name: 'Column ' + (column + 1), fieldDef: { type: 'var' } }
+      const hostColumn = hostByName.get(String(parsedColumn.name))
+      columns.push(createColumn(column, hostColumn
+        ? Object.assign({}, parsedColumn, hostColumn, { name: parsedColumn.name, fieldDef: hostColumn.fieldDef })
+        : parsedColumn))
     }
 
     const diagnostics = new Map()

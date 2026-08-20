@@ -105,7 +105,7 @@
     const sig = asNumericSig(a.sig, min)
     return collectSignal(ui.slider({
       value: sig,
-      onChange: function (v) { a.write(isInt ? Math.trunc(v) : v) },
+      onChange: function (v, meta) { a.write(isInt ? Math.trunc(v) : v, meta) },
       min: min,
       max: agv.max != null ? agv.max : 100,
       step: agv.step != null ? agv.step : (isInt ? 1 : 0.01),
@@ -135,7 +135,6 @@
     return ui.colorInput({
       value:     a.sig,
       onChange:  a.write,
-      onCommit:  function (value, meta) { a.write(value, meta) },
       valueKind: agv.valueKind || (a.fieldDef.base_type === 'int' ? 'int' : 'hex'),
       valueScale: agv.valueScale,
     })
@@ -146,7 +145,7 @@
     const sig = asVectorSig(a.sig, fields)
     return collectSignal(ui.vectorInput({
       value: sig,
-      onChange: function (next) { a.write(next) },
+      onChange: function (next, meta) { a.write(next, meta) },
       labels: fields.map(function (f) { return f.key.toUpperCase() }),
       layout: agv.layout || 'row',
       step: agv.step != null ? agv.step : 0.01,

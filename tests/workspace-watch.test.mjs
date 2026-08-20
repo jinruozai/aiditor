@@ -80,6 +80,30 @@ class FakeFileHandle {
   async isSameEntry(other) { return !!other && other.id === this.id }
 }
 
+class SlowFileHandle extends FakeFileHandle {
+  constructor(name, text) {
+    super(name, text)
+    this.blocked = false
+    this.activeReads = 0
+    this.maxActiveReads = 0
+    this.releases = []
+  }
+
+  async getFile() {
+    this.activeReads++
+    this.maxActiveReads = Math.max(this.maxActiveReads, this.activeReads)
+    if (this.blocked) await new Promise((resolve) => this.releases.push(resolve))
+    const file = await super.getFile()
+    this.activeReads--
+    return file
+  }
+
+  release() {
+    this.blocked = false
+    while (this.releases.length) this.releases.shift()()
+  }
+}
+
 class FakeDirectoryHandle {
   constructor(name) {
     this.kind = 'directory'
@@ -266,6 +290,24 @@ windowEvents.get('focus')()
 await waitForBatch()
 assert.deepEqual(flatten(fallbackBatches), [{ type: 'created', path: 'focused.txt', kind: 'file' }])
 assert.equal(fallbackBatches[0].source, 'focus')
+
+fallbackBatches.length = 0
+const slow = fallbackRoot.add(new SlowFileHandle('slow.txt', 'before'))
+Array.from(intervals.values())[0]()
+await waitForBatch()
+fallbackBatches.length = 0
+slow.setText('after')
+slow.blocked = true
+Array.from(intervals.values())[0]()
+await new Promise(function (resolve) { setTimeout(resolve, 80) })
+assert.equal(slow.activeReads, 1)
+Array.from(intervals.values())[0]()
+Array.from(intervals.values())[0]()
+await new Promise(function (resolve) { setTimeout(resolve, 20) })
+assert.equal(slow.maxActiveReads, 1)
+slow.release()
+await waitForBatch()
+assert.deepEqual(flatten(fallbackBatches), [{ type: 'modified', path: 'slow.txt', kind: 'file' }])
 
 fallbackWs.dispose()
 assert.equal(intervals.size, 0)

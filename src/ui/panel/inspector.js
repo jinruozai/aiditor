@@ -136,15 +136,40 @@
       currentSubKey = nextKey
       currentSubscribe = nextSubscribe
       if (nextSubscribe) {
+        let subscribing = true
         currentDispose = aiditor.safeCall({ scope: 'inspector', action: 'subscribe', type: inspection.type }, function () {
-          return nextSubscribe(refresh, {
+          return nextSubscribe(function (change) {
+            // The inspection captured the current state immediately before subscribing.
+            // Providers may synchronously publish that same initial state while registering.
+            if (!subscribing) invalidate(change)
+          }, {
             targets: targets,
             primary: targets[0],
             panel: ctx.panel,
             bus: ctx.bus,
           })
         })
+        subscribing = false
       }
+    }
+
+    function invalidate(change) {
+      if (!change || change.kind === 'structure') {
+        refresh()
+        return
+      }
+      if (change.kind !== 'value' && change.kind !== 'collection') {
+        throw new Error('inspector subscription: unknown invalidation kind "' + change.kind + '"')
+      }
+      const values = change.values || (typeof currentInspection.readValues === 'function'
+        ? currentInspection.readValues(currentTargets, change)
+        : null)
+      if (!values) {
+        refresh()
+        return
+      }
+      currentInspection.values = values
+      valuesSig.set(values)
     }
 
     function callWrite(field, change, values, meta) {
@@ -333,28 +358,29 @@
       const targets = aiditor.inspector.selection()
       const selectionMeta = aiditor.inspector.meta()
       if (!targets.length) {
-        currentInspection = null
-        currentTargets = []
-        foldingScopeSig.set(null)
+        mountEmpty('Inspector', '', 'Select something to inspect.')
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         setBeforeForm(null, targets)
-        mountEmpty('Inspector', '', 'Select something to inspect.')
+        currentInspection = null
+        currentTargets = []
+        foldingScopeSig.set(null)
         return
       }
       const inspection = aiditor.inspector.inspect(targets, { panel: ctx.panel, bus: ctx.bus })
       if (!inspection) {
-        currentInspection = null
-        currentTargets = targets
-        foldingScopeSig.set(null)
+        mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         setBeforeForm(null, targets)
-        mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
+        currentInspection = null
+        currentTargets = targets
+        foldingScopeSig.set(null)
         return
       }
+      if (inspection.render ? mode === 'form' : mode === 'custom') clearBody()
       currentInspection = inspection
       currentTargets = targets
       setFieldMessages(inspection, targets)

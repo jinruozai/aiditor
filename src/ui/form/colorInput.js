@@ -17,6 +17,7 @@
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
   const FAVORITES_KEY = 'aiditor-color-picker-favorites'
+  let colorEditId = 0
 
   ui.colorInput = function (opts) {
     const o = opts || {}
@@ -38,6 +39,7 @@
       return {
         edit: {
           phase: phase,
+          id: edit.id,
           source: edit.source,
           initialValue: editValue(edit.initialValue),
           value: editValue(value),
@@ -47,7 +49,7 @@
 
     function beginEdit(source) {
       if (edit) return
-      edit = { source: source, initialValue: editValue(currentValue), updated: false }
+      edit = { id: 'aiditor-color-' + (++colorEditId), source: source, initialValue: editValue(currentValue), updated: false }
     }
 
     function updateArgb(argb, preferAlpha, source) {
@@ -64,6 +66,7 @@
       const value = editValue(currentValue)
       const meta = editMeta('commit', value)
       edit = null
+      if (session.updated) rawWrite(value, meta)
       if (session.updated && typeof o.onCommit === 'function') {
         aiditor.untracked(function () { o.onCommit(value, meta) })
       }

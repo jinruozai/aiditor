@@ -9,12 +9,12 @@
     return String(workspaceId || 'default') + ':' + String(formatId || 'csv') + ':' + aiditor.workspace.normalizePath(path)
   }
 
-  function createSession(workspaceId, path, formatId) {
+  function createSession(workspaceId, path, formatId, options) {
     const key = sessionKey(workspaceId, path, formatId)
     const document = ui.createTextDocument({
       workspaceId: workspaceId,
       path: path,
-      decode: function (text) { return csv.model.parse(text, formatId) },
+      decode: function (text) { return csv.model.parse(text, formatId, options && options.columns) },
       encode: csv.model.stringify,
       equals: Object.is,
     })
@@ -156,12 +156,12 @@
     return session
   }
 
-  function acquire(workspaceId, path, formatId) {
+  function acquire(workspaceId, path, formatId, options) {
     const normalizedFormatId = csv.formats.resolve(formatId || 'csv').id
     const key = sessionKey(workspaceId, path, normalizedFormatId)
     let session = sessions.get(key)
     if (!session) {
-      session = createSession(String(workspaceId || 'default'), path, normalizedFormatId)
+      session = createSession(String(workspaceId || 'default'), path, normalizedFormatId, options)
       sessions.set(key, session)
     }
     return session.retain()

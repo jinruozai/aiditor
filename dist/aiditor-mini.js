@@ -16,6 +16,7 @@
   let currentEffect = null
   let batchDepth = 0
   const pending = new Set()
+  const MAX_EFFECT_RUNS = 100
 
   function signal(initial) {
     let value = initial
@@ -37,6 +38,10 @@
 
   function schedule(eff) {
     if (eff.disposed) return
+    if (eff.running) {
+      eff.queued = true
+      return
+    }
     if (batchDepth > 0) pending.add(eff)
     else run(eff)
   }
@@ -56,14 +61,30 @@
 
   function run(eff) {
     if (eff.disposed) return
-    teardown(eff)
-    const prev = currentEffect
-    currentEffect = eff
-    try { eff.fn() } finally { currentEffect = prev }
+    if (eff.running) {
+      eff.queued = true
+      return
+    }
+    eff.running = true
+    let runs = 0
+    try {
+      do {
+        eff.queued = false
+        teardown(eff)
+        const prev = currentEffect
+        currentEffect = eff
+        try { eff.fn() } finally { currentEffect = prev }
+        runs++
+        if (runs >= MAX_EFFECT_RUNS && eff.queued) throw new Error('aiditor.signal: reactive cycle detected')
+      } while (eff.queued && !eff.disposed)
+    } finally {
+      eff.running = false
+      eff.queued = false
+    }
   }
 
   function effect(fn) {
-    const eff = { fn: fn, deps: new Set(), cleanups: [], disposed: false }
+    const eff = { fn: fn, deps: new Set(), cleanups: [], disposed: false, running: false, queued: false }
     run(eff)
     return function dispose() {
       if (eff.disposed) return
@@ -1103,6 +1124,65 @@
     })
 
     return { commit: finish, cancel: revert }
+  }
+
+  let gestureId = 0
+
+  ui.editGesture = function (opts) {
+    const o = opts || {}
+    const get = o.get
+    const write = o.write
+    let active = null
+
+    function begin(source) {
+      if (active) return active.id
+      active = {
+        id: 'aiditor-edit-' + (++gestureId),
+        source: source || o.source || 'pointer',
+        initialValue: clone(get()),
+        value: clone(get()),
+        changed: false,
+      }
+      return active.id
+    }
+    function update(value, source) {
+      if (!active) begin(source)
+      active.value = clone(value)
+      active.changed = true
+      write(value, metadata('update', value))
+    }
+    function commit() {
+      if (!active) return
+      const current = active
+      active = null
+      if (current.changed) write(current.value, metadataFor(current, 'commit', current.value))
+    }
+    function cancel() {
+      if (!active) return
+      const current = active
+      active = null
+      if (current.changed) write(current.initialValue, metadataFor(current, 'cancel', current.initialValue))
+    }
+    function metadata(phase, value) { return metadataFor(active, phase, value) }
+    return { begin: begin, update: update, commit: commit, cancel: cancel, active: function () { return !!active } }
+  }
+
+  function metadataFor(edit, phase, value) {
+    return { edit: {
+      id: edit.id,
+      phase: phase,
+      source: edit.source,
+      initialValue: clone(edit.initialValue),
+      value: clone(value),
+    } }
+  }
+
+  function clone(value) {
+    if (Array.isArray(value)) return value.map(clone)
+    if (!value || typeof value !== 'object') return value
+    const result = {}
+    Object.keys(value).forEach(function (key) { result[key] = clone(value[key]) })
+    return result
   }
 })(window.aiditor = window.aiditor || {})
 
@@ -2805,6 +2885,7 @@
     const radix   = o.radix   || 'dec'              // construction-time, not reactive
     const percent = !!o.percent
     const doWrite = ui.writer(sig, o.onChange, 'ui.numberInput')
+    const scrubGesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
 
     const el  = ui.h('div', 'aiditor-ui-num')
     const lab = ui.h('span', 'aiditor-ui-num-label')
@@ -2864,16 +2945,20 @@
       const n = Number(s)
       return Number.isFinite(n) ? n : 0
     }
-    function commit(v) {
+    function normalized(v) {
       const raw = typeof v === 'string' ? parseInput(v) : Number(v)
       const n = clamp(raw)
-      if (!Number.isFinite(n)) return
+      if (!Number.isFinite(n)) return null
       // For hex/bin we keep integer precision; for percent the signal holds the
       // raw fraction, not the displayed "N%". Round-trip through fmt only for
       // the default decimal path (preserves precision-field contract).
-      if (radix === 'hex' || radix === 'bin') doWrite(Math.trunc(n))
-      else if (percent) doWrite(Number(n.toFixed(prec() + 2)))
-      else doWrite(Number(n.toFixed(prec())))
+      if (radix === 'hex' || radix === 'bin') return Math.trunc(n)
+      if (percent) return Number(n.toFixed(prec() + 2))
+      return Number(n.toFixed(prec()))
+    }
+    function commit(v, meta) {
+      const next = normalized(v)
+      if (next != null) doWrite(next, meta)
     }
 
     let editing = false
@@ -2938,24 +3023,32 @@
         if (!scrubbing) {
           if (Math.abs(dx) < SCRUB_THRESHOLD) return
           scrubbing = true
+          scrubGesture.begin('number.scrub')
           el.classList.add('aiditor-ui-num-scrubbing')
         }
         let mul = stepS.peek()
         if (ev.shiftKey) mul *= 10
         if (ev.ctrlKey || ev.metaKey) mul /= 10
-        commit(startVal + dx * mul)
+        const next = normalized(startVal + dx * mul)
+        if (next != null) scrubGesture.update(next)
       }
-      function onUp(ev) {
+      function finish(ev, cancelled) {
         el.removeEventListener('pointermove', onMove)
         el.removeEventListener('pointerup', onUp)
-        el.removeEventListener('pointercancel', onUp)
+        el.removeEventListener('pointercancel', onCancel)
         try { el.releasePointerCapture(ev.pointerId) } catch (_) {}
-        if (scrubbing) el.classList.remove('aiditor-ui-num-scrubbing')
+        if (scrubbing) {
+          el.classList.remove('aiditor-ui-num-scrubbing')
+          if (cancelled) scrubGesture.cancel()
+          else scrubGesture.commit()
+        }
         else if (targetWasText) enterEdit()
       }
+      function onUp(ev) { finish(ev, false) }
+      function onCancel(ev) { finish(ev, true) }
       el.addEventListener('pointermove', onMove)
       el.addEventListener('pointerup', onUp)
-      el.addEventListener('pointercancel', onUp)
+      el.addEventListener('pointercancel', onCancel)
     })
 
     el.addEventListener('dblclick', function (e) {
@@ -3003,6 +3096,7 @@
     const showValue = ui.asSig(o.showValue != null ? o.showValue : false)
     const suffix    = ui.asSig(o.suffix    != null ? o.suffix    : '')
     const doWrite = ui.writer(sig, o.onChange, 'ui.slider')
+    const gesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
 
     const el = ui.h('div', 'aiditor-ui-slider')
     const track = ui.h('div', 'aiditor-ui-slider-track')
@@ -3054,8 +3148,10 @@
       return quantize(minS.peek() + t * (maxS.peek() - minS.peek()))
     }
     ui.attachDrag(track, {
-      onStart: function (e) { doWrite(fromEvent(e)) },
-      onMove:  function (e) { doWrite(fromEvent(e)) },
+      onStart: function (e) { gesture.begin('slider'); gesture.update(fromEvent(e)) },
+      onMove:  function (e) { gesture.update(fromEvent(e)) },
+      onEnd: gesture.commit,
+      onCancel: gesture.cancel,
     })
 
     return el
@@ -3120,15 +3216,20 @@
       return quantize(minS.peek() + ((e.clientX - r.left) / r.width) * (maxS.peek() - minS.peek()))
     }
     function attach(thumb, idx) {
+      const gesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
+      let draft = null
       ui.attachDrag(thumb, {
-        onStart: function (e) { e.stopPropagation(); update(e) },
+        onStart: function (e) { e.stopPropagation(); draft = sig.peek().slice(); gesture.begin('range-slider'); update(e) },
         onMove:  update,
+        onEnd: function () { gesture.commit(); draft = null },
+        onCancel: function () { gesture.cancel(); draft = null },
       })
       function update(e) {
-        const v = sig.peek().slice()
+        const v = (draft || sig.peek()).slice()
         v[idx] = fromEvent(e)
         if (v[0] > v[1]) { const t = v[0]; v[0] = v[1]; v[1] = t }
-        doWrite(v)
+        draft = v
+        gesture.update(v)
       }
     }
     attach(t1, 0); attach(t2, 1)
@@ -3462,6 +3563,7 @@
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
   const FAVORITES_KEY = 'aiditor-color-picker-favorites'
+  let colorEditId = 0
 
   ui.colorInput = function (opts) {
     const o = opts || {}
@@ -3483,6 +3585,7 @@
       return {
         edit: {
           phase: phase,
+          id: edit.id,
           source: edit.source,
           initialValue: editValue(edit.initialValue),
           value: editValue(value),
@@ -3492,7 +3595,7 @@
 
     function beginEdit(source) {
       if (edit) return
-      edit = { source: source, initialValue: editValue(currentValue), updated: false }
+      edit = { id: 'aiditor-color-' + (++colorEditId), source: source, initialValue: editValue(currentValue), updated: false }
     }
 
     function updateArgb(argb, preferAlpha, source) {
@@ -3509,6 +3612,7 @@
       const value = editValue(currentValue)
       const meta = editMeta('commit', value)
       edit = null
+      if (session.updated) rawWrite(value, meta)
       if (session.updated && typeof o.onCommit === 'function') {
         aiditor.untracked(function () { o.onCommit(value, meta) })
       }

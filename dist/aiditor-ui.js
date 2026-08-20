@@ -435,6 +435,65 @@
 
     return { commit: finish, cancel: revert }
   }
+
+  let gestureId = 0
+
+  ui.editGesture = function (opts) {
+    const o = opts || {}
+    const get = o.get
+    const write = o.write
+    let active = null
+
+    function begin(source) {
+      if (active) return active.id
+      active = {
+        id: 'aiditor-edit-' + (++gestureId),
+        source: source || o.source || 'pointer',
+        initialValue: clone(get()),
+        value: clone(get()),
+        changed: false,
+      }
+      return active.id
+    }
+    function update(value, source) {
+      if (!active) begin(source)
+      active.value = clone(value)
+      active.changed = true
+      write(value, metadata('update', value))
+    }
+    function commit() {
+      if (!active) return
+      const current = active
+      active = null
+      if (current.changed) write(current.value, metadataFor(current, 'commit', current.value))
+    }
+    function cancel() {
+      if (!active) return
+      const current = active
+      active = null
+      if (current.changed) write(current.initialValue, metadataFor(current, 'cancel', current.initialValue))
+    }
+    function metadata(phase, value) { return metadataFor(active, phase, value) }
+    return { begin: begin, update: update, commit: commit, cancel: cancel, active: function () { return !!active } }
+  }
+
+  function metadataFor(edit, phase, value) {
+    return { edit: {
+      id: edit.id,
+      phase: phase,
+      source: edit.source,
+      initialValue: clone(edit.initialValue),
+      value: clone(value),
+    } }
+  }
+
+  function clone(value) {
+    if (Array.isArray(value)) return value.map(clone)
+    if (!value || typeof value !== 'object') return value
+    const result = {}
+    Object.keys(value).forEach(function (key) { result[key] = clone(value[key]) })
+    return result
+  }
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ui/_internal/_scope.js ---- */
@@ -2833,6 +2892,7 @@
     const radix   = o.radix   || 'dec'              // construction-time, not reactive
     const percent = !!o.percent
     const doWrite = ui.writer(sig, o.onChange, 'ui.numberInput')
+    const scrubGesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
 
     const el  = ui.h('div', 'aiditor-ui-num')
     const lab = ui.h('span', 'aiditor-ui-num-label')
@@ -2892,16 +2952,20 @@
       const n = Number(s)
       return Number.isFinite(n) ? n : 0
     }
-    function commit(v) {
+    function normalized(v) {
       const raw = typeof v === 'string' ? parseInput(v) : Number(v)
       const n = clamp(raw)
-      if (!Number.isFinite(n)) return
+      if (!Number.isFinite(n)) return null
       // For hex/bin we keep integer precision; for percent the signal holds the
       // raw fraction, not the displayed "N%". Round-trip through fmt only for
       // the default decimal path (preserves precision-field contract).
-      if (radix === 'hex' || radix === 'bin') doWrite(Math.trunc(n))
-      else if (percent) doWrite(Number(n.toFixed(prec() + 2)))
-      else doWrite(Number(n.toFixed(prec())))
+      if (radix === 'hex' || radix === 'bin') return Math.trunc(n)
+      if (percent) return Number(n.toFixed(prec() + 2))
+      return Number(n.toFixed(prec()))
+    }
+    function commit(v, meta) {
+      const next = normalized(v)
+      if (next != null) doWrite(next, meta)
     }
 
     let editing = false
@@ -2966,24 +3030,32 @@
         if (!scrubbing) {
           if (Math.abs(dx) < SCRUB_THRESHOLD) return
           scrubbing = true
+          scrubGesture.begin('number.scrub')
           el.classList.add('aiditor-ui-num-scrubbing')
         }
         let mul = stepS.peek()
         if (ev.shiftKey) mul *= 10
         if (ev.ctrlKey || ev.metaKey) mul /= 10
-        commit(startVal + dx * mul)
+        const next = normalized(startVal + dx * mul)
+        if (next != null) scrubGesture.update(next)
       }
-      function onUp(ev) {
+      function finish(ev, cancelled) {
         el.removeEventListener('pointermove', onMove)
         el.removeEventListener('pointerup', onUp)
-        el.removeEventListener('pointercancel', onUp)
+        el.removeEventListener('pointercancel', onCancel)
         try { el.releasePointerCapture(ev.pointerId) } catch (_) {}
-        if (scrubbing) el.classList.remove('aiditor-ui-num-scrubbing')
+        if (scrubbing) {
+          el.classList.remove('aiditor-ui-num-scrubbing')
+          if (cancelled) scrubGesture.cancel()
+          else scrubGesture.commit()
+        }
         else if (targetWasText) enterEdit()
       }
+      function onUp(ev) { finish(ev, false) }
+      function onCancel(ev) { finish(ev, true) }
       el.addEventListener('pointermove', onMove)
       el.addEventListener('pointerup', onUp)
-      el.addEventListener('pointercancel', onUp)
+      el.addEventListener('pointercancel', onCancel)
     })
 
     el.addEventListener('dblclick', function (e) {
@@ -3045,17 +3117,13 @@
     for (let i = 0; i < n; i++) {
       const idx = i
       const cs = aiditor.signal(init[idx])
-      let writing = false
-
       // parent → channel
       const stop1 = aiditor.effect(function () {
         const arr = sig()
-        if (cs.peek() !== arr[idx]) { writing = true; cs.set(arr[idx]); writing = false }
+        if (cs.peek() !== arr[idx]) cs.set(arr[idx])
       })
-      // channel → parent
-      const stop2 = aiditor.effect(function () {
-        const v = cs()
-        if (writing) return
+
+      function writeChannel(v, meta) {
         const cur = sig.peek()
         if (cur[idx] === v && (!linked || !linked.peek())) return
         const next = cur.slice()
@@ -3066,13 +3134,13 @@
         } else {
           next[idx] = v
         }
-        doWrite(next)
-      })
+        cs.set(v)
+        doWrite(next, meta)
+      }
       ui.collect(wrap, stop1)
-      ui.collect(wrap, stop2)
 
       const axis = ui.numberInput({
-        value: cs, label: labels[idx], step: o.step, precision: o.precision,
+        value: cs, onChange: writeChannel, label: labels[idx], step: o.step, precision: o.precision,
       })
       axis.classList.add('aiditor-ui-vec-axis-field')
       wrap.appendChild(axis)
@@ -3102,6 +3170,7 @@
     const showValue = ui.asSig(o.showValue != null ? o.showValue : false)
     const suffix    = ui.asSig(o.suffix    != null ? o.suffix    : '')
     const doWrite = ui.writer(sig, o.onChange, 'ui.slider')
+    const gesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
 
     const el = ui.h('div', 'aiditor-ui-slider')
     const track = ui.h('div', 'aiditor-ui-slider-track')
@@ -3153,8 +3222,10 @@
       return quantize(minS.peek() + t * (maxS.peek() - minS.peek()))
     }
     ui.attachDrag(track, {
-      onStart: function (e) { doWrite(fromEvent(e)) },
-      onMove:  function (e) { doWrite(fromEvent(e)) },
+      onStart: function (e) { gesture.begin('slider'); gesture.update(fromEvent(e)) },
+      onMove:  function (e) { gesture.update(fromEvent(e)) },
+      onEnd: gesture.commit,
+      onCancel: gesture.cancel,
     })
 
     return el
@@ -3219,15 +3290,20 @@
       return quantize(minS.peek() + ((e.clientX - r.left) / r.width) * (maxS.peek() - minS.peek()))
     }
     function attach(thumb, idx) {
+      const gesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
+      let draft = null
       ui.attachDrag(thumb, {
-        onStart: function (e) { e.stopPropagation(); update(e) },
+        onStart: function (e) { e.stopPropagation(); draft = sig.peek().slice(); gesture.begin('range-slider'); update(e) },
         onMove:  update,
+        onEnd: function () { gesture.commit(); draft = null },
+        onCancel: function () { gesture.cancel(); draft = null },
       })
       function update(e) {
-        const v = sig.peek().slice()
+        const v = (draft || sig.peek()).slice()
         v[idx] = fromEvent(e)
         if (v[0] > v[1]) { const t = v[0]; v[0] = v[1]; v[1] = t }
-        doWrite(v)
+        draft = v
+        gesture.update(v)
       }
     }
     attach(t1, 0); attach(t2, 1)
@@ -3561,6 +3637,7 @@
   'use strict'
   const ui = aiditor.ui = aiditor.ui || {}
   const FAVORITES_KEY = 'aiditor-color-picker-favorites'
+  let colorEditId = 0
 
   ui.colorInput = function (opts) {
     const o = opts || {}
@@ -3582,6 +3659,7 @@
       return {
         edit: {
           phase: phase,
+          id: edit.id,
           source: edit.source,
           initialValue: editValue(edit.initialValue),
           value: editValue(value),
@@ -3591,7 +3669,7 @@
 
     function beginEdit(source) {
       if (edit) return
-      edit = { source: source, initialValue: editValue(currentValue), updated: false }
+      edit = { id: 'aiditor-color-' + (++colorEditId), source: source, initialValue: editValue(currentValue), updated: false }
     }
 
     function updateArgb(argb, preferAlpha, source) {
@@ -3608,6 +3686,7 @@
       const value = editValue(currentValue)
       const meta = editMeta('commit', value)
       edit = null
+      if (session.updated) rawWrite(value, meta)
       if (session.updated && typeof o.onCommit === 'function') {
         aiditor.untracked(function () { o.onCommit(value, meta) })
       }
@@ -5024,10 +5103,20 @@
       ui.collect(root, visible.dispose)
 
       const editorCtx = searchContext(ctx, searchQuery, directMatch)
-      const editor = f.editor(fieldSig, writeSlot, editorCtx)
-      cell.appendChild(editor)
-      ui.collect(root, function () { ui.dispose(editor) })
-      if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
+      let editor = null
+      const mountEditor = function () {
+        if (editor) return
+        editor = f.editor(fieldSig, writeSlot, editorCtx)
+        cell.appendChild(editor)
+        if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
+      }
+      if (sectionInfo) {
+        const stopEditor = aiditor.effect(function () {
+          if (!sectionInfo.header.collapsed()) aiditor.untracked(mountEditor)
+        })
+        ui.collect(root, stopEditor)
+      } else mountEditor()
+      ui.collect(root, function () { if (editor) ui.dispose(editor) })
 
       if (headerEditor) {
         const headerHost = ui.h('span', 'aiditor-ui-struct-input-section-header')
@@ -6870,7 +6959,7 @@
     const sig = asNumericSig(a.sig, min)
     return collectSignal(ui.slider({
       value: sig,
-      onChange: function (v) { a.write(isInt ? Math.trunc(v) : v) },
+      onChange: function (v, meta) { a.write(isInt ? Math.trunc(v) : v, meta) },
       min: min,
       max: agv.max != null ? agv.max : 100,
       step: agv.step != null ? agv.step : (isInt ? 1 : 0.01),
@@ -6900,7 +6989,6 @@
     return ui.colorInput({
       value:     a.sig,
       onChange:  a.write,
-      onCommit:  function (value, meta) { a.write(value, meta) },
       valueKind: agv.valueKind || (a.fieldDef.base_type === 'int' ? 'int' : 'hex'),
       valueScale: agv.valueScale,
     })
@@ -6911,7 +6999,7 @@
     const sig = asVectorSig(a.sig, fields)
     return collectSignal(ui.vectorInput({
       value: sig,
-      onChange: function (next) { a.write(next) },
+      onChange: function (next, meta) { a.write(next, meta) },
       labels: fields.map(function (f) { return f.key.toUpperCase() }),
       layout: agv.layout || 'row',
       step: agv.step != null ? agv.step : 0.01,
@@ -11153,7 +11241,7 @@
     }
   }
 
-  function parse(text, formatId) {
+  function parse(text, formatId, hostColumns) {
     const format = csv.formats.resolve(formatId || 'csv')
     const parsed = codec.parseRows(text)
     const sourceRows = parsed.rows
@@ -11162,11 +11250,16 @@
     for (let row = 1; row < sourceRows.length; row++) width = Math.max(width, sourceRows[row].length)
     width = Math.max(1, width)
 
+    const hostByName = new Map((hostColumns || []).map(function (column) { return [String(column.name), column] }))
     const columns = []
     for (let column = 0; column < width; column++) {
-      columns.push(createColumn(column, column < header.length
+      const parsedColumn = column < header.length
         ? format.parseColumn(header[column], column)
-        : { name: 'Column ' + (column + 1), fieldDef: { type: 'var' } }))
+        : { name: 'Column ' + (column + 1), fieldDef: { type: 'var' } }
+      const hostColumn = hostByName.get(String(parsedColumn.name))
+      columns.push(createColumn(column, hostColumn
+        ? Object.assign({}, parsedColumn, hostColumn, { name: parsedColumn.name, fieldDef: hostColumn.fieldDef })
+        : parsedColumn))
     }
 
     const diagnostics = new Map()
@@ -19227,15 +19320,40 @@
       currentSubKey = nextKey
       currentSubscribe = nextSubscribe
       if (nextSubscribe) {
+        let subscribing = true
         currentDispose = aiditor.safeCall({ scope: 'inspector', action: 'subscribe', type: inspection.type }, function () {
-          return nextSubscribe(refresh, {
+          return nextSubscribe(function (change) {
+            // The inspection captured the current state immediately before subscribing.
+            // Providers may synchronously publish that same initial state while registering.
+            if (!subscribing) invalidate(change)
+          }, {
             targets: targets,
             primary: targets[0],
             panel: ctx.panel,
             bus: ctx.bus,
           })
         })
+        subscribing = false
       }
+    }
+
+    function invalidate(change) {
+      if (!change || change.kind === 'structure') {
+        refresh()
+        return
+      }
+      if (change.kind !== 'value' && change.kind !== 'collection') {
+        throw new Error('inspector subscription: unknown invalidation kind "' + change.kind + '"')
+      }
+      const values = change.values || (typeof currentInspection.readValues === 'function'
+        ? currentInspection.readValues(currentTargets, change)
+        : null)
+      if (!values) {
+        refresh()
+        return
+      }
+      currentInspection.values = values
+      valuesSig.set(values)
     }
 
     function callWrite(field, change, values, meta) {
@@ -19424,28 +19542,29 @@
       const targets = aiditor.inspector.selection()
       const selectionMeta = aiditor.inspector.meta()
       if (!targets.length) {
-        currentInspection = null
-        currentTargets = []
-        foldingScopeSig.set(null)
+        mountEmpty('Inspector', '', 'Select something to inspect.')
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         setBeforeForm(null, targets)
-        mountEmpty('Inspector', '', 'Select something to inspect.')
+        currentInspection = null
+        currentTargets = []
+        foldingScopeSig.set(null)
         return
       }
       const inspection = aiditor.inspector.inspect(targets, { panel: ctx.panel, bus: ctx.bus })
       if (!inspection) {
-        currentInspection = null
-        currentTargets = targets
-        foldingScopeSig.set(null)
+        mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
         setFieldMessages(null, targets)
         setSubscription(null, targets)
         setHeaderActions(null, targets)
         setBeforeForm(null, targets)
-        mountEmpty('No Inspector', '', 'No provider for ' + (targetType(targets[0]) || 'selection') + '.')
+        currentInspection = null
+        currentTargets = targets
+        foldingScopeSig.set(null)
         return
       }
+      if (inspection.render ? mode === 'form' : mode === 'custom') clearBody()
       currentInspection = inspection
       currentTargets = targets
       setFieldMessages(inspection, targets)
@@ -20018,12 +20137,12 @@
     return String(workspaceId || 'default') + ':' + String(formatId || 'csv') + ':' + aiditor.workspace.normalizePath(path)
   }
 
-  function createSession(workspaceId, path, formatId) {
+  function createSession(workspaceId, path, formatId, options) {
     const key = sessionKey(workspaceId, path, formatId)
     const document = ui.createTextDocument({
       workspaceId: workspaceId,
       path: path,
-      decode: function (text) { return csv.model.parse(text, formatId) },
+      decode: function (text) { return csv.model.parse(text, formatId, options && options.columns) },
       encode: csv.model.stringify,
       equals: Object.is,
     })
@@ -20165,12 +20284,12 @@
     return session
   }
 
-  function acquire(workspaceId, path, formatId) {
+  function acquire(workspaceId, path, formatId, options) {
     const normalizedFormatId = csv.formats.resolve(formatId || 'csv').id
     const key = sessionKey(workspaceId, path, normalizedFormatId)
     let session = sessions.get(key)
     if (!session) {
-      session = createSession(String(workspaceId || 'default'), path, normalizedFormatId)
+      session = createSession(String(workspaceId || 'default'), path, normalizedFormatId, options)
       sessions.set(key, session)
     }
     return session.retain()
@@ -21338,7 +21457,7 @@
     const format = csv.formats.resolve(initial.format || 'csv')
     if (!path) throw new Error('csv-editor: props.path is required')
 
-    const session = csv.sessions.acquire(workspaceId, path, format.id)
+    const session = csv.sessions.acquire(workspaceId, path, format.id, { columns: initial.columns || null })
     const workspace = aiditor.workspace.binding(workspaceId)
     const document = session.document
     const selectionSig = aiditor.signal(null)

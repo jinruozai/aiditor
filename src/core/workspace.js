@@ -112,9 +112,9 @@
     return i < 0 ? path : path.slice(i + 1)
   }
 
-  function textResult(path, text, mtime) {
+  function textResult(path, text, mtime, hash) {
     text = String(text == null ? '' : text)
-    return { path: path, text: text, hash: hashText(text), size: text.length, mtime: mtime || null, mime: 'text/plain' }
+    return { path: path, text: text, hash: hash || hashText(text), size: text.length, mtime: mtime || null, mime: 'text/plain' }
   }
 
   async function blobResult(path, blob, hash) {
@@ -137,7 +137,7 @@
   function workspaceReason(err) {
     const raw = String(err && (err.reason || err.code || err.name) || '').toLowerCase()
     const message = String(err && err.message || '').toLowerCase()
-    if (raw.indexOf('notfound') >= 0 || raw === 'enoent' || raw === 'not_found' || message.indexOf('not found') >= 0) return 'not_found'
+    if (raw.indexOf('notfound') >= 0 || raw === 'enoent' || raw === 'not_found' || message.indexOf('not found') >= 0 || message.indexOf('not be found') >= 0) return 'not_found'
     if (raw.indexOf('notallowed') >= 0 || raw.indexOf('security') >= 0 || raw === 'eacces' || raw === 'eperm' || raw === 'permission_denied') return 'permission_denied'
     if (raw.indexOf('notreadable') >= 0 || raw === 'not_readable') return 'not_readable'
     if (raw.indexOf('quota') >= 0 || raw === 'enospc' || raw === 'quota_exceeded') return 'quota_exceeded'
@@ -1511,13 +1511,16 @@
       },
       list: async function (path) {
         path = normalizePath(path || '')
-        try {
-          const dir = await dirHandle(path, false)
-          const out = []
-          for await (const entry of dir.values()) out.push({ path: path ? path + '/' + entry.name : entry.name, name: entry.name, kind: entry.kind })
-          return out
-        } catch (err) {
-          throw structuredWorkspaceError('list', path, err)
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const dir = await dirHandle(path, false)
+            const out = []
+            for await (const entry of dir.values()) out.push({ path: path ? path + '/' + entry.name : entry.name, name: entry.name, kind: entry.kind })
+            return out
+          } catch (err) {
+            if (attempt === 0 && workspaceReason(err) === 'not_found') continue
+            throw structuredWorkspaceError('list', path, err)
+          }
         }
       },
       readText: async function (path) {
@@ -1525,7 +1528,9 @@
         try {
           const h = await fileHandle(path, false)
           const file = await h.getFile()
-          return textResult(path, await file.text(), file.lastModified || null)
+          const buffer = await file.arrayBuffer()
+          const bytes = new Uint8Array(buffer)
+          return textResult(path, new TextDecoder().decode(bytes), file.lastModified || null, hashBytes(bytes))
         } catch (err) {
           throw structuredWorkspaceError('readText', path, err)
         }
@@ -1544,11 +1549,13 @@
         path = normalizePath(path)
         try {
           await assertWriteIntent(path, opts || {}, 'writeText')
+          text = String(text == null ? '' : text)
           const h = await fileHandle(path, true)
           const w = await h.createWritable()
-          await w.write(String(text == null ? '' : text))
+          await w.write(text)
           await w.close()
-          return textResult(path, String(text == null ? '' : text))
+          const bytes = new TextEncoder().encode(text)
+          return textResult(path, text, null, hashBytes(bytes))
         } catch (err) {
           throw structuredWorkspaceError('writeText', path, err)
         }

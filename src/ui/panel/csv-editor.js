@@ -11,7 +11,7 @@
     const format = csv.formats.resolve(initial.format || 'csv')
     if (!path) throw new Error('csv-editor: props.path is required')
 
-    const session = csv.sessions.acquire(workspaceId, path, format.id)
+    const session = csv.sessions.acquire(workspaceId, path, format.id, { columns: initial.columns || null })
     const workspace = aiditor.workspace.binding(workspaceId)
     const document = session.document
     const selectionSig = aiditor.signal(null)

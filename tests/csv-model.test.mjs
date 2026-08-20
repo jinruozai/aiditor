@@ -40,6 +40,13 @@ const gameSource = csv.codec.stringifyRows([
 ], { bom: true, newline: '\r\n', finalNewline: true })
 const game = csv.model.parse(gameSource, 'gamecsv')
 assert.equal(game.formatId, 'gamecsv')
+
+const hosted = csv.model.parse('name,count\nSword,12', 'gamecsv', [
+  { name: 'count', fieldDef: { type: 'int', type_render: 'range', type_agv: { min: 0, max: 20 } } },
+])
+assert.equal(hosted.columns[1].fieldDef.type, 'int')
+assert.equal(hosted.columns[1].fieldDef.type_render, 'range')
+assert.equal(hosted.rows[0].values[1], 12)
 assert.equal(game.columns[0].fieldDef.type, 'var')
 assert.equal(game.columns[1].name, 'Count')
 assert.equal(game.columns[1].fieldDef.type, 'int')

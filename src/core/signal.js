@@ -10,6 +10,7 @@
   let currentEffect = null
   let batchDepth = 0
   const pending = new Set()
+  const MAX_EFFECT_RUNS = 100
 
   function signal(initial) {
     let value = initial
@@ -31,6 +32,10 @@
 
   function schedule(eff) {
     if (eff.disposed) return
+    if (eff.running) {
+      eff.queued = true
+      return
+    }
     if (batchDepth > 0) pending.add(eff)
     else run(eff)
   }
@@ -50,14 +55,30 @@
 
   function run(eff) {
     if (eff.disposed) return
-    teardown(eff)
-    const prev = currentEffect
-    currentEffect = eff
-    try { eff.fn() } finally { currentEffect = prev }
+    if (eff.running) {
+      eff.queued = true
+      return
+    }
+    eff.running = true
+    let runs = 0
+    try {
+      do {
+        eff.queued = false
+        teardown(eff)
+        const prev = currentEffect
+        currentEffect = eff
+        try { eff.fn() } finally { currentEffect = prev }
+        runs++
+        if (runs >= MAX_EFFECT_RUNS && eff.queued) throw new Error('aiditor.signal: reactive cycle detected')
+      } while (eff.queued && !eff.disposed)
+    } finally {
+      eff.running = false
+      eff.queued = false
+    }
   }
 
   function effect(fn) {
-    const eff = { fn: fn, deps: new Set(), cleanups: [], disposed: false }
+    const eff = { fn: fn, deps: new Set(), cleanups: [], disposed: false, running: false, queued: false }
     run(eff)
     return function dispose() {
       if (eff.disposed) return

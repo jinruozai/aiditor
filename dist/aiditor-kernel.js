@@ -59,6 +59,7 @@
   let currentEffect = null
   let batchDepth = 0
   const pending = new Set()
+  const MAX_EFFECT_RUNS = 100
 
   function signal(initial) {
     let value = initial
@@ -80,6 +81,10 @@
 
   function schedule(eff) {
     if (eff.disposed) return
+    if (eff.running) {
+      eff.queued = true
+      return
+    }
     if (batchDepth > 0) pending.add(eff)
     else run(eff)
   }
@@ -99,14 +104,30 @@
 
   function run(eff) {
     if (eff.disposed) return
-    teardown(eff)
-    const prev = currentEffect
-    currentEffect = eff
-    try { eff.fn() } finally { currentEffect = prev }
+    if (eff.running) {
+      eff.queued = true
+      return
+    }
+    eff.running = true
+    let runs = 0
+    try {
+      do {
+        eff.queued = false
+        teardown(eff)
+        const prev = currentEffect
+        currentEffect = eff
+        try { eff.fn() } finally { currentEffect = prev }
+        runs++
+        if (runs >= MAX_EFFECT_RUNS && eff.queued) throw new Error('aiditor.signal: reactive cycle detected')
+      } while (eff.queued && !eff.disposed)
+    } finally {
+      eff.running = false
+      eff.queued = false
+    }
   }
 
   function effect(fn) {
-    const eff = { fn: fn, deps: new Set(), cleanups: [], disposed: false }
+    const eff = { fn: fn, deps: new Set(), cleanups: [], disposed: false, running: false, queued: false }
     run(eff)
     return function dispose() {
       if (eff.disposed) return
@@ -2644,9 +2665,9 @@
     return i < 0 ? path : path.slice(i + 1)
   }
 
-  function textResult(path, text, mtime) {
+  function textResult(path, text, mtime, hash) {
     text = String(text == null ? '' : text)
-    return { path: path, text: text, hash: hashText(text), size: text.length, mtime: mtime || null, mime: 'text/plain' }
+    return { path: path, text: text, hash: hash || hashText(text), size: text.length, mtime: mtime || null, mime: 'text/plain' }
   }
 
   async function blobResult(path, blob, hash) {
@@ -2669,7 +2690,7 @@
   function workspaceReason(err) {
     const raw = String(err && (err.reason || err.code || err.name) || '').toLowerCase()
     const message = String(err && err.message || '').toLowerCase()
-    if (raw.indexOf('notfound') >= 0 || raw === 'enoent' || raw === 'not_found' || message.indexOf('not found') >= 0) return 'not_found'
+    if (raw.indexOf('notfound') >= 0 || raw === 'enoent' || raw === 'not_found' || message.indexOf('not found') >= 0 || message.indexOf('not be found') >= 0) return 'not_found'
     if (raw.indexOf('notallowed') >= 0 || raw.indexOf('security') >= 0 || raw === 'eacces' || raw === 'eperm' || raw === 'permission_denied') return 'permission_denied'
     if (raw.indexOf('notreadable') >= 0 || raw === 'not_readable') return 'not_readable'
     if (raw.indexOf('quota') >= 0 || raw === 'enospc' || raw === 'quota_exceeded') return 'quota_exceeded'
@@ -4043,13 +4064,16 @@
       },
       list: async function (path) {
         path = normalizePath(path || '')
-        try {
-          const dir = await dirHandle(path, false)
-          const out = []
-          for await (const entry of dir.values()) out.push({ path: path ? path + '/' + entry.name : entry.name, name: entry.name, kind: entry.kind })
-          return out
-        } catch (err) {
-          throw structuredWorkspaceError('list', path, err)
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const dir = await dirHandle(path, false)
+            const out = []
+            for await (const entry of dir.values()) out.push({ path: path ? path + '/' + entry.name : entry.name, name: entry.name, kind: entry.kind })
+            return out
+          } catch (err) {
+            if (attempt === 0 && workspaceReason(err) === 'not_found') continue
+            throw structuredWorkspaceError('list', path, err)
+          }
         }
       },
       readText: async function (path) {
@@ -4057,7 +4081,9 @@
         try {
           const h = await fileHandle(path, false)
           const file = await h.getFile()
-          return textResult(path, await file.text(), file.lastModified || null)
+          const buffer = await file.arrayBuffer()
+          const bytes = new Uint8Array(buffer)
+          return textResult(path, new TextDecoder().decode(bytes), file.lastModified || null, hashBytes(bytes))
         } catch (err) {
           throw structuredWorkspaceError('readText', path, err)
         }
@@ -4076,11 +4102,13 @@
         path = normalizePath(path)
         try {
           await assertWriteIntent(path, opts || {}, 'writeText')
+          text = String(text == null ? '' : text)
           const h = await fileHandle(path, true)
           const w = await h.createWritable()
-          await w.write(String(text == null ? '' : text))
+          await w.write(text)
           await w.close()
-          return textResult(path, String(text == null ? '' : text))
+          const bytes = new TextEncoder().encode(text)
+          return textResult(path, text, null, hashBytes(bytes))
         } catch (err) {
           throw structuredWorkspaceError('writeText', path, err)
         }
@@ -4412,7 +4440,9 @@
 
   const workspace = aiditor.workspace
   const MERGE_DELAY = 60
-  const POLL_INTERVAL = 4000
+  const POLL_INTERVAL = 15000
+  const SCAN_CONCURRENCY = 16
+  const SCAN_SLICE = 32
 
   function normalize(path) { return workspace.normalizePath(path || '') }
 
@@ -4463,6 +4493,7 @@
     let disposed = false
     let mergeTimer = null
     let pollTimer = null
+    let flushing = false
     let source = 'observer'
     let observerErrored = false
     let permissionLost = false
@@ -4509,16 +4540,40 @@
       }
     }
 
-    async function scanDirectory(path, handle, out) {
+    async function scanCheckpoint(state) {
+      state.count++
+      if (state.count < SCAN_SLICE) return
+      state.count = 0
+      await new Promise(function (resolve) { setTimeout(resolve, 0) })
+    }
+
+    async function scanDirectory(path, handle, out, state) {
       out.set(path, await entry(path, handle))
+      await scanCheckpoint(state)
+      const directories = []
+      let files = []
       for await (const child of handle.values()) {
         const childPath = path ? path + '/' + child.name : child.name
-        if (child.kind === 'directory') await scanDirectory(childPath, child, out)
-        else out.set(childPath, await entry(childPath, child))
+        if (child.kind === 'directory') directories.push({ path: childPath, handle: child })
+        else files.push({ path: childPath, handle: child })
+      }
+      for (let i = 0; i < directories.length; i++) {
+        await scanDirectory(directories[i].path, directories[i].handle, out, state)
+      }
+      while (files.length) {
+        const batch = files.slice(0, SCAN_CONCURRENCY)
+        files = files.slice(SCAN_CONCURRENCY)
+        const entries = await Promise.all(batch.map(async function (item) {
+          return { path: item.path, value: await entry(item.path, item.handle) }
+        }))
+        for (let i = 0; i < entries.length; i++) {
+          out.set(entries[i].path, entries[i].value)
+          await scanCheckpoint(state)
+        }
       }
     }
 
-    async function scanScope(path) {
+    async function scanScope(path, state) {
       const out = new Map()
       let handle
       try {
@@ -4527,8 +4582,11 @@
         if (missing(err)) return out
         throw err
       }
-      if (handle.kind === 'directory') await scanDirectory(path, handle, out)
-      else out.set(path, await entry(path, handle))
+      if (handle.kind === 'directory') await scanDirectory(path, handle, out, state)
+      else {
+        out.set(path, await entry(path, handle))
+        await scanCheckpoint(state)
+      }
       return out
     }
 
@@ -4539,12 +4597,13 @@
         throw err
       }
       const next = new Map(snapshot)
+      const state = { count: 0 }
       for (let i = 0; i < scopes.length; i++) {
         const scope = scopes[i]
         Array.from(next.keys()).forEach(function (path) {
           if (within(path, scope)) next.delete(path)
         })
-        const found = await scanScope(scope)
+        const found = await scanScope(scope, state)
         found.forEach(function (value, path) { next.set(path, value) })
       }
       return next
@@ -4690,10 +4749,13 @@
     async function flush() {
       mergeTimer = null
       if (!started || disposed || !pendingScopes.size) return
+      if (flushing) return
       if (!ready) {
         mergeTimer = setTimeout(flush, MERGE_DELAY)
         return
       }
+      flushing = true
+      const token = generation
       const scopes = compactScopes(pendingScopes)
       pendingScopes.clear()
       const batchSource = source
@@ -4701,6 +4763,7 @@
       try {
         const next = await scan(scopes)
         const changes = await changesBetween(snapshot, next)
+        if (!active(token)) return
         snapshot = next
         publish(changes, batchSource)
         permissionLost = false
@@ -4713,8 +4776,10 @@
         if (permissionError(err)) unavailable('permission_lost')
         else if (aiditor.reportError) aiditor.reportError({ scope: 'workspace-watch', action: 'scan' }, err)
       } finally {
+        flushing = false
         forcedModified.clear()
         hintedMoves.length = 0
+        if (active(token) && ready && pendingScopes.size && !mergeTimer) mergeTimer = setTimeout(flush, MERGE_DELAY)
       }
     }
 
@@ -4769,6 +4834,7 @@
     }
 
     function poll(sourceName) {
+      if (sourceName === 'poll' && (flushing || pendingScopes.size || mergeTimer)) return
       if (!disposed && listeners.size && typeof document !== 'undefined' && document.visibilityState !== 'hidden') {
         queue(watchedScopes(), sourceName)
       }
@@ -4827,11 +4893,6 @@
     async function begin(restart, token) {
       if (starting) return starting
       starting = (async function () {
-        if (!restart) {
-          const initial = await scan([''])
-          if (!active(token)) return
-          snapshot = initial
-        }
         if (typeof window.FileSystemObserver === 'function') {
           try {
             if (!await permissionGranted()) {
@@ -4847,16 +4908,12 @@
               return
             }
             if (!restart) {
-              const verified = await scan([''])
+              const initial = await scan([''])
               if (!active(token)) {
                 stopNative()
                 return
               }
-              const setupChanges = await changesBetween(snapshot, verified)
-              snapshot = verified
-              publish(setupChanges, 'observer')
-              forcedModified.clear()
-              hintedMoves.length = 0
+              snapshot = initial
             }
             ready = true
             stopPolling()
@@ -4866,12 +4923,22 @@
             if (!active(token)) return
             if (permissionError(err)) unavailable('permission_lost')
             else {
+              if (!restart) {
+                const initial = await scan([''])
+                if (!active(token)) return
+                snapshot = initial
+              }
               ready = true
               startPolling()
             }
           }
         } else {
           if (!active(token)) return
+          if (!restart) {
+            const initial = await scan([''])
+            if (!active(token)) return
+            snapshot = initial
+          }
           ready = true
           startPolling()
         }

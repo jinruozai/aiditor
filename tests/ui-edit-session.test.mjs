@@ -86,4 +86,27 @@ global.document = { activeElement: null }
   assert.equal(count, 1)
 }
 
+{
+  let value = [1, 2]
+  const writes = []
+  const edit = ui.editGesture({
+    get: function () { return value },
+    write: function (next, meta) { value = next; writes.push({ value: next, edit: meta.edit }) },
+  })
+  edit.begin('test.scrub')
+  edit.update([3, 2])
+  edit.update([4, 2])
+  edit.commit()
+  assert.deepEqual(writes.map(function (item) { return item.edit.phase }), ['update', 'update', 'commit'])
+  assert.equal(new Set(writes.map(function (item) { return item.edit.id })).size, 1)
+  assert.deepEqual(writes[0].edit.initialValue, [1, 2])
+  assert.deepEqual(writes[2].value, [4, 2])
+
+  edit.begin('test.cancel')
+  edit.update([9, 2])
+  edit.cancel()
+  assert.equal(writes[writes.length - 1].edit.phase, 'cancel')
+  assert.deepEqual(value, [4, 2])
+}
+
 console.log('ui edit session tests ok')

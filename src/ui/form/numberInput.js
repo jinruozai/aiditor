@@ -43,6 +43,7 @@
     const radix   = o.radix   || 'dec'              // construction-time, not reactive
     const percent = !!o.percent
     const doWrite = ui.writer(sig, o.onChange, 'ui.numberInput')
+    const scrubGesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
 
     const el  = ui.h('div', 'aiditor-ui-num')
     const lab = ui.h('span', 'aiditor-ui-num-label')
@@ -102,16 +103,20 @@
       const n = Number(s)
       return Number.isFinite(n) ? n : 0
     }
-    function commit(v) {
+    function normalized(v) {
       const raw = typeof v === 'string' ? parseInput(v) : Number(v)
       const n = clamp(raw)
-      if (!Number.isFinite(n)) return
+      if (!Number.isFinite(n)) return null
       // For hex/bin we keep integer precision; for percent the signal holds the
       // raw fraction, not the displayed "N%". Round-trip through fmt only for
       // the default decimal path (preserves precision-field contract).
-      if (radix === 'hex' || radix === 'bin') doWrite(Math.trunc(n))
-      else if (percent) doWrite(Number(n.toFixed(prec() + 2)))
-      else doWrite(Number(n.toFixed(prec())))
+      if (radix === 'hex' || radix === 'bin') return Math.trunc(n)
+      if (percent) return Number(n.toFixed(prec() + 2))
+      return Number(n.toFixed(prec()))
+    }
+    function commit(v, meta) {
+      const next = normalized(v)
+      if (next != null) doWrite(next, meta)
     }
 
     let editing = false
@@ -176,24 +181,32 @@
         if (!scrubbing) {
           if (Math.abs(dx) < SCRUB_THRESHOLD) return
           scrubbing = true
+          scrubGesture.begin('number.scrub')
           el.classList.add('aiditor-ui-num-scrubbing')
         }
         let mul = stepS.peek()
         if (ev.shiftKey) mul *= 10
         if (ev.ctrlKey || ev.metaKey) mul /= 10
-        commit(startVal + dx * mul)
+        const next = normalized(startVal + dx * mul)
+        if (next != null) scrubGesture.update(next)
       }
-      function onUp(ev) {
+      function finish(ev, cancelled) {
         el.removeEventListener('pointermove', onMove)
         el.removeEventListener('pointerup', onUp)
-        el.removeEventListener('pointercancel', onUp)
+        el.removeEventListener('pointercancel', onCancel)
         try { el.releasePointerCapture(ev.pointerId) } catch (_) {}
-        if (scrubbing) el.classList.remove('aiditor-ui-num-scrubbing')
+        if (scrubbing) {
+          el.classList.remove('aiditor-ui-num-scrubbing')
+          if (cancelled) scrubGesture.cancel()
+          else scrubGesture.commit()
+        }
         else if (targetWasText) enterEdit()
       }
+      function onUp(ev) { finish(ev, false) }
+      function onCancel(ev) { finish(ev, true) }
       el.addEventListener('pointermove', onMove)
       el.addEventListener('pointerup', onUp)
-      el.addEventListener('pointercancel', onUp)
+      el.addEventListener('pointercancel', onCancel)
     })
 
     el.addEventListener('dblclick', function (e) {

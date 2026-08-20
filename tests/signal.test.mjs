@@ -40,4 +40,16 @@ aiditor.batch(function () {
 })
 assert.equal(batched, 2)
 
+const self = aiditor.signal(0)
+assert.throws(function () {
+  aiditor.effect(function () { self.set(self() + 1) })
+}, /reactive cycle detected/)
+
+const left = aiditor.signal(0)
+const right = aiditor.signal(0)
+aiditor.effect(function () { right.set(left()) })
+assert.throws(function () {
+  aiditor.effect(function () { left.set(right() + 1) })
+}, /reactive cycle detected/)
+
 console.log('signal tests ok')

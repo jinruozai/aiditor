@@ -161,10 +161,20 @@
       ui.collect(root, visible.dispose)
 
       const editorCtx = searchContext(ctx, searchQuery, directMatch)
-      const editor = f.editor(fieldSig, writeSlot, editorCtx)
-      cell.appendChild(editor)
-      ui.collect(root, function () { ui.dispose(editor) })
-      if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
+      let editor = null
+      const mountEditor = function () {
+        if (editor) return
+        editor = f.editor(fieldSig, writeSlot, editorCtx)
+        cell.appendChild(editor)
+        if (f.messages) bindFieldMessages(root, row, cell, editor, f.messages)
+      }
+      if (sectionInfo) {
+        const stopEditor = aiditor.effect(function () {
+          if (!sectionInfo.header.collapsed()) aiditor.untracked(mountEditor)
+        })
+        ui.collect(root, stopEditor)
+      } else mountEditor()
+      ui.collect(root, function () { if (editor) ui.dispose(editor) })
 
       if (headerEditor) {
         const headerHost = ui.h('span', 'aiditor-ui-struct-input-section-header')

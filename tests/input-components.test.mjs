@@ -164,6 +164,7 @@ window.URL = global.URL
 
 for (const file of [
   'src/core/signal.js',
+  'src/core/storage.js',
   'src/core/workspace-state.js',
   'src/ui/_internal/_signal.js',
   'src/ui/_internal/_drag.js',
@@ -791,15 +792,15 @@ function contextmenu(el, target, extra) {
     },
   })
   const parentRow = form.querySelector('.aiditor-ui-struct-input-row-layout-section')
+  assert.equal(form.querySelector('.aiditor-ui-struct-group'), null)
+  assert.equal(parentRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+
+  query.set('needle')
   const group = form.querySelector('.aiditor-ui-struct-group')
   const nestedRows = group.querySelectorAll('.aiditor-ui-struct-input-row')
   const noteRow = nestedRows.find(function (row) { return row.dataset.efFieldKey === 'note' })
   const otherRow = nestedRows.find(function (row) { return row.dataset.efFieldKey === 'other' })
   const noteInput = noteRow.querySelector('input')
-  assert.equal(parentRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
-  assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), true)
-
-  query.set('needle')
   assert.equal(parentRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
   assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), false)
   assert.equal(noteRow.hidden, false)
@@ -932,13 +933,15 @@ function contextmenu(el, target, extra) {
   assert.equal(transformLabel.parentNode, transformRow)
   assert.equal(transformCell.children[0].classList.contains('aiditor-ui-slot'), true)
   assert.equal(transformCell.querySelector('.aiditor-ui-struct-input-row-layout-section'), positionRow)
-  assert.equal(positionCell.children[0].classList.contains('aiditor-ui-struct-input'), true)
-  assert.equal(positionCell.querySelectorAll('.aiditor-ui-vec-axis-field').length, 3)
-  assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
+  assert.equal(positionCell.children.length, 0)
+  assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 6)
   assert.equal(transformRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
   assert.equal(positionRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
   positionRow.querySelector('.aiditor-ui-struct-input-section-toggle').click()
   assert.equal(positionRow.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
+  assert.equal(positionCell.children[0].classList.contains('aiditor-ui-struct-input'), true)
+  assert.equal(positionCell.querySelectorAll('.aiditor-ui-vec-axis-field').length, 3)
+  assert.equal(form.querySelectorAll('.aiditor-ui-vec-axis-field').length, 9)
 }
 
 {
@@ -992,20 +995,19 @@ function contextmenu(el, target, extra) {
     foldingScope: foldingScope,
   })
   await Promise.resolve()
-  const rows = form.querySelectorAll('.aiditor-ui-struct-input-row-layout-section')
-  const transform = rows.find(function (row) { return row.dataset.efFieldKey === 'transform' })
-  const position = rows.find(function (row) { return row.dataset.efFieldKey === 'position' })
-  const controlled = rows.find(function (row) { return row.dataset.efFieldKey === 'controlled' })
-  const groups = form.querySelectorAll('.aiditor-ui-struct-group')
-  const nestedGroup = groups.find(function (section) { return section.dataset.efGroup === 'advanced' })
-  const group = groups.find(function (section) { return section.dataset.efGroup === 'render' })
+  const initialRows = form.querySelectorAll('.aiditor-ui-struct-input-row-layout-section')
+  const transform = initialRows.find(function (row) { return row.dataset.efFieldKey === 'transform' })
+  const controlled = initialRows.find(function (row) { return row.dataset.efFieldKey === 'controlled' })
+  const group = form.querySelectorAll('.aiditor-ui-struct-group').find(function (section) { return section.dataset.efGroup === 'render' })
   assert.equal(transform.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
-  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
-  assert.equal(nestedGroup.classList.contains('aiditor-ui-section-collapsed'), true)
   assert.equal(group.classList.contains('aiditor-ui-section-collapsed'), true)
   assert.equal(controlled.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
 
   transform.querySelector('.aiditor-ui-struct-input-section-toggle').click()
+  const position = form.querySelectorAll('.aiditor-ui-struct-input-row-layout-section').find(function (row) { return row.dataset.efFieldKey === 'position' })
+  const nestedGroup = form.querySelectorAll('.aiditor-ui-struct-group').find(function (section) { return section.dataset.efGroup === 'advanced' })
+  assert.equal(position.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
+  assert.equal(nestedGroup.classList.contains('aiditor-ui-section-collapsed'), true)
   position.querySelector('.aiditor-ui-struct-input-section-toggle').click()
   nestedGroup.querySelector('.aiditor-ui-section-toggle').click()
   group.querySelector('.aiditor-ui-section-toggle').click()
@@ -1050,6 +1052,7 @@ function contextmenu(el, target, extra) {
 
 {
   const value = aiditor.signal({ transform: [[1, 2, 3]] })
+  let editorMounts = 0
   const el = ui.structInput({
     value,
     fields: [{
@@ -1057,7 +1060,7 @@ function contextmenu(el, target, extra) {
       label: 'Transform',
       fieldLayout: 'section',
       defaultCollapsed: true,
-      editor: function () { return ui.h('div', 'inner-editor') },
+      editor: function () { editorMounts += 1; return ui.h('div', 'inner-editor') },
     }],
   })
   const row = el.querySelector('.aiditor-ui-struct-input-row')
@@ -1065,9 +1068,14 @@ function contextmenu(el, target, extra) {
   assert.equal(row.classList.contains('aiditor-ui-struct-input-row-layout-section'), true)
   assert.equal(row.classList.contains('aiditor-ui-struct-input-row-collapsed'), true)
   assert.equal(toggle.attributes['aria-expanded'], 'false')
+  assert.equal(editorMounts, 0)
   toggle.click()
   assert.equal(row.classList.contains('aiditor-ui-struct-input-row-collapsed'), false)
   assert.equal(toggle.attributes['aria-expanded'], 'true')
+  assert.equal(editorMounts, 1)
+  toggle.click()
+  toggle.click()
+  assert.equal(editorMounts, 1)
 }
 
 {

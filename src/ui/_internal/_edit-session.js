@@ -82,4 +82,63 @@
 
     return { commit: finish, cancel: revert }
   }
+
+  let gestureId = 0
+
+  ui.editGesture = function (opts) {
+    const o = opts || {}
+    const get = o.get
+    const write = o.write
+    let active = null
+
+    function begin(source) {
+      if (active) return active.id
+      active = {
+        id: 'aiditor-edit-' + (++gestureId),
+        source: source || o.source || 'pointer',
+        initialValue: clone(get()),
+        value: clone(get()),
+        changed: false,
+      }
+      return active.id
+    }
+    function update(value, source) {
+      if (!active) begin(source)
+      active.value = clone(value)
+      active.changed = true
+      write(value, metadata('update', value))
+    }
+    function commit() {
+      if (!active) return
+      const current = active
+      active = null
+      if (current.changed) write(current.value, metadataFor(current, 'commit', current.value))
+    }
+    function cancel() {
+      if (!active) return
+      const current = active
+      active = null
+      if (current.changed) write(current.initialValue, metadataFor(current, 'cancel', current.initialValue))
+    }
+    function metadata(phase, value) { return metadataFor(active, phase, value) }
+    return { begin: begin, update: update, commit: commit, cancel: cancel, active: function () { return !!active } }
+  }
+
+  function metadataFor(edit, phase, value) {
+    return { edit: {
+      id: edit.id,
+      phase: phase,
+      source: edit.source,
+      initialValue: clone(edit.initialValue),
+      value: clone(value),
+    } }
+  }
+
+  function clone(value) {
+    if (Array.isArray(value)) return value.map(clone)
+    if (!value || typeof value !== 'object') return value
+    const result = {}
+    Object.keys(value).forEach(function (key) { result[key] = clone(value[key]) })
+    return result
+  }
 })(window.aiditor = window.aiditor || {})

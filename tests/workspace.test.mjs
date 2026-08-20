@@ -126,7 +126,14 @@ class FakeFileHandle {
   async getFile() {
     if (this.opts.failRead) throw Object.assign(new Error('cannot read file'), { name: 'NotReadableError' })
     const self = this
-    return { async text() { return self.text } }
+    const blob = new Blob([self.text], { type: 'text/plain' })
+    return {
+      size: blob.size,
+      type: blob.type,
+      lastModified: 1,
+      async text() { return self.text },
+      arrayBuffer() { return blob.arrayBuffer() },
+    }
   }
   async createWritable() {
     if (this.opts.failWrite) throw Object.assign(new Error('permission denied'), { name: 'NotAllowedError' })
@@ -176,6 +183,29 @@ class FakeDirHandle {
       return null
     }
     return visit(this, [])
+  }
+}
+
+class FlakyDirHandle extends FakeDirHandle {
+  constructor(name) {
+    super(name)
+    this.listCalls = 0
+  }
+  async *values() {
+    this.listCalls++
+    if (this.listCalls === 1) throw new Error('A requested file or directory could not be found at the time an operation was processed.')
+    yield * super.values()
+  }
+}
+
+class MissingDirHandle extends FakeDirHandle {
+  constructor(name) {
+    super(name)
+    this.listCalls = 0
+  }
+  async *values() {
+    this.listCalls++
+    throw new Error('A requested file or directory could not be found at the time an operation was processed.')
   }
 }
 
@@ -297,6 +327,8 @@ window.showSaveFilePicker = async function (opts) {
   return saveTargetHandle
 }
 const fsa = aiditor.workspace.fromHandle(root)
+const fsaRead = await fsa.readText('src/panel.js')
+assert.equal(fsaRead.hash, (await fsa.stat('src/panel.js')).hash)
 assert.equal((await fsa.capabilities()).pickSaveTarget, true)
 assert.equal(await fsa.pickSaveTarget({
   suggestedName: 'export',
@@ -334,6 +366,19 @@ assert.equal((await fsa.search('beta', { path: 'src/panel.js', limit: 10 })).mat
 assert.equal((await fsa.capabilities()).search, true)
 assert.equal((await fsa.capabilities()).revealInSystem, false)
 assert.deepEqual(await fsa.revealInSystem('src/panel.js'), { ok: false, reason: 'unsupported' })
+const flakyRoot = new FlakyDirHandle('flaky')
+flakyRoot.entries['game.mors'] = new FakeFileHandle('game.mors', flakyRoot, '')
+const flakyWorkspace = aiditor.workspace.fromHandle(flakyRoot)
+assert.deepEqual(await flakyWorkspace.list(''), [{ path: 'game.mors', name: 'game.mors', kind: 'file' }])
+assert.equal(flakyRoot.listCalls, 2)
+const missingRoot = new MissingDirHandle('missing')
+const missingWorkspace = aiditor.workspace.fromHandle(missingRoot)
+await assert.rejects(function () { return missingWorkspace.list('') }, function (err) {
+  assert.equal(err.reason, 'not_found')
+  assert.equal(err.path, '')
+  return true
+})
+assert.equal(missingRoot.listCalls, 2)
 src.entries['bad.bin'] = new FakeFileHandle('bad.bin', src, '', { failRead: true })
 await assert.rejects(async function () { return fsa.readBlob('src/bad.bin') }, function (err) {
   assert.equal(err.path, 'src/bad.bin')

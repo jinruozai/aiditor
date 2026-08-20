@@ -55,15 +55,20 @@
       return quantize(minS.peek() + ((e.clientX - r.left) / r.width) * (maxS.peek() - minS.peek()))
     }
     function attach(thumb, idx) {
+      const gesture = ui.editGesture({ get: function () { return sig.peek() }, write: doWrite })
+      let draft = null
       ui.attachDrag(thumb, {
-        onStart: function (e) { e.stopPropagation(); update(e) },
+        onStart: function (e) { e.stopPropagation(); draft = sig.peek().slice(); gesture.begin('range-slider'); update(e) },
         onMove:  update,
+        onEnd: function () { gesture.commit(); draft = null },
+        onCancel: function () { gesture.cancel(); draft = null },
       })
       function update(e) {
-        const v = sig.peek().slice()
+        const v = (draft || sig.peek()).slice()
         v[idx] = fromEvent(e)
         if (v[0] > v[1]) { const t = v[0]; v[0] = v[1]; v[1] = t }
-        doWrite(v)
+        draft = v
+        gesture.update(v)
       }
     }
     attach(t1, 0); attach(t2, 1)
