@@ -5708,6 +5708,7 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const defaultRefsByOwner = {}
 
   function stringList(value, field) {
     if (value == null) return []
@@ -5781,6 +5782,7 @@
       return out
     },
   })
+  const unregisterRegistryOwner = registry.unregisterOwner
 
   function availability(name, ctx) {
     const skill = registry.get(name)
@@ -5808,8 +5810,9 @@
     const query = String(options.query || '').trim().toLowerCase()
     const limit = Math.max(1, Math.min(Number(options.limit) || 50, 100))
     const out = []
+    const active = ctx && Array.isArray(ctx.skillRefs) ? ctx.skillRefs : []
     const ids = registry.list().slice().sort()
-    for (let i = 0; i < ids.length && out.length < limit; i++) {
+    for (let i = 0; i < ids.length; i++) {
       const skill = registry.get(ids[i])
       if (audience === 'user' ? !skill.userInvocable : !skill.modelInvocable) continue
       const text = [ids[i], skill.title, skill.description, skill.whenToUse, skill.whenNotToUse].join('\n').toLowerCase()
@@ -5830,12 +5833,79 @@
         unavailableReason: state.reason,
       })
     }
+    out.sort(function (left, right) {
+      const leftActive = active.indexOf(left.id) >= 0
+      const rightActive = active.indexOf(right.id) >= 0
+      if (leftActive !== rightActive) return leftActive ? -1 : 1
+      const leftHost = left.layer === 'module' || left.layer === 'app' || left.layer === 'workspace'
+      const rightHost = right.layer === 'module' || right.layer === 'app' || right.layer === 'workspace'
+      if (leftHost !== rightHost) return leftHost ? -1 : 1
+      if (left.available !== right.available) return left.available ? -1 : 1
+      return left.id.localeCompare(right.id)
+    })
+    return out.slice(0, limit)
+  }
+
+  function configureDefaults(refs, meta) {
+    const owner = String(meta && meta.owner || '')
+    if (!owner) throw new Error('ai.skills.configureDefaults: owner is required')
+    if (!Array.isArray(refs)) throw new Error('ai.skills.configureDefaults: refs must be an array')
+    const out = []
+    const seen = {}
+    for (let i = 0; i < refs.length; i++) {
+      const id = String(refs[i] || '')
+      if (!id || seen[id]) continue
+      const skill = registry.get(id)
+      if (!skill || skill.modelInvocable === false) throw new Error('ai.skills.configureDefaults: Skill is not model-invocable: ' + id)
+      seen[id] = true
+      out.push(id)
+    }
+    defaultRefsByOwner[owner] = out
+    return out.slice()
+  }
+
+  function clearDefaults(meta) {
+    const owner = String(meta && meta.owner || '')
+    if (!owner) throw new Error('ai.skills.clearDefaults: owner is required')
+    const existed = Object.prototype.hasOwnProperty.call(defaultRefsByOwner, owner)
+    delete defaultRefsByOwner[owner]
+    return existed
+  }
+
+  function defaults() {
+    const out = []
+    const seen = {}
+    const owners = Object.keys(defaultRefsByOwner).sort()
+    for (let i = 0; i < owners.length; i++) {
+      const refs = defaultRefsByOwner[owners[i]]
+      for (let j = 0; j < refs.length; j++) {
+        if (seen[refs[j]]) continue
+        seen[refs[j]] = true
+        out.push(refs[j])
+      }
+    }
     return out
+  }
+
+  function unregisterOwner(owner) {
+    delete defaultRefsByOwner[String(owner || '')]
+    return unregisterRegistryOwner(owner)
+  }
+
+  if (aiditor.runtime && aiditor.runtime.registerOwnerCleanup) {
+    aiditor.runtime.registerOwnerCleanup(function (owner) {
+      delete defaultRefsByOwner[String(owner || '')]
+      return {}
+    })
   }
 
   ai.skills = Object.assign(registry, {
     availability: availability,
     catalog: catalog,
+    configureDefaults: configureDefaults,
+    clearDefaults: clearDefaults,
+    defaults: defaults,
+    unregisterOwner: unregisterOwner,
   })
 })(window.aiditor = window.aiditor || {})
 
@@ -5971,7 +6041,7 @@
   }
 
   function createToolContext(found, actor, signal) {
-    return {
+    const ctx = {
       ai: ai,
       actor: actor || found.toolCall.actor || 'user',
       agent: found.agent,
@@ -5982,6 +6052,7 @@
       canRead: function (scope) { return ai.canRead(actor || found.toolCall.actor || 'user', found.agent.id, scope || 'agent.full') },
       canApply: function () { return toolPermissionDecision(found, actor || found.toolCall.actor || 'user', 'apply').allowed === true },
     }
+    return ctx.runId && ai._runSkillContext ? ai._runSkillContext(ctx.runId, ctx) : ctx
   }
 
   function toolExecutorId(call) {
@@ -6140,14 +6211,7 @@
   }
 
   function permissionContext(found, actor) {
-    return {
-      ai: ai,
-      actor: actor,
-      agent: found.agent,
-      message: found.message,
-      toolCall: found.toolCall,
-      runId: found.message && found.message.meta && found.message.meta.runId || null,
-    }
+    return createToolContext(found, actor, null)
   }
 
   function toolPermissionDecision(found, actor, phase) {
@@ -8078,15 +8142,23 @@
   function readReference(ref, options, ctx) {
     const r = normalizeReference(ref)
     if (!r) return null
-    const providerRead = safeProviderCall(r, 'read', [r, options || {}], ctx)
-    if (providerRead != null) return providerRead
-    return r
+    const provider = providerFor(r)
+    if (!provider || typeof provider.read !== 'function') return r
+    const value = provider.read(r, options || {}, withRefContext(ctx))
+    return value === undefined ? r : value
   }
 
   function referencePermissionTargets(ref, ctx) {
     const r = normalizeReference(ref)
+    if (!r) return [{
+      entry: 'reference',
+      target: 'reference:invalid',
+      origin: 'builtin',
+      risk: 'read',
+      unavailable: true,
+    }]
     const provider = providerFor(r)
-    const meta = r && referenceProviderMeta[r.resolver] || {}
+    const meta = referenceProviderMeta[r.resolver] || {}
     if (provider && provider.permissionTargets) {
       const projected = aiditor.safeCall
         ? aiditor.safeCall({ scope: 'ai.reference', resolver: r.resolver, method: 'permissionTargets' }, function () { return provider.permissionTargets(r, withRefContext(ctx)) }, 'warn')
@@ -8129,16 +8201,45 @@
   }
 
   function searchReferences(query, ctx) {
+    query = query || {}
     const out = []
-    const names = keys(referenceProviders)
+    const resolver = query.resolver == null ? '' : String(query.resolver)
+    const kind = query.kind == null ? '' : String(query.kind)
+    const needle = query.query == null ? '' : String(query.query).trim().toLowerCase()
+    const limit = Math.max(1, Math.min(256, Math.trunc(Number(query.limit) || 64)))
+    const providerQuery = Object.assign({}, query, { limit: Math.max(64, limit) })
+    const names = resolver ? (referenceProviders[resolver] ? [resolver] : []) : keys(referenceProviders)
     for (let i = 0; i < names.length; i++) {
       const provider = referenceProviders[names[i]]
       if (!provider.search) continue
-      const found = provider.search(query || {}, withRefContext(ctx)) || []
-      const refs = normalizeReferences(found)
-      for (let j = 0; j < refs.length; j++) out.push(refs[j])
+      const found = provider.search(providerQuery, withRefContext(ctx)) || []
+      const refs = normalizeReferences(found).slice(0, 256)
+      for (let j = 0; j < refs.length; j++) {
+        if (kind && refs[j].kind !== kind) continue
+        if (resolver) {
+          out.push(refs[j])
+          continue
+        }
+        out.push({ ref: refs[j], order: out.length, score: referenceSearchScore(refs[j], needle) })
+      }
     }
-    return out
+    if (resolver) return out.slice(0, limit)
+    const ranked = needle ? out.filter(function (item) { return item.score > 0 }) : out
+    ranked.sort(function (left, right) { return right.score - left.score || left.order - right.order })
+    return ranked.slice(0, limit).map(function (item) { return item.ref })
+  }
+
+  function referenceSearchScore(ref, needle) {
+    if (!needle) return 0
+    const title = String(ref.title || '').toLowerCase()
+    const uri = String(ref.uri || '').toLowerCase()
+    const summary = String(ref.summary || '').toLowerCase()
+    if (title === needle) return 1000
+    if (title.indexOf(needle) === 0) return 500
+    if (title.indexOf(needle) >= 0) return 250
+    if (uri.indexOf(needle) >= 0) return 100
+    if (summary.indexOf(needle) >= 0) return 50
+    return 0
   }
 
   function selectedReferences(ctx) {
@@ -8267,6 +8368,10 @@
     return fn()
   }
 
+  function isPromiseLike(value) {
+    return value && typeof value.then === 'function'
+  }
+
   function withOperationContext(op, ctx) {
     return Object.assign({
       ai: ai,
@@ -8310,12 +8415,18 @@
       }
     }
     const raw = fn(input, withOperationContext(op, ctx))
+    if (isPromiseLike(raw)) {
+      return Promise.resolve(raw).then(function (resolved) {
+        return normalizePreview(op, input, resolved, ctx)
+      })
+    }
     return normalizePreview(op, input, raw, ctx)
   }
 
   function operationVisibleToModel(op, ctx) {
     const spec = getOperation(op)
     if (!spec) return false
+    if (ctx && Array.isArray(ctx.modelToolIds)) return ctx.modelToolIds.indexOf(op) >= 0
     if (spec.exposeToModel !== true) return false
     if (typeof spec.available === 'function' && spec.available(withOperationContext(op, ctx)) === false) return false
     return true
@@ -8413,23 +8524,42 @@
     return spec
   }
 
-  function applyOperation(previewOrSpec, ctx) {
-    let preview = resolvePreview(previewOrSpec)
-    if (!preview && previewOrSpec && (previewOrSpec.op || previewOrSpec.operation)) {
-      preview = previewOperation(previewOrSpec, null, ctx)
-    }
+  function appliedOperationResult(preview, result) {
+    if (result && typeof result === 'object') return Object.assign({ applied: true, previewId: preview.id }, result)
+    return { applied: true, previewId: preview.id, result: result }
+  }
+
+  function applyResolvedOperation(preview, ctx) {
     if (!preview) throw new Error('Operation preview not found')
     if (preview.ok === false) return { applied: false, ok: false, error: 'Preview is not valid', preview: preview }
     const op = preview.op || preview.operation
     const spec = getOperation(op)
     if (!spec || !spec.apply) throw new Error('Operation has no apply: ' + op)
+    if (preview.id) delete previews[preview.id]
     const opCtx = withOperationContext(op, ctx)
     const apply = function () { return spec.apply(preview, opCtx) }
     const result = spec.transaction === false
       ? apply()
       : runTransaction(preview.title || op, apply, { source: 'aiditor.ai', op: op, previewId: preview.id, risk: preview.risk })
-    if (result && typeof result === 'object') return Object.assign({ applied: true, previewId: preview.id }, result)
-    return { applied: true, previewId: preview.id, result: result }
+    if (isPromiseLike(result)) {
+      return Promise.resolve(result).then(function (resolved) {
+        return appliedOperationResult(preview, resolved)
+      })
+    }
+    return appliedOperationResult(preview, result)
+  }
+
+  function applyOperation(previewOrSpec, ctx) {
+    let preview = resolvePreview(previewOrSpec)
+    if (!preview && previewOrSpec && (previewOrSpec.op || previewOrSpec.operation)) {
+      preview = previewOperation(previewOrSpec, null, ctx)
+    }
+    if (isPromiseLike(preview)) {
+      return Promise.resolve(preview).then(function (resolved) {
+        return applyResolvedOperation(resolved, ctx)
+      })
+    }
+    return applyResolvedOperation(preview, ctx)
   }
 
   function configureTransactions(driver) {
@@ -8464,6 +8594,7 @@
         type: 'object',
         properties: {
           query: { type: 'string' },
+          resolver: { type: 'string', description: 'Reference provider id when the host domain is known.' },
           kind: { type: 'string' },
           limit: { type: 'number' },
         },
@@ -8472,7 +8603,7 @@
         return searchReferences(args || {}, ctx)
       },
       permissionTargets: function (args) {
-        return { target: 'references:' + (args && args.kind || '*'), risk: 'read' }
+        return { target: 'references:' + (args && args.resolver || '*') + ':' + (args && args.kind || '*'), risk: 'read' }
       },
       isConcurrencySafe: function () { return true },
     }, TOOL_META)
@@ -14464,6 +14595,8 @@
     const seen = {}
     const explicit = explicitSkillRefs(input)
     for (let e = 0; e < explicit.length; e++) addSkillActivation(activations, seen, explicit[e], 'explicit', ctx)
+    const defaults = ai.skills && ai.skills.defaults ? ai.skills.defaults() : []
+    for (let d = 0; d < defaults.length; d++) addSkillActivation(activations, seen, defaults[d], 'host', ctx)
     const configured = agent.skillRefs || []
     for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured', ctx)
     const selected = input && input.selectedSkillRefs || []
@@ -14499,25 +14632,8 @@
     return text.length > max ? text.slice(0, max) + '...' : text
   }
 
-  function compactContextRef(ref) {
-    if (!ref || typeof ref !== 'object') return ref
-    const out = {}
-    const keys = ['resolver', 'uri', 'kind', 'title', 'summary', 'meta', 'capabilities']
-    for (let i = 0; i < keys.length; i++) {
-      if (ref[keys[i]] != null) out[keys[i]] = ref[keys[i]]
-    }
-    return out
-  }
-
   function compactRuntimeContextValue(value) {
-    if (value == null) return null
-    if (Array.isArray(value)) return value.map(compactRuntimeContextValue)
-    if (typeof value !== 'object') return value
-    const out = compactContextRef(value)
-    if (value.selection != null) out.selection = value.selection
-    if (value.refs != null) out.refs = value.refs.map(compactContextRef)
-    if (Object.keys(out).length) return out
-    return { value: compactJson(value, 1200) }
+    return compactValue(value, 1200, 4)
   }
 
   function compactString(value, max) {
@@ -14806,8 +14922,7 @@
     if (!items.length) return null
     return contextCardMessage('context', 'runtime-context', 60, [
       'Current editor runtime context.',
-      'Use this to resolve phrases like "current table", "selected rows", "selected nodes", or "active editor".',
-      'This is a navigation summary, not full data. Before modifying data, call the relevant tools to read schemas/entities.',
+      'Use these bounded host snapshots directly. Read a reference only when the required value is absent.',
       compactJson(items, 6000),
     ].join('\n'), 7000)
   }
@@ -14881,7 +14996,13 @@
     if (!ai.skills || !ai.skills.catalog) return null
     const active = requestCtx && requestCtx.skillRefs || []
     const items = ai.skills.catalog(requestCtx || {}, { limit: 50 }).map(function (item) {
-      return Object.assign({}, item, { active: active.indexOf(item.id) >= 0 })
+      return {
+        id: item.id,
+        description: String(item.description || item.whenToUse || '').slice(0, 320),
+        active: active.indexOf(item.id) >= 0,
+        available: item.available,
+        unavailableReason: item.available ? '' : item.unavailableReason,
+      }
     })
     if (!items.length) return null
     return contextCardMessage(
@@ -17799,6 +17920,7 @@
   function activateRunSkill(runId, skillId, ctx) {
     const record = runRecord(runId)
     if (!record) throw new Error('Skill activation requires a live run.')
+    skillId = normalizedSkillId(skillId)
     const skill = ai.skills && ai.skills.get(skillId)
     if (!skill || skill.modelInvocable === false) throw new Error('Skill is not model-invocable: ' + skillId)
     const request = record.request || {}
@@ -17811,6 +17933,14 @@
     if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId, lifetime: 'run' }
     selected.push(skillId)
     return { outcome: 'activated', id: skillId, continuation: true, lifetime: 'run' }
+  }
+
+  function normalizedSkillId(value) {
+    const text = String(value || '')
+    const prefix = 'aiditor://skills/'
+    if (text.indexOf(prefix) !== 0) return text
+    const path = text.slice(prefix.length).split('/')[0]
+    try { return decodeURIComponent(path) } catch (_) { return path }
   }
 
   function runSkillContext(runId, ctx) {
@@ -17837,6 +17967,8 @@
       workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
       runtimeContext: request.runtimeContext || [],
       skillRefs: active,
+      toolIds: request.tools ? request.tools.slice() : [],
+      modelToolIds: request.modelToolIds ? request.modelToolIds.slice() : [],
       configuredSkillRefs: request.agent && request.agent.skillRefs ? request.agent.skillRefs.slice() : [],
     })
   }

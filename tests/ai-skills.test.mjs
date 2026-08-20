@@ -59,6 +59,22 @@ assert.equal(modelCatalog.some(function (item) { return item.id === 'test.model-
 assert.equal(Array.isArray(userCatalog[0].tools), true)
 aiditor.runtime.unloadOwner('test:catalog')
 
+ai.skills.register('test.host-default', { title: 'Host Default' }, { owner: 'test:host-default' })
+assert.deepEqual(ai.skills.configureDefaults(['test.host-default', 'test.host-default'], { owner: 'test:host-default' }), ['test.host-default'])
+assert.deepEqual(ai.skills.defaults(), ['test.host-default'])
+assert.deepEqual(aiditor.runtime.unloadOwner('test:host-default').skills, ['test.host-default'])
+assert.deepEqual(ai.skills.defaults(), [])
+
+ai.skills.configureDefaults([], { owner: 'test:host' })
+assert.equal(ai.skills.clearDefaults({ owner: 'test:host' }), true)
+assert.deepEqual(ai.skills.defaults(), [])
+
+for (let i = 0; i < 6; i++) ai.skills.register('a.builtin-' + i, { title: 'Builtin ' + i }, { owner: 'test:catalog-priority', layer: 'builtin' })
+ai.skills.register('z.host-active', { title: 'Host Active' }, { owner: 'test:catalog-priority', layer: 'module' })
+const prioritizedCatalog = ai.skills.catalog({ skillRefs: ['z.host-active'] }, { limit: 3 })
+assert.equal(prioritizedCatalog[0].id, 'z.host-active')
+aiditor.runtime.unloadOwner('test:catalog-priority')
+
 ai.skills.register('inline.resource', {
   resources: [{ path: 'references/info.md', kind: 'reference' }],
 }, { owner: 'test:inline' })

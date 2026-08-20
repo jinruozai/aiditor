@@ -109,6 +109,10 @@ aiditor.ai.tools.register('workspace.readText', {
 Low-level host escape hatches can stay registered for framework code while being
 kept out of normal model requests with `exposeToModel: false`.
 
+Each run freezes the resulting Tool ids, model Tool ids, specs, and routes.
+Continuations and approval waits execute that request surface; registry and
+availability changes apply to the next request.
+
 ### Tool Argument Transport
 
 `ToolCall.toolId` and `ToolCall.args` are the model-visible semantic Tool identity
@@ -318,9 +322,11 @@ cannot downgrade its siblings.
 Runtime validates the direct input, preserves the operation id in the ToolCall,
 then privately invokes `aiditor.applyOperation` with `{ op, input }`. That single
 executor still owns preview, permission, approval, transaction, apply, history,
-and audit. The projection cannot select a different executor and never becomes a
-registry entry or second project API. Registration and `available(ctx)` changes
-take effect on the next request. Provider name aliases are transport-only and
+and audit. Async preview and apply complete before the Tool publishes its result;
+`applied: true` therefore means the host mutation has finished. The projection
+cannot select a different executor and never becomes a registry entry or second
+project API. The run snapshot decides which projected operation ids may execute.
+Provider name aliases are transport-only and
 map transparently back to the original operation id. Duplicate model-visible ids
 are rejected while building the request.
 

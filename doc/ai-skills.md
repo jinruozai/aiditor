@@ -62,11 +62,12 @@ guess intent with framework-owned phrase matching.
 
 ## Activation
 
-There are three explicit activation sources:
+There are four deterministic activation sources:
 
 | reason | source | lifetime |
 | --- | --- | --- |
 | `explicit` | `/skill`, rich-prompt Skill token, request `skillRefs` | current run |
+| `host` | `ai.skills.configureDefaults(refs, { owner })` | host owner lifetime |
 | `configured` | `agent.skillRefs` | Agent profile |
 | `selected` | model call to `skill.activate` | current run |
 
@@ -76,11 +77,20 @@ Every tool-capable request also exposes two system controls:
   distinguishes host capability `available` from current-run `active`, reports
   whether it is profile `configured`, and exposes `lifetime: "run" | "agent"`.
 - `skill.activate({ id })`: activate one available model-invocable Skill for
-  the current run.
+  the current run. `id` accepts the catalog id or its exact
+  `aiditor://skills/<id>` reference.
 
 Activation is run-scoped. It survives Tool continuations and approval waits,
 then is released on completion, failure, or cancellation. It never mutates the
 Agent profile or leaks into the next user task.
+
+Activation rebuilds the continuation request and freezes its Skill and Tool
+surface. Execution uses that snapshot while permission and host revisions are
+still checked at the real Tool or Operation boundary.
+
+Host defaults activate the smallest Skill required by the current application
+for every Agent, including persisted and user-created Agents. Unloading their
+owner clears them; `ai.skills.clearDefaults({ owner })` can clear them earlier.
 
 If a provider calls a registered Tool that belongs to an available but inactive
 Skill, Runtime returns a structured `SKILL_ACTIVATION_REQUIRED` Tool result with

@@ -275,11 +275,12 @@ ai.operations.register('stream.setValue', {
     additionalProperties: false,
     properties: { value: { type: 'number' } },
   },
-  preview: function (input) {
+  preview: async function (input) {
+    await Promise.resolve()
     operationProjectionExecutions += 1
     return { title: 'Set stream value', next: input.value }
   },
-  apply: function () { operationProjectionApplies += 1; return { applied: true } },
+  apply: async function () { await Promise.resolve(); operationProjectionApplies += 1; return { applied: true } },
 }, TEST_META)
 ai.operations.register('stream.dynamic', {
   exposeToModel: true,

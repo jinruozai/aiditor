@@ -141,15 +141,23 @@
   function readReference(ref, options, ctx) {
     const r = normalizeReference(ref)
     if (!r) return null
-    const providerRead = safeProviderCall(r, 'read', [r, options || {}], ctx)
-    if (providerRead != null) return providerRead
-    return r
+    const provider = providerFor(r)
+    if (!provider || typeof provider.read !== 'function') return r
+    const value = provider.read(r, options || {}, withRefContext(ctx))
+    return value === undefined ? r : value
   }
 
   function referencePermissionTargets(ref, ctx) {
     const r = normalizeReference(ref)
+    if (!r) return [{
+      entry: 'reference',
+      target: 'reference:invalid',
+      origin: 'builtin',
+      risk: 'read',
+      unavailable: true,
+    }]
     const provider = providerFor(r)
-    const meta = r && referenceProviderMeta[r.resolver] || {}
+    const meta = referenceProviderMeta[r.resolver] || {}
     if (provider && provider.permissionTargets) {
       const projected = aiditor.safeCall
         ? aiditor.safeCall({ scope: 'ai.reference', resolver: r.resolver, method: 'permissionTargets' }, function () { return provider.permissionTargets(r, withRefContext(ctx)) }, 'warn')
@@ -192,16 +200,45 @@
   }
 
   function searchReferences(query, ctx) {
+    query = query || {}
     const out = []
-    const names = keys(referenceProviders)
+    const resolver = query.resolver == null ? '' : String(query.resolver)
+    const kind = query.kind == null ? '' : String(query.kind)
+    const needle = query.query == null ? '' : String(query.query).trim().toLowerCase()
+    const limit = Math.max(1, Math.min(256, Math.trunc(Number(query.limit) || 64)))
+    const providerQuery = Object.assign({}, query, { limit: Math.max(64, limit) })
+    const names = resolver ? (referenceProviders[resolver] ? [resolver] : []) : keys(referenceProviders)
     for (let i = 0; i < names.length; i++) {
       const provider = referenceProviders[names[i]]
       if (!provider.search) continue
-      const found = provider.search(query || {}, withRefContext(ctx)) || []
-      const refs = normalizeReferences(found)
-      for (let j = 0; j < refs.length; j++) out.push(refs[j])
+      const found = provider.search(providerQuery, withRefContext(ctx)) || []
+      const refs = normalizeReferences(found).slice(0, 256)
+      for (let j = 0; j < refs.length; j++) {
+        if (kind && refs[j].kind !== kind) continue
+        if (resolver) {
+          out.push(refs[j])
+          continue
+        }
+        out.push({ ref: refs[j], order: out.length, score: referenceSearchScore(refs[j], needle) })
+      }
     }
-    return out
+    if (resolver) return out.slice(0, limit)
+    const ranked = needle ? out.filter(function (item) { return item.score > 0 }) : out
+    ranked.sort(function (left, right) { return right.score - left.score || left.order - right.order })
+    return ranked.slice(0, limit).map(function (item) { return item.ref })
+  }
+
+  function referenceSearchScore(ref, needle) {
+    if (!needle) return 0
+    const title = String(ref.title || '').toLowerCase()
+    const uri = String(ref.uri || '').toLowerCase()
+    const summary = String(ref.summary || '').toLowerCase()
+    if (title === needle) return 1000
+    if (title.indexOf(needle) === 0) return 500
+    if (title.indexOf(needle) >= 0) return 250
+    if (uri.indexOf(needle) >= 0) return 100
+    if (summary.indexOf(needle) >= 0) return 50
+    return 0
   }
 
   function selectedReferences(ctx) {
@@ -330,6 +367,10 @@
     return fn()
   }
 
+  function isPromiseLike(value) {
+    return value && typeof value.then === 'function'
+  }
+
   function withOperationContext(op, ctx) {
     return Object.assign({
       ai: ai,
@@ -373,12 +414,18 @@
       }
     }
     const raw = fn(input, withOperationContext(op, ctx))
+    if (isPromiseLike(raw)) {
+      return Promise.resolve(raw).then(function (resolved) {
+        return normalizePreview(op, input, resolved, ctx)
+      })
+    }
     return normalizePreview(op, input, raw, ctx)
   }
 
   function operationVisibleToModel(op, ctx) {
     const spec = getOperation(op)
     if (!spec) return false
+    if (ctx && Array.isArray(ctx.modelToolIds)) return ctx.modelToolIds.indexOf(op) >= 0
     if (spec.exposeToModel !== true) return false
     if (typeof spec.available === 'function' && spec.available(withOperationContext(op, ctx)) === false) return false
     return true
@@ -476,23 +523,42 @@
     return spec
   }
 
-  function applyOperation(previewOrSpec, ctx) {
-    let preview = resolvePreview(previewOrSpec)
-    if (!preview && previewOrSpec && (previewOrSpec.op || previewOrSpec.operation)) {
-      preview = previewOperation(previewOrSpec, null, ctx)
-    }
+  function appliedOperationResult(preview, result) {
+    if (result && typeof result === 'object') return Object.assign({ applied: true, previewId: preview.id }, result)
+    return { applied: true, previewId: preview.id, result: result }
+  }
+
+  function applyResolvedOperation(preview, ctx) {
     if (!preview) throw new Error('Operation preview not found')
     if (preview.ok === false) return { applied: false, ok: false, error: 'Preview is not valid', preview: preview }
     const op = preview.op || preview.operation
     const spec = getOperation(op)
     if (!spec || !spec.apply) throw new Error('Operation has no apply: ' + op)
+    if (preview.id) delete previews[preview.id]
     const opCtx = withOperationContext(op, ctx)
     const apply = function () { return spec.apply(preview, opCtx) }
     const result = spec.transaction === false
       ? apply()
       : runTransaction(preview.title || op, apply, { source: 'aiditor.ai', op: op, previewId: preview.id, risk: preview.risk })
-    if (result && typeof result === 'object') return Object.assign({ applied: true, previewId: preview.id }, result)
-    return { applied: true, previewId: preview.id, result: result }
+    if (isPromiseLike(result)) {
+      return Promise.resolve(result).then(function (resolved) {
+        return appliedOperationResult(preview, resolved)
+      })
+    }
+    return appliedOperationResult(preview, result)
+  }
+
+  function applyOperation(previewOrSpec, ctx) {
+    let preview = resolvePreview(previewOrSpec)
+    if (!preview && previewOrSpec && (previewOrSpec.op || previewOrSpec.operation)) {
+      preview = previewOperation(previewOrSpec, null, ctx)
+    }
+    if (isPromiseLike(preview)) {
+      return Promise.resolve(preview).then(function (resolved) {
+        return applyResolvedOperation(resolved, ctx)
+      })
+    }
+    return applyResolvedOperation(preview, ctx)
   }
 
   function configureTransactions(driver) {
@@ -527,6 +593,7 @@
         type: 'object',
         properties: {
           query: { type: 'string' },
+          resolver: { type: 'string', description: 'Reference provider id when the host domain is known.' },
           kind: { type: 'string' },
           limit: { type: 'number' },
         },
@@ -535,7 +602,7 @@
         return searchReferences(args || {}, ctx)
       },
       permissionTargets: function (args) {
-        return { target: 'references:' + (args && args.kind || '*'), risk: 'read' }
+        return { target: 'references:' + (args && args.resolver || '*') + ':' + (args && args.kind || '*'), risk: 'read' }
       },
       isConcurrencySafe: function () { return true },
     }, TOOL_META)

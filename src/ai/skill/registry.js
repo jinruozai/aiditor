@@ -3,6 +3,7 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const defaultRefsByOwner = {}
 
   function stringList(value, field) {
     if (value == null) return []
@@ -76,6 +77,7 @@
       return out
     },
   })
+  const unregisterRegistryOwner = registry.unregisterOwner
 
   function availability(name, ctx) {
     const skill = registry.get(name)
@@ -103,8 +105,9 @@
     const query = String(options.query || '').trim().toLowerCase()
     const limit = Math.max(1, Math.min(Number(options.limit) || 50, 100))
     const out = []
+    const active = ctx && Array.isArray(ctx.skillRefs) ? ctx.skillRefs : []
     const ids = registry.list().slice().sort()
-    for (let i = 0; i < ids.length && out.length < limit; i++) {
+    for (let i = 0; i < ids.length; i++) {
       const skill = registry.get(ids[i])
       if (audience === 'user' ? !skill.userInvocable : !skill.modelInvocable) continue
       const text = [ids[i], skill.title, skill.description, skill.whenToUse, skill.whenNotToUse].join('\n').toLowerCase()
@@ -125,11 +128,78 @@
         unavailableReason: state.reason,
       })
     }
+    out.sort(function (left, right) {
+      const leftActive = active.indexOf(left.id) >= 0
+      const rightActive = active.indexOf(right.id) >= 0
+      if (leftActive !== rightActive) return leftActive ? -1 : 1
+      const leftHost = left.layer === 'module' || left.layer === 'app' || left.layer === 'workspace'
+      const rightHost = right.layer === 'module' || right.layer === 'app' || right.layer === 'workspace'
+      if (leftHost !== rightHost) return leftHost ? -1 : 1
+      if (left.available !== right.available) return left.available ? -1 : 1
+      return left.id.localeCompare(right.id)
+    })
+    return out.slice(0, limit)
+  }
+
+  function configureDefaults(refs, meta) {
+    const owner = String(meta && meta.owner || '')
+    if (!owner) throw new Error('ai.skills.configureDefaults: owner is required')
+    if (!Array.isArray(refs)) throw new Error('ai.skills.configureDefaults: refs must be an array')
+    const out = []
+    const seen = {}
+    for (let i = 0; i < refs.length; i++) {
+      const id = String(refs[i] || '')
+      if (!id || seen[id]) continue
+      const skill = registry.get(id)
+      if (!skill || skill.modelInvocable === false) throw new Error('ai.skills.configureDefaults: Skill is not model-invocable: ' + id)
+      seen[id] = true
+      out.push(id)
+    }
+    defaultRefsByOwner[owner] = out
+    return out.slice()
+  }
+
+  function clearDefaults(meta) {
+    const owner = String(meta && meta.owner || '')
+    if (!owner) throw new Error('ai.skills.clearDefaults: owner is required')
+    const existed = Object.prototype.hasOwnProperty.call(defaultRefsByOwner, owner)
+    delete defaultRefsByOwner[owner]
+    return existed
+  }
+
+  function defaults() {
+    const out = []
+    const seen = {}
+    const owners = Object.keys(defaultRefsByOwner).sort()
+    for (let i = 0; i < owners.length; i++) {
+      const refs = defaultRefsByOwner[owners[i]]
+      for (let j = 0; j < refs.length; j++) {
+        if (seen[refs[j]]) continue
+        seen[refs[j]] = true
+        out.push(refs[j])
+      }
+    }
     return out
+  }
+
+  function unregisterOwner(owner) {
+    delete defaultRefsByOwner[String(owner || '')]
+    return unregisterRegistryOwner(owner)
+  }
+
+  if (aiditor.runtime && aiditor.runtime.registerOwnerCleanup) {
+    aiditor.runtime.registerOwnerCleanup(function (owner) {
+      delete defaultRefsByOwner[String(owner || '')]
+      return {}
+    })
   }
 
   ai.skills = Object.assign(registry, {
     availability: availability,
     catalog: catalog,
+    configureDefaults: configureDefaults,
+    clearDefaults: clearDefaults,
+    defaults: defaults,
+    unregisterOwner: unregisterOwner,
   })
 })(window.aiditor = window.aiditor || {})

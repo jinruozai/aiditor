@@ -129,7 +129,7 @@
   }
 
   function createToolContext(found, actor, signal) {
-    return {
+    const ctx = {
       ai: ai,
       actor: actor || found.toolCall.actor || 'user',
       agent: found.agent,
@@ -140,6 +140,7 @@
       canRead: function (scope) { return ai.canRead(actor || found.toolCall.actor || 'user', found.agent.id, scope || 'agent.full') },
       canApply: function () { return toolPermissionDecision(found, actor || found.toolCall.actor || 'user', 'apply').allowed === true },
     }
+    return ctx.runId && ai._runSkillContext ? ai._runSkillContext(ctx.runId, ctx) : ctx
   }
 
   function toolExecutorId(call) {
@@ -298,14 +299,7 @@
   }
 
   function permissionContext(found, actor) {
-    return {
-      ai: ai,
-      actor: actor,
-      agent: found.agent,
-      message: found.message,
-      toolCall: found.toolCall,
-      runId: found.message && found.message.meta && found.message.meta.runId || null,
-    }
+    return createToolContext(found, actor, null)
   }
 
   function toolPermissionDecision(found, actor, phase) {

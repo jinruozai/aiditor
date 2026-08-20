@@ -26,6 +26,7 @@ for (const file of [
   'src/ai/skill/runtime.js',
   'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
+  'src/ai/reference.js',
   'src/ai/rich-prompt.js',
   'src/ai/request.js',
   'src/ai/runtime.js',
@@ -90,6 +91,27 @@ const agent = ai.createAgent({
   path: 'tools/root',
   connection: 'tool-test',
 })
+registerContext('mors.editor.summary', {
+  capture: function () {
+    return {
+      kind: 'mors.editor',
+      summary: 'Current MORS editor state.',
+      activeScene: 'project://scene.morscn',
+      activeSceneRevision: 3,
+      sceneRoot: { uri: 'mors://meta?document=project%3A%2F%2Fscene.morscn&local=root', local: 'root' },
+      selection: [],
+    }
+  },
+})
+const runtimeContextRequest = ai.planRequest(agent, null, 'runtime_context_values', 'user', 0)
+const runtimeContextMessage = runtimeContextRequest.messages.find(function (message) {
+  return message.role === 'system' && String(message.content || '').indexOf('Current editor runtime context') >= 0
+})
+assert.match(runtimeContextMessage.content, /project:\/\/scene\.morscn/)
+assert.match(runtimeContextMessage.content, /activeSceneRevision\":3/)
+assert.match(runtimeContextMessage.content, /local\":\"root/)
+assert.doesNotMatch(runtimeContextMessage.content, /navigation summary/)
+ai.context.unregister('mors.editor.summary', TEST_META)
 
 let previewCtx = null
 let runCtx = null
@@ -171,6 +193,15 @@ assert.equal(filteredActivationTrace.entry, 'filtered-tools')
 assert.equal(filteredActivationTrace.meta.reason, 'configured')
 assert.equal(filteredActivationTrace.meta.owner, 'test:filtered')
 assert.equal(ai.trace.list('run_filtered_tools').find(function (event) { return event.type === 'request_built' }).meta.skillPromptChars > 0, true)
+ai.skills.configureDefaults(['filtered-tools'], { owner: 'test:host-default' })
+const hostDefaultRequest = ai.planRequest(ai.createAgent({
+  name: 'Host Default Skill Agent',
+  connection: 'tool-test',
+}), null, 'run_host_default_skill', 'user', 0)
+assert.equal(hostDefaultRequest.skillActivations[0].id, 'filtered-tools')
+assert.equal(hostDefaultRequest.skillActivations[0].reason, 'host')
+assert.equal(hostDefaultRequest.tools.includes('ctx-visible'), true)
+assert.equal(ai.skills.clearDefaults({ owner: 'test:host-default' }), true)
 assert.equal(availableCtx.actor, 'user')
 let explicitSkillDraft = ai.richPrompt.insertSkill(ai.richPrompt.empty(), 0, {
   id: 'filtered-tools',
@@ -449,6 +480,51 @@ assert.equal(loopRequests.length, 2)
 assert.equal(ai.findAgent(loopAgent.id).messages.some(function (message) { return message.role === 'tool' }), true)
 ai.skills.unregister('loop.explicit', TEST_META)
 
+let skillBoundValue = 0
+let skillBoundAvailable = true
+ai.operations.register('case.skillBound', {
+  title: 'Skill-bound operation',
+  exposeToModel: true,
+  available: function (ctx) { return skillBoundAvailable && (ctx.skillRefs || []).indexOf('operation.run-context') >= 0 },
+  inputSchema: {
+    type: 'object',
+    required: ['value'],
+    additionalProperties: false,
+    properties: { value: { type: 'number' } },
+  },
+  preview: function (input) { return { next: input.value } },
+  apply: function (preview) {
+    skillBoundValue = preview.next
+    return { value: skillBoundValue }
+  },
+}, TEST_META)
+registerSkill('operation.run-context', {
+  title: 'Run context operation',
+  tools: ['aiditor.applyOperation'],
+})
+const operationRequests = []
+ai.registerTransport('operation-run-context', {
+  toolProtocol: 'native',
+  send: function (connection, request) {
+    operationRequests.push(request)
+    if (operationRequests.length === 1) {
+      assert.equal(request.toolSpecs.some(function (tool) { return tool.id === 'case.skillBound' }), true)
+      skillBoundAvailable = false
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'case.skillBound', args: { value: 17 } }] }
+    }
+    const result = JSON.parse(request.messages[request.messages.length - 1].content)
+    assert.equal(result.value, 17)
+    return { role: 'assistant', content: 'operation complete' }
+  },
+})
+ai.registerConnection('operation-run-context', { auth: { type: 'none' }, transport: { type: 'operation-run-context' }, configDefaults: {} })
+const operationAgent = ai.createAgent({ name: 'Operation run context', connection: 'operation-run-context', permissionMode: 'full', skillRefs: ['operation.run-context'] })
+const operationReply = await ai.message.send(operationAgent.id, 'apply operation', 'user').promise
+assert.equal(operationReply.content, 'operation complete')
+assert.equal(skillBoundValue, 17)
+ai.skills.unregister('operation.run-context', TEST_META)
+ai.operations.unregister('case.skillBound', TEST_META)
+
 registerSkill('dynamic.read', {
   title: 'Dynamic Read',
   description: 'Read a number after run-scoped activation.',
@@ -461,7 +537,7 @@ ai.registerTransport('dynamic-skill', {
     dynamicRequests.push(request)
     if (dynamicRequests.length === 1) {
       assert.deepEqual(request.tools, ['skill.list', 'skill.activate'])
-      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'skill.activate', args: { id: 'dynamic.read' } }] }
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'skill.activate', args: { id: 'aiditor://skills/dynamic.read' } }] }
     }
     if (dynamicRequests.length === 2) {
       assert.equal(request.tools.includes('read-number'), true)

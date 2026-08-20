@@ -2595,6 +2595,7 @@
   function activateRunSkill(runId, skillId, ctx) {
     const record = runRecord(runId)
     if (!record) throw new Error('Skill activation requires a live run.')
+    skillId = normalizedSkillId(skillId)
     const skill = ai.skills && ai.skills.get(skillId)
     if (!skill || skill.modelInvocable === false) throw new Error('Skill is not model-invocable: ' + skillId)
     const request = record.request || {}
@@ -2607,6 +2608,14 @@
     if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId, lifetime: 'run' }
     selected.push(skillId)
     return { outcome: 'activated', id: skillId, continuation: true, lifetime: 'run' }
+  }
+
+  function normalizedSkillId(value) {
+    const text = String(value || '')
+    const prefix = 'aiditor://skills/'
+    if (text.indexOf(prefix) !== 0) return text
+    const path = text.slice(prefix.length).split('/')[0]
+    try { return decodeURIComponent(path) } catch (_) { return path }
   }
 
   function runSkillContext(runId, ctx) {
@@ -2633,6 +2642,8 @@
       workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
       runtimeContext: request.runtimeContext || [],
       skillRefs: active,
+      toolIds: request.tools ? request.tools.slice() : [],
+      modelToolIds: request.modelToolIds ? request.modelToolIds.slice() : [],
       configuredSkillRefs: request.agent && request.agent.skillRefs ? request.agent.skillRefs.slice() : [],
     })
   }

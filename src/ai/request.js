@@ -205,6 +205,8 @@
     const seen = {}
     const explicit = explicitSkillRefs(input)
     for (let e = 0; e < explicit.length; e++) addSkillActivation(activations, seen, explicit[e], 'explicit', ctx)
+    const defaults = ai.skills && ai.skills.defaults ? ai.skills.defaults() : []
+    for (let d = 0; d < defaults.length; d++) addSkillActivation(activations, seen, defaults[d], 'host', ctx)
     const configured = agent.skillRefs || []
     for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured', ctx)
     const selected = input && input.selectedSkillRefs || []
@@ -240,25 +242,8 @@
     return text.length > max ? text.slice(0, max) + '...' : text
   }
 
-  function compactContextRef(ref) {
-    if (!ref || typeof ref !== 'object') return ref
-    const out = {}
-    const keys = ['resolver', 'uri', 'kind', 'title', 'summary', 'meta', 'capabilities']
-    for (let i = 0; i < keys.length; i++) {
-      if (ref[keys[i]] != null) out[keys[i]] = ref[keys[i]]
-    }
-    return out
-  }
-
   function compactRuntimeContextValue(value) {
-    if (value == null) return null
-    if (Array.isArray(value)) return value.map(compactRuntimeContextValue)
-    if (typeof value !== 'object') return value
-    const out = compactContextRef(value)
-    if (value.selection != null) out.selection = value.selection
-    if (value.refs != null) out.refs = value.refs.map(compactContextRef)
-    if (Object.keys(out).length) return out
-    return { value: compactJson(value, 1200) }
+    return compactValue(value, 1200, 4)
   }
 
   function compactString(value, max) {
@@ -547,8 +532,7 @@
     if (!items.length) return null
     return contextCardMessage('context', 'runtime-context', 60, [
       'Current editor runtime context.',
-      'Use this to resolve phrases like "current table", "selected rows", "selected nodes", or "active editor".',
-      'This is a navigation summary, not full data. Before modifying data, call the relevant tools to read schemas/entities.',
+      'Use these bounded host snapshots directly. Read a reference only when the required value is absent.',
       compactJson(items, 6000),
     ].join('\n'), 7000)
   }
@@ -622,7 +606,13 @@
     if (!ai.skills || !ai.skills.catalog) return null
     const active = requestCtx && requestCtx.skillRefs || []
     const items = ai.skills.catalog(requestCtx || {}, { limit: 50 }).map(function (item) {
-      return Object.assign({}, item, { active: active.indexOf(item.id) >= 0 })
+      return {
+        id: item.id,
+        description: String(item.description || item.whenToUse || '').slice(0, 320),
+        active: active.indexOf(item.id) >= 0,
+        available: item.available,
+        unavailableReason: item.available ? '' : item.unavailableReason,
+      }
     })
     if (!items.length) return null
     return contextCardMessage(

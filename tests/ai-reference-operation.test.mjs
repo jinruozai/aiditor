@@ -66,6 +66,27 @@ assert.throws(function () {
 registerReference('case.replace', { read: function () { return 'two' } }, { owner: 'test:reference-operation', replace: true })
 assert.equal(ai.references.get('case.replace').read(), 'two')
 ai.references.unregister('case.replace', TEST_META)
+registerReference('case.missing', { read: function () { return null } })
+assert.equal(ai.references.read('case.missing://item/absent'), null)
+registerReference('case.noisy', {
+  search: function () {
+    return [
+      { uri: 'case://other/ignored', kind: 'case.other', title: 'Cube inspector example' },
+      { uri: 'case://item/two', kind: 'case.item', title: 'cube' },
+      { uri: 'case://item/three', kind: 'case.item' },
+    ]
+  },
+})
+assert.deepEqual(ai.references.search({ kind: 'case.item', limit: 2 }).map(function (item) { return item.uri }), ['case://item/one', 'case://item/two'])
+assert.deepEqual(ai.references.search({ kind: 'case.unknown' }), [])
+assert.deepEqual(ai.references.search({ query: 'cube', limit: 1 }).map(function (item) { return item.uri }), ['case://item/two'])
+assert.deepEqual(ai.references.search({ resolver: 'case', kind: 'case.item' }).map(function (item) { return item.uri }), ['case://item/one'])
+assert.deepEqual(ai.references.search({ resolver: 'case.noisy', query: 'pink cube', kind: 'case.item' }).map(function (item) { return item.uri }), ['case://item/two', 'case://item/three'])
+assert.deepEqual(ai.references.search({ resolver: 'missing', query: 'cube' }), [])
+const invalidReferenceTarget = ai.tools.permissionTargets('aiditor.readReference', null, { actor: 'user' })[0]
+assert.equal(invalidReferenceTarget.entry, 'reference')
+assert.equal(invalidReferenceTarget.target, 'reference:invalid')
+assert.equal(invalidReferenceTarget.unavailable, true)
 
 ai.transactions.configure({
   run(label, fn, meta) {
@@ -160,6 +181,34 @@ assert.equal(value, 7)
 assert.equal(tx[0].label, 'Set value')
 assert.equal(tx[0].meta.op, 'case.setValue')
 
+let asyncValue = 0
+registerOperation('case.setAsyncValue', {
+  title: 'Set Async Value',
+  exposeToModel: true,
+  inputSchema: {
+    type: 'object',
+    required: ['value'],
+    additionalProperties: false,
+    properties: { value: { type: 'number' } },
+  },
+  preview: async function (input) {
+    await Promise.resolve()
+    return { title: 'Set async value', next: input.value }
+  },
+  apply: async function (prepared) {
+    await Promise.resolve()
+    asyncValue = prepared.next
+    return { value: asyncValue }
+  },
+})
+const asyncPreview = await ai.operations.preview('case.setAsyncValue', { value: 11 })
+assert.equal(asyncPreview.next, 11)
+assert.equal(asyncValue, 0)
+const asyncApplied = await ai.operations.apply(asyncPreview)
+assert.equal(asyncApplied.applied, true)
+assert.equal(asyncApplied.value, 11)
+assert.equal(asyncValue, 11)
+
 const agent = ai.createAgent({ name: 'Reference Agent' })
 const defaultRequest = ai.planRequest(agent, null, 'inspect', 'user', 0)
 assert.equal(defaultRequest.tools.includes('aiditor.previewOperation'), false)
@@ -211,7 +260,7 @@ const requestWithAvailableOperation = ai.planRequest(ai.createAgent({
 }), null, 'inspect_available', 'user', 0)
 assert.deepEqual(
   requestWithAvailableOperation.toolSpecs.map(function (tool) { return tool.route.args.op }),
-  ['case.setValue', 'case.unavailable']
+  ['case.setAsyncValue', 'case.setValue', 'case.unavailable']
 )
 unavailableOperationEnabled = false
 
@@ -231,10 +280,10 @@ const previewGateway = ai.tools.get('aiditor.previewOperation')
 const unknownOperation = previewGateway.run({ op: 'case.missing', input: {} }, { actor: 'user', agent: agent })
 assert.equal(unknownOperation.ok, false)
 assert.equal(unknownOperation.code, 'OPERATION_NOT_FOUND')
-assert.deepEqual(unknownOperation.allowedValues, ['case.setValue'])
+assert.deepEqual(unknownOperation.allowedValues, ['case.setAsyncValue', 'case.setValue'])
 const unavailableOperation = previewGateway.run({ op: 'case.unavailable', input: {} }, { actor: 'user', agent: agent })
 assert.equal(unavailableOperation.code, 'OPERATION_NOT_AVAILABLE')
-assert.deepEqual(unavailableOperation.allowedValues, ['case.setValue'])
+assert.deepEqual(unavailableOperation.allowedValues, ['case.setAsyncValue', 'case.setValue'])
 assert.throws(function () {
   ai.operations.preview('case.missing', {})
 }, /Operation not found/)
@@ -275,5 +324,6 @@ assert.equal(ai.findToolCall(agent.id, applyTool.id).toolCall.preview.changes[0]
 ai.approveToolCall(agent.id, applyTool.id, 'user')
 ai.applyToolCall(agent.id, applyTool.id, 'user')
 assert.equal(value, 9)
+assert.equal(ai.operations.getPreview(ai.findToolCall(agent.id, applyTool.id).toolCall.preview.id), null)
 
 console.log('ai reference operation tests ok')
