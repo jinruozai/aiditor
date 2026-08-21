@@ -148,7 +148,7 @@ for (const file of [
   'src/ai/i18n.js',
   'src/ui/_internal/_signal.js',
   'src/ui/_internal/_css.js',
-  'src/ai/rich-prompt.js',
+  'src/ai/context/rich-prompt.js',
   'src/ai/panels/rich-prompt-input.js',
   'src/ai/panels/composer-slash.js',
 ]) {

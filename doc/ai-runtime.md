@@ -1,195 +1,114 @@
-# AI Host Runtime
+# AI Runtime
 
-AI Host is an optional layer above AIditor Core/UI. Core/UI never depends on it.
+## Ownership
 
-## Public model
-
-```text
-Agent        stable profile, transcript, queue, inbox, quests
-Skill        discoverable focused capability and instructions
-Tool         internal executable endpoint exposed through active Skills
-Context      request-time facts
-Reference    semantic resource identity and bounded read
-Operation    semantic preview/apply mutation
-ChangeSet    grouped user review and apply
-Permission   centralized actor/target/scope decision and audit
-```
-
-Targets, attachments, rich-prompt ranges, checkpoints, and provider wire
-formats are runtime/UX details rather than new capability models.
-
-Transient `statusText` is a bounded single-line projection of the current
-input. Rich prompts use the shared message text normalization contract; runtime
-state must never persist JavaScript object coercions such as `[object Object]`.
-
-## Agent profile
-
-An Agent owns stable configuration:
-
-```js
-{
-  id,
-  name,
-  parentAgentId,
-  connection,
-  model,
-  systemPrompt,
-  outputSchema,
-  contextRefs,
-  skillRefs,
-  permissionMode,
-  permissions,
-}
-```
-
-Direct Tool ids are not part of the Agent contract. Child creation,
-configuration, and delegation accept `skillRefs` only.
-
-## Run lifecycle
+The AI Host keeps six model-facing concepts: Agent, Skill, Tool, Context
+Reference, Operation, and ChangeSet.
 
 ```text
-queued input
-  -> planRequest (pure synchronous capability plan)
-  -> resolveRequest (abortable asynchronous Reference hydration)
-  -> provider turn
-  -> assistant Tool calls?
-       no  -> validate optional outputSchema -> finish
-       yes -> decode whole batch -> schema validation -> permission
-              -> run/preview/apply or wait for approval
-              -> append Tool results -> plan/resolve continuation
+src/ai/agent/      Agent state, request, Run, orchestration, persistence
+src/ai/skill/      stateless instructions, catalog, read/list, packages
+src/ai/tool/       executable registry, ToolCall lifecycle, scheduling
+src/ai/context/    factual request context, targets, Rich Prompt
+src/ai/operation/  grouped review/apply
+src/ai/provider*   provider protocol and transport
 ```
 
-Each run has a stable `runId` and bounded `{maxTurns, timeoutMs, maxTokens}`.
-Tool continuations reuse the same run. Dynamic Skill selection is stored per
-run, survives approval waits, and is cleared on complete/fail/stop.
+Agent owns conversation and execution state. Skill owns instructions. Tool owns
+execution. Permission owns authorization. These concerns never grant or mutate
+one another.
 
-## Skill discovery
+## Agent
 
-Connections with Tool calling always receive `skill.list` and
-`skill.activate`. Domain Tools appear only through active Skills. A model may:
+An Agent profile stores model/connection configuration, optional
+`systemPrompt`, context references, transcript, queue, quests, memory,
+permissions, and runtime status. It does not store Tool or Skill capability
+lists.
 
-1. inspect the compact catalog already present in system context;
-2. call `skill.list` for a focused query;
-3. call `skill.activate` for one available Skill;
-4. use the Skill Tools on the next continuation.
+The default system prompt is:
 
-User `/skill`, rich-prompt tokens, configured `agent.skillRefs`, and model
-activation all converge on the same request assembly. See
-[ai-skills.md](./ai-skills.md).
-
-## Tool lifecycle
-
-Tools may implement:
-
-- `run(input, ctx)` for direct execution;
-- `preview(input, ctx)` and `apply(preview, ctx)` for reviewed mutation;
-- `resolveSchema(ctx)` for request-time schema;
-- `resolveModelSpecs(ctx)` for provider-facing semantic projections;
-- `available(ctx)` for current host capability.
-- `permissionTargets(input, ctx, phase)` for exact Policy targets;
-- `isConcurrencySafe(input)` to opt a call into bounded parallel scheduling;
-- `timeoutMs` for an execution deadline.
-
-Skill activation never bypasses `available(ctx)` or Permission. Runtime decodes
-and validates the entire provider batch before executing any call. Strict Tool
-argument recovery is bounded and does not replay side effects.
-
-Tool batches preserve provider order. Consecutive calls run in parallel only
-when every call explicitly opts in through `isConcurrencySafe`; every other
-call is an exclusive barrier. `tool/runtime.js` remains the only ToolCall state
-owner. Execution ids prevent a timed-out or cancelled promise from settling a
-newer or terminal ToolCall.
-
-Policy `allow` continues directly through preview, run, and apply without
-publishing review controls. Only `ask` creates an explicit ToolCall
-`approvalPhase` (`run` or `apply`), and Transcript actions render solely from
-that state. Tools may declare a semantic `permissionDeniedHint`; it only guides
-recovery and never changes the centralized Policy decision.
-
-## Context and references
-
-Context providers capture small current facts, such as active editor identity
-or selection summaries. References provide stable semantic resources and
-bounded reads. Neither contributes Tools. Tool access is selected only through
-Skills.
-
-## Operations
-
-A model-visible Operation declares:
-
-```js
-aiditor.ai.operations.register('scene.setValue', {
-  exposeToModel: true,
-  inputSchema: { type: 'object', properties: { value: {} } },
-  preview: function (input, ctx) { /* ... */ },
-  apply: function (preview, ctx) { /* ... */ },
-}, { owner: 'project:game' })
+```text
+You are an AI agent.
+Complete the user's request using the capabilities available in the current request.
+Treat the current workspace, runtime state, and Tool results as the source of truth.
+Never claim an action that was not completed.
+If blocked, state the exact blocker.
+Keep responses concise, clear, and limited to what is necessary.
 ```
 
-The request projects each available Operation directly as its own provider Tool
-while preserving the canonical Operation id for preview, apply, permission,
-trace, and replay. The hidden gateway remains an implementation detail.
+`systemPrompt == null` uses this default. Any string replaces it completely;
+an empty string omits the runtime system prompt. Framework instructions are
+never appended to a project override.
 
-## Persistence
+## Request and Run
 
-Snapshot schema version 3 stores complete JSON-safe transcripts in the
-configured durable adapter. `localStorage` stores only a lightweight bootstrap
-manifest. Model context compaction never deletes UI transcript history.
+One Run starts from one user input and may contain multiple provider Turns due
+to Tool calls. Explicit Skill instructions remain attached to that input across
+those Turns without becoming persistent state.
 
-The version is exact; there is no legacy migration path in the framework.
+A Run has no default turn, token, or wall-clock limit. Long work continues
+through ordinary Tool Turns and context compaction until it completes, is
+cancelled, becomes genuinely blocked, or encounters an unrecoverable error.
+Hosts and delegated tasks may set `maxTurns`, `maxTokens`, or `timeoutMs` as
+explicit budgets. Those values are opt-in policy, not hidden framework limits.
+An unconstrained Run stores no budget; it does not materialize a placeholder
+object filled with null limits.
+
+For a Tool-capable connection, request assembly begins with `skill.read` and
+adds `skill.list` only when the bounded catalog omitted entries. It then adds
+currently available Tools from `always` Skills, explicitly selected Skills, and
+successful main `skill.read` calls still present in conversation context.
+Resource-only reads do not project Tools. Other registered Tools do not consume
+provider-schema tokens until their Skill is selected or read.
+
+Provider Tool calls are normalized from provider aliases and projection routes,
+then executed by canonical Tool name and arguments. The execution path is:
+
+```text
+Tool Registry lookup
+→ current available(ctx)
+→ input schema validation
+→ Permission decision/approval
+→ preview/run/apply
+→ normalized Tool result
+```
+
+There is no request capability snapshot, callable layer, Skill activation, or
+loaded-Skill state. Request-local Tool projection is derived from Skill
+configuration plus the visible transcript. Provider projection metadata is used
+only to decode aliases and route direct Operation projections to their canonical
+gateway.
+
+## Tool Runtime
+
+`ai.tools.invoke(name, args, ctx, phase)` is the internal execution primitive.
+It resolves the registered Tool, rechecks current availability, validates input,
+and invokes the requested phase. The persisted ToolCall lifecycle surrounds
+this primitive with permission, preview/apply approval, tracing, cancellation,
+deadlines, and result delivery.
+
+An ordered Tool batch pauses at the first approval boundary. After that call is
+resolved, the Run resumes the remaining ToolCalls in the same assistant message;
+only a fully terminal batch may continue to the next provider Turn. ToolCall
+statuses are the sole batch progress state.
+
+A function that must not be model-callable is an internal API, not a Tool.
+Sensitive Tools remain safe through `available(ctx)` and Permission, not model
+visibility flags.
 
 ## Orchestration
 
-`aiditor.agent-orchestration` exposes bounded `agent.*`, `quest.*`, and
-`message.*` Tools. Agents may create or manage descendants only. Delegation
-selects focused child `skillRefs`; it does not pass raw Tool ids.
+Child Agents inherit runtime environment through the Host. Delegation accepts
+task, model, connection, system prompt, output schema, context references, and
+budget; it does not accept Skill or Tool ids. Agent ancestry and Permission
+continue to bound read, send, configure, stop, and quest operations.
 
-Model-selected Skills remain run-scoped. When provider output calls a Tool from
-an available but inactive Skill, Runtime reports `SKILL_ACTIVATION_REQUIRED`
-with the canonical Tool id, original provider alias, and candidate Skill ids
-instead of the ambiguous generic Tool-unavailable message. `skill.list`
-separately reports `available`, `active`, `configured`, and activation lifetime.
-Cross-request capability configuration remains owned by persisted
-`agent.skillRefs`.
+`agent.delegate` is the direct path when an Agent should perform work.
+`agent.create` creates an idle profile only.
 
-The runtime, not provider output, owns each ToolCall actor. `agent.create` and
-new-agent `agent.delegate` resolve an omitted parent from that originating
-actor, revalidate it at apply time, and fail if the caller or parent no longer
-exists. Agent-originated creation can never fall back to a root Agent, and the
-Store rejects orphan parent ids.
+## Persistence and compaction
 
-Quest result/cancel is the precise task lifecycle. `agent.stop` remains an
-emergency current-run control, not the normal quest completion mechanism.
-At the Agent boundary, an unreadable or missing Quest is reported uniformly as
-`QUEST_UNAVAILABLE` so existence is not leaked across ownership boundaries.
-User-originated diagnostics retain exact `AGENT_NOT_FOUND` and
-`QUEST_NOT_FOUND` codes.
-
-## File ownership
-
-```text
-src/ai/
-  i18n.js                   built-in AI Host UI dictionaries
-  contribution-registry.js  shared exact-owner Registry primitive
-  tool/
-    registry.js              executable Tool definitions
-    scheduler.js             ordered parallel groups, barriers, deadline/abort
-    runtime.js               Tool-call lifecycle and run context
-  context/
-    registry.js              factual Context providers
-  skill/
-    registry.js              SkillSpec normalization/catalog
-    runtime.js               skill.list / skill.activate
-    builtins.js              framework Skill taxonomy
-    packages.js              bounded SKILL.md discovery
-    reference.js             Skill reference projection
-  request.js                 synchronous plan + async Reference hydration
-  runtime.js                 Agent run state, continuation, approval
-  orchestration.js           Agent/Quest control Tools
-  permission.js              centralized policy and audit
-  store.js                   in-memory Agent state
-  persistence.js             durable snapshot lifecycle
-```
-
-Provider, connection, reference, ChangeSet, compaction, and panel files remain
-separate because each already has one cohesive responsibility.
+Persistence stores the complete Agent transcript and durable Agent fields.
+There is no Skill activation state to persist or restore. Compaction operates on
+messages and memory; when it removes a `skill.read` ToolCall from request context,
+that Skill can be read again when its Tool schemas are needed.

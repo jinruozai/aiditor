@@ -1094,7 +1094,6 @@
       description: 'Open the current AI workspace as an AIditor demo project when it contains aiditor.project.json. Use this before demo.project.addPanel if files exist but no demo project is open.',
       schema: { type: 'object', properties: {} },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: function () { return workspaceAvailable() && !projectAvailable() },
       run: function () { return openCurrentWorkspace({ mount: {} }) },
     }, { owner: owner, layer: 'builtin' })
@@ -1111,7 +1110,6 @@
       description: 'Search files in the current project workspace. Prefer this before reading whole files.',
       schema: { type: 'object', required: ['query'], properties: { projectId: { type: 'string' }, query: { type: 'string' }, path: { type: 'string' }, limit: { type: 'number' } } },
       permissions: ['tool.call'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return hostWorkspaceFor(projectForTool(args && args.projectId)).search(args.query || '', args || {}) },
     }, { owner: owner, layer: 'builtin' })
@@ -1120,7 +1118,6 @@
       description: 'Read one project file. Use readFileRange for large source files.',
       schema: { type: 'object', required: ['path'], properties: { projectId: { type: 'string' }, path: { type: 'string' }, full: { type: 'boolean' }, maxChars: { type: 'number' }, maxLines: { type: 'number' } } },
       permissions: ['tool.call'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return readProjectFile(projectForTool(args && args.projectId), args.path, args || {}) },
     }, { owner: owner, layer: 'builtin' })
@@ -1129,7 +1126,6 @@
       description: 'Read a 1-based line range from one project file.',
       schema: { type: 'object', required: ['path', 'startLine', 'endLine'], properties: { projectId: { type: 'string' }, path: { type: 'string' }, startLine: { type: 'number' }, endLine: { type: 'number' } } },
       permissions: ['tool.call'],
-      exposeToModel: false,
       available: projectAvailable,
       run: async function (args) {
         const file = await hostWorkspaceFor(projectForTool(args && args.projectId)).readText(args.path)
@@ -1152,7 +1148,6 @@
       description: 'Write one complete project file. JS/JSON writes are validated before commit; broad rewrites are high risk, prefer workspace.editText for existing source files.',
       schema: { type: 'object', required: ['path', 'text'], properties: { projectId: { type: 'string' }, path: { type: 'string' }, text: { type: 'string' }, baseHash: { type: 'string' }, validate: { type: 'string', enum: ['auto', 'none', 'javascript', 'json'] } } },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return writeProjectFile(projectForTool(args && args.projectId), args.path, args.text || '', { baseHash: args.baseHash, validate: args.validate }) },
     }, { owner: owner, layer: 'builtin' })
@@ -1161,7 +1156,6 @@
       description: 'Create or overwrite one complete project file in the authorized workspace. JS/JSON writes are validated before commit.',
       schema: { type: 'object', required: ['path', 'text'], properties: { projectId: { type: 'string' }, path: { type: 'string' }, text: { type: 'string' }, validate: { type: 'string', enum: ['auto', 'none', 'javascript', 'json'] } } },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return writeProjectFile(projectForTool(args && args.projectId), args.path, args.text || '', { validate: args.validate }) },
     }, { owner: owner, layer: 'builtin' })
@@ -1170,7 +1164,6 @@
       description: 'Patch a project file with 1-based line patches and a base hash. JS/JSON results are validated before commit.',
       schema: { type: 'object', required: ['path', 'baseHash', 'patches'], properties: { projectId: { type: 'string' }, path: { type: 'string' }, baseHash: { type: 'string' }, patches: { type: 'array' }, validate: { type: 'string', enum: ['auto', 'none', 'javascript', 'json'] } } },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return patchProjectFile(projectForTool(args && args.projectId), args.path, args.baseHash, args.patches || [], { validate: args.validate }) },
     }, { owner: owner, layer: 'builtin' })
@@ -1179,7 +1172,6 @@
       description: 'Delete one project file from the authorized workspace.',
       schema: { type: 'object', required: ['path'], properties: { projectId: { type: 'string' }, path: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return hostWorkspaceFor(projectForTool(args && args.projectId)).delete(args.path) },
     }, { owner: owner, layer: 'builtin' })
@@ -1204,7 +1196,6 @@
         },
       },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return addPanel(args || {}) },
     }, { owner: owner, layer: 'builtin' })
@@ -1229,7 +1220,6 @@
         },
       },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: function () { return workspaceAvailable() || projectAvailable() },
       run: function (args) { return mountPanel(args || {}) },
     }, { owner: owner, layer: 'builtin' })
@@ -1238,7 +1228,6 @@
       description: 'Update aiditor.project.json in the current project.',
       schema: { type: 'object', required: ['descriptor'], properties: { projectId: { type: 'string' }, descriptor: { type: 'object' }, baseHash: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) {
         return writeProjectFile(projectForTool(args && args.projectId), 'aiditor.project.json', JSON.stringify(args.descriptor || {}, null, 2), { baseHash: args.baseHash, validate: 'json' })
@@ -1249,7 +1238,6 @@
       description: 'Reload the current AIditor project after file edits.',
       schema: { type: 'object', properties: { projectId: { type: 'string' } } },
       permissions: ['tool.call', 'tool.apply'],
-      exposeToModel: false,
       available: projectAvailable,
       run: function (args) { return reload(args && args.projectId) },
     }, { owner: owner, layer: 'builtin' })
@@ -1316,21 +1304,19 @@
     aiditor.ai.skills.register('demo.project.authoring', {
       title: 'Demo Project Authoring',
       description: 'Develop and operate the currently open AIditor demo project.',
-      systemPrompt: 'Use the current demo project runtime as the host-specific AIditor authoring environment. Keep UI code file-backed and add registered components to inspected docks by name.',
-      available: function () { return workspaceAvailable() || projectAvailable() },
-      unavailableReason: 'Open a demo project or workspace first.',
-      tools: ['demo.project.openWorkspace', 'demo.project.readDescriptor', 'demo.project.searchFiles', 'demo.project.readFile', 'demo.project.readFileRange', 'demo.project.readSource', 'demo.project.writeFile', 'demo.project.createFile', 'demo.project.patchFile', 'demo.project.deleteFile', 'demo.project.addPanel', 'demo.project.mountPanel', 'demo.project.updateDescriptor', 'demo.project.reload', 'demo.project.inspectPanel', 'demo.project.runCheck', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
-      rules: [
+      toolDisclosure: 'onRead',
+      instructions: [
+        'Use the current demo project runtime as the host-specific AIditor authoring environment. Keep UI code file-backed and add registered components to inspected docks by name.',
         'A demo project is a workspace folder with aiditor.project.json, optional aiditor.layout.json, and plain .js entry files.',
         'Demo project component files register with Demo.project.component(componentId, spec). Use this instead of aiditor.registerComponent inside demo project entry files.',
         'Use generic dotted component ids such as app.mainPanel or tool.timeline. Do not copy ids from examples unless they match the requested feature.',
         'After writing or editing a component file, pass that file path to aiditor.addPanelToDock so the runtime loads it before adding the panel.',
         'Before adding a panel, call aiditor.inspectDocks and choose a returned dockId from its position, size, and existing panels.',
-        'Add panels with aiditor.addPanelToDock using the registered component id and returned dock id. This is the AI-facing version of choosing a component from the dock Add Panel menu.',
         'Pass title, icon, or props only when overriding component defaults; otherwise defaults() supplies them.',
         'Do not manually create aiditor.project.json or aiditor.layout.json unless the user explicitly asks to edit project metadata or layout files.',
         'Do not guess dock names such as main/editor and do not hand-write layout JSON to place a panel.',
-      ],
+      ].join('\n'),
+      tools: ['demo.project.openWorkspace', 'demo.project.readDescriptor', 'demo.project.searchFiles', 'demo.project.readFile', 'demo.project.readFileRange', 'demo.project.readSource', 'demo.project.writeFile', 'demo.project.createFile', 'demo.project.patchFile', 'demo.project.deleteFile', 'demo.project.addPanel', 'demo.project.mountPanel', 'demo.project.updateDescriptor', 'demo.project.reload', 'demo.project.inspectPanel', 'demo.project.runCheck', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
     }, { owner: 'project:demo', layer: 'project', source: 'demo/project.js' })
   }
 

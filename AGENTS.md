@@ -167,18 +167,15 @@ aiditor/
       ui-base.css / ui-form.css / ui-property.css / ui-editor.css / ui-container.css / ui-data.css / ui-overlay.css / dock-tabs.css / ui-ai.css
     ai/
       permission.js                # 统一 permission resolver + audit + path rules
-      store.js                     # agents/messages/quests/attachments 完整内存状态
-      persistence.js               # IndexedDB 完整转录持久化 + localStorage 启动清单
       schema.js                    # tool/output 共用 JSON schema normalize/validate
       contribution-registry.js     # AI contribution exact-owner lifecycle primitive
+      agent/                       # Agent store/request/runtime/orchestration/persistence/compaction/checkpoint/eval
       tool/registry.js             # Tool schema/capability/availability registry
       tool/runtime.js              # tool-call lifecycle + run context helpers
-      context/registry.js          # factual request Context providers
-      skill/                       # Skill registry/runtime/builtins/packages/reference
-      request.js / runtime.js      # request assembly + scheduler/run/resume/tool approval
-      checkpoints.js / evals.js    # 可选恢复检查点 + 基于 trace 的轻量确定性评估
-      reference.js / change-set.js # references/operations + grouped review/apply
-      target.js / rich-prompt.js   # add-to-chat targets + inline references
+      context/                     # factual Context providers + targets + rich prompt
+      skill/                       # Skill registry/read/list/builtins/packages
+      operation/                   # grouped ChangeSet review/apply
+      reference.js                 # references + operation protocol/gateways
       provider*.js / adapter.js    # provider/connection/auth/transport/message tool protocol
       panels/                      # AI panel components(chat/transcript/settings/rich prompt 等)
     extensions/
@@ -231,6 +228,7 @@ aiditor/
 7. **focus mode 有 CSS containing block 限制**(architecture-decisions.md 第 5 条已记录)。aiditor root 的祖先不能有 `transform/filter/perspective/will-change`。
 8. **`addPanel(..., { transient: true })` 自动驱逐同 dock 已有 transient**(architecture-decisions.md 第 4 条框架级预览槽语义)。调用方不用自己写"找到现有 transient 再删"的胶水 —— tree 层已经做了。`LayoutHandle.promotePanel(panelId)` 负责"单击→preview / 双击→固定"的升级路径。
 9. **所有可调常数的唯一存储是 `src/style/theme.css` 的 `--aiditor-*` token**。**不要**在 JS 里新写任何"默认时长 220ms / 默认阈值 6px / icon 映射表"。判据:"JS 要不要对这个值做数值运算?" 否 → CSS `var()`/`calc(var())`/`content: var()`;是 → `aiditor.ui.readNum('--aiditor-xxx', fallback)`。消费者看 `drawer.js` / `interactions.js` / `panel-drag.js` 的写法,不要复制旧习惯。
+10. **多 Tool 审批恢复必须继续同一条 assistant message 的未完成 ToolCall**。不能因为一个调用已审批就直接开启下一 provider Turn,也不能看到仍有 pending 就空返回;批次只有全部进入终态后才能继续模型。ToolCall status 是唯一批次进度,不要再造 cursor/snapshot。
 
 ---
 
@@ -269,7 +267,8 @@ demo/              Host/demo app code, not framework design
 - `src/` 继续保持 IIFE + `window.aiditor` 单命名空间;不写 `import/export`。
 - 新 framework 能力必须进正确层:Core/UI、AI Host、Extension Runtime、Demo Runtime 不能互相偷概念。
 - Extension contribution 发布 dotted public name,但生命周期 owner 是 `extension:<id>`;卸载/禁用用 owner 精确清理。
-- AI Host 的 model-facing 主概念保持 Agent / Skill / Tool / Context Reference / Operation / ChangeSet;Skill 是能力选择面,Tool 是内部执行协议;targets、attachments、rich prompt、quests 是 runtime/UX 细节。
+- AI Host 的 model-facing 主概念保持 Agent / Skill / Tool / Context Reference / Operation / ChangeSet。Skill 是始终可见、可读取的说明与 Tool 组织单元,没有激活/加载状态;`toolDisclosure: always | onRead` 控制 Tool Schema 是默认投影还是在主 `skill.read` 后投影,resource 读取不投影 Tool。默认目录只含 Skill id、描述和 Tool 数量;仅目录预算发生省略时暴露确定性分页 `skill.list`,没有语义 `skill.search`。请求按 `available(ctx)` 过滤,执行仍按 Tool 名字和参数并再次检查当前可用性,Permission 独立于 Skill。targets、attachments、rich prompt、quests 是 runtime/UX 细节。
+- AI Run 默认没有总回合、总 token 或总时长限制;`maxTurns` / `maxTokens` / `timeoutMs` 只来自宿主或委派任务的显式预算,长任务通过 compaction 继续。Tool 参数纠错只在连续纠错链内识别重复失败,合法 Tool 调用必须结束该链,不得跨整个 Run 累计错误后强制终止。
 - 所有组件和 toolbar item 引用 component 都只能用已注册 string name。
 - CSS 可调常数优先放在 `src/style/theme.css` 的 `--aiditor-*` token;JS 只有需要数值计算时用 `aiditor.ui.readNum(...)`。
 

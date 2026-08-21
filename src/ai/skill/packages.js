@@ -11,14 +11,24 @@
     { path: 'scripts', kind: 'script' },
   ]
 
-  function normalizePath(path, label) {
+  function packageError(code, message) {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
+
+  function normalizePath(path, label, code) {
     path = String(path || '').replace(/\\/g, '/')
-    if (path.charAt(0) === '/' || /^[a-z][a-z0-9+.-]*:\/\//i.test(path)) throw new Error(label + ' must be workspace-relative')
+    if (path.charAt(0) === '/' || /^[a-z][a-z0-9+.-]*:\/\//i.test(path)) throw code
+      ? packageError(code, label + ' must be workspace-relative')
+      : new Error(label + ' must be workspace-relative')
     const parts = path.split('/')
     const out = []
     for (let i = 0; i < parts.length; i++) {
       if (!parts[i] || parts[i] === '.') continue
-      if (parts[i] === '..') throw new Error(label + ' cannot traverse outside the package')
+      if (parts[i] === '..') throw code
+        ? packageError(code, label + ' cannot traverse outside the package')
+        : new Error(label + ' cannot traverse outside the package')
       out.push(parts[i])
     }
     return out.join('/')
@@ -72,7 +82,7 @@
       name: name,
       description: description,
       argumentHint: String(data['argument-hint'] || ''),
-      userInvocable: data['user-invocable'] !== false,
+      toolDisclosure: String(data['tool-disclosure'] || 'onRead'),
       body: match[2].trim(),
     }
   }
@@ -134,9 +144,9 @@
       if (resources[i].kind === 'reference') readable[resources[i].path] = resources[i]
     }
     return async function (path) {
-      path = normalizePath(path, 'Skill resource path')
+      path = normalizePath(path, 'Skill resource path', 'SKILL_RESOURCE_PATH_INVALID')
       const resource = readable[path]
-      if (!resource) throw new Error('Skill reference resource not found: ' + path)
+      if (!resource) throw packageError('SKILL_RESOURCE_NOT_FOUND', 'Skill reference resource not found: ' + path)
       const file = await ws.readText(joinPath(root, path))
       return {
         path: path,
@@ -172,19 +182,10 @@
       title: String(input.title || parsed.name),
       description: parsed.description,
       argumentHint: String(input.argumentHint != null ? input.argumentHint : parsed.argumentHint),
-      userInvocable: input.userInvocable == null ? parsed.userInvocable : input.userInvocable !== false,
-      modelInvocable: input.modelInvocable !== false,
-      whenToUse: String(input.whenToUse || parsed.description),
-      whenNotToUse: String(input.whenNotToUse || ''),
-      systemPrompt: parsed.body,
-      rules: Array.isArray(input.rules) ? input.rules.slice() : [],
-      examples: Array.isArray(input.examples) ? input.examples.slice() : [],
+      instructions: parsed.body,
+      toolDisclosure: input.toolDisclosure || parsed.toolDisclosure,
       tools: Array.isArray(input.tools) ? input.tools.slice() : [],
-      relatedApis: Array.isArray(input.relatedApis) ? input.relatedApis.slice() : [],
       resources: resources,
-      docPath: manifestPath,
-      available: input.available,
-      unavailableReason: input.unavailableReason,
       readResource: resourceReader(ws, root, resources),
     }
     const registration = Object.assign({

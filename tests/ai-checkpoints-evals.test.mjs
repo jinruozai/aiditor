@@ -7,15 +7,15 @@ for (const file of [
   'src/core/signal.js',
   'src/core/log.js',
   'src/core/names.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/serialize.js',
   'src/ai/schema.js',
   'src/ai/trace.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
-  'src/ai/persistence.js',
-  'src/ai/checkpoints.js',
-  'src/ai/evals.js',
+  'src/ai/agent/store.js',
+  'src/ai/agent/persistence.js',
+  'src/ai/agent/checkpoints.js',
+  'src/ai/agent/evals.js',
 ]) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 
 const ai = window.aiditor.ai

@@ -5,8 +5,11 @@ description: Develop AIditor Agent, Skill, Tool, Context, provider, permission, 
 
 # AIditor AI Host Authoring
 
-Keep capability selection Skill-only. Tools are internal executable endpoints;
-Context and References provide facts, never Tool authorization. Every
-contribution has an exact Owner. Permission remains centralized and is never
-bypassed by Skill activation. Preserve run-scoped activation across Tool
-continuations and release it on every terminal path.
+Skills are stateless readable instructions and Tool organization. Their
+`toolDisclosure: always | onRead`, explicit selection, and visible main
+`skill.read` ToolCalls determine request-local Tool schema disclosure without
+activation or loaded state. Resource-only reads never project Tools. Tool
+Runtime still rechecks current availability and Permission remains the
+independent authorization boundary. Context and References provide facts, never
+Tool authorization. Every contribution has an exact Owner. Do not add Tool
+visibility flags or Agent capability lists.

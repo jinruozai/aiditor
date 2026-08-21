@@ -51,17 +51,17 @@ const JS_ORDER = [
   'core/context.js',
 
   // Layer 2.5 - AI session/agent runtime (no UI dependency)
-  'ai/name-generator.js',
+  'ai/agent/name-generator.js',
   'ai/i18n.js',
   'ai/serialize.js',
   'ai/schema.js',
   'ai/trace.js',
   'ai/context-pack.js',
   'ai/permission.js',
-  'ai/store.js',
-  'ai/persistence.js',
-  'ai/memory.js',
-  'ai/compaction.js',
+  'ai/agent/store.js',
+  'ai/agent/persistence.js',
+  'ai/agent/memory.js',
+  'ai/agent/compaction.js',
   'ai/connection.js',
   'ai/adapter.js',
   'ai/provider.js',
@@ -84,7 +84,6 @@ const JS_ORDER = [
   'ai/reference.js',
   'ai/api-docs.generated.js',
   'ai/api-reference.js',
-  'ai/skill/reference.js',
 
   // Layer 2.6 - optional extension runtime
   'extensions/manifest.js',
@@ -93,14 +92,14 @@ const JS_ORDER = [
   'extensions/ai.js',
 
   // Layer 2.7 - AI review, targets, request assembly, and runtime
-  'ai/change-set.js',
-  'ai/target.js',
-  'ai/rich-prompt.js',
-  'ai/orchestration.js',
-  'ai/request.js',
-  'ai/runtime.js',
-  'ai/checkpoints.js',
-  'ai/evals.js',
+  'ai/operation/change-set.js',
+  'ai/context/target.js',
+  'ai/context/rich-prompt.js',
+  'ai/agent/orchestration.js',
+  'ai/agent/request.js',
+  'ai/agent/runtime.js',
+  'ai/agent/checkpoints.js',
+  'ai/agent/evals.js',
 
   // Layer 3 - dock runtime
   'dock/runtime.js',
@@ -237,6 +236,7 @@ const JS_ORDER = [
   'ai/panels/rich-prompt-input.js',
   'ai/panels/composer-slash.js',
   'ai/panels/chat.js',
+  'ai/panels/metrics-format.js',
   'ai/panels/message-live-strip.js',
   'ai/panels/message-virtualizer.js',
   'ai/panels/transcript.js',

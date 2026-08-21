@@ -47,12 +47,12 @@ function loadRuntime(storage, location) {
   for (const file of [
     'src/core/signal.js',
     'src/core/log.js',
-    'src/ai/name-generator.js',
+    'src/ai/agent/name-generator.js',
     'src/ai/serialize.js',
     'src/ai/schema.js',
     'src/ai/permission.js',
-    'src/ai/store.js',
-    'src/ai/persistence.js',
+    'src/ai/agent/store.js',
+    'src/ai/agent/persistence.js',
   ]) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
   return { ai: window.aiditor.ai, windowEvents: windowEvents, documentEvents: documentEvents }
 }
@@ -180,7 +180,6 @@ function loadRuntime(storage, location) {
         id: 'agent-v2',
         name: 'Version Two',
         toolRefs: ['legacy.direct-tool'],
-        skillRefs: ['aiditor.workspace-authoring'],
         messages: [{ id: 'message-v2', role: 'user', content: 'preserve this transcript' }],
       }],
       attachments: [],
@@ -195,7 +194,7 @@ function loadRuntime(storage, location) {
 
   const restored = ai.findAgent('agent-v2')
   assert.equal(restored.messages[0].content, 'preserve this transcript')
-  assert.deepEqual(restored.skillRefs, ['aiditor.workspace-authoring'])
+  assert.equal('skillRefs' in restored, false)
   assert.equal(Object.prototype.hasOwnProperty.call(restored, 'toolRefs'), false)
   const migrated = records.get('migrate-v2.ai')
   assert.equal(migrated.state.version, 3)

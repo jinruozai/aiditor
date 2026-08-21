@@ -137,10 +137,14 @@
       toolCall: found.toolCall,
       runId: found.message && found.message.meta && found.message.meta.runId || null,
       signal: signal || null,
+      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
+      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
+      tools: ai.tools,
+      skills: ai.skills,
       canRead: function (scope) { return ai.canRead(actor || found.toolCall.actor || 'user', found.agent.id, scope || 'agent.full') },
       canApply: function () { return toolPermissionDecision(found, actor || found.toolCall.actor || 'user', 'apply').allowed === true },
     }
-    return ctx.runId && ai._runSkillContext ? ai._runSkillContext(ctx.runId, ctx) : ctx
+    return ctx
   }
 
   function toolExecutorId(call) {
@@ -153,14 +157,45 @@
 
   function callToolPhase(agentId, callId, actor, phase, signal) {
     const found = findToolCall(agentId, callId)
-    const tool = found && ai.tools.get(toolExecutorId(found.toolCall))
-    const fn = tool && tool[phase]
-    if (!fn) return null
+    if (!found) return null
     const ctx = createToolContext(found, actor, signal)
     const input = phase === 'apply'
       ? (found.toolCall.result || found.toolCall.preview || toolExecutorArgs(found.toolCall))
       : toolExecutorArgs(found.toolCall)
-    return fn(input, ctx)
+    return invokeTool(toolExecutorId(found.toolCall), input, ctx, phase)
+  }
+
+  function invokeTool(name, args, ctx, phase) {
+    const tool = ai.tools.get(name)
+    if (!tool) {
+      const error = new Error('Tool not found: ' + name)
+      error.code = 'TOOL_NOT_FOUND'
+      throw error
+    }
+    if (!ai.tools.available(name, ctx || {})) {
+      const error = new Error('Tool is not currently available: ' + name)
+      error.code = 'TOOL_UNAVAILABLE'
+      throw error
+    }
+    const method = phase || 'run'
+    const fn = tool[method]
+    if (!fn) {
+      const error = new Error('Tool does not support phase "' + method + '": ' + name)
+      error.code = 'TOOL_PHASE_UNAVAILABLE'
+      throw error
+    }
+    if (method !== 'apply') {
+      const validation = ai.schema.validate(args, ai.tools.schema(name, ctx || {}))
+      if (!validation.valid) {
+        const first = validation.error
+        const error = new Error('Tool arguments do not match the schema for "' + name + '" at ' + first.path + ': ' + first.message)
+        error.code = 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+        error.toolName = name
+        error.schemaErrors = validation.errors
+        throw error
+      }
+    }
+    return fn(args, ctx || {})
   }
 
   function invokeToolPhase(agentId, callId, actor, phase, options) {
@@ -194,19 +229,6 @@
     return serialize(value)
   }
 
-  function errorCode(message) {
-    const text = String(message || '')
-    if (/baseHash mismatch/i.test(text)) return 'BASE_HASH_MISMATCH'
-    if (/permission denied/i.test(text)) return 'PERMISSION_DENIED'
-    if (/workspace.*not available|workspace.*required|No AI workspace/i.test(text)) return 'WORKSPACE_REQUIRED'
-    if (/file not found|path not found/i.test(text)) return 'FILE_NOT_FOUND'
-    if (/invalid JSON/i.test(text)) return 'INVALID_JSON'
-    if (/invalid JavaScript|syntax error/i.test(text)) return 'INVALID_JAVASCRIPT'
-    if (/not found/i.test(text)) return 'NOT_FOUND'
-    if (/not allowed|not available/i.test(text)) return 'NOT_ALLOWED'
-    return 'TOOL_FAILED'
-  }
-
   function recoverHint(code, toolId) {
     if (code === 'BASE_HASH_MISMATCH') return 'Read the current resource again, then retry with the new hash.'
     if (code === 'WORKSPACE_REQUIRED') return 'Ask the user to open or select a workspace before writing files.'
@@ -222,21 +244,16 @@
     return ''
   }
 
-  function failureEnvelope(toolId, phase, value) {
+  function failureEnvelope(toolId, value) {
     const message = errorMessage(value, 'Tool failed')
-    const code = value && value.code ? String(value.code) : errorCode(message)
+    const code = value && value.code ? String(value.code) : 'TOOL_FAILED'
     const out = {
       ok: false,
       code: code,
       message: message,
-      error: message,
-      toolId: toolId || '',
-      phase: phase || 'run',
-      recoverable: code !== 'PERMISSION_DENIED' && code !== 'TOOL_CANCELLED',
     }
     const hint = value && value.hint ? String(value.hint) : recoverHint(code, toolId)
     if (hint) out.hint = hint
-    if (value && typeof value === 'object') out.details = value
     return out
   }
 
@@ -246,7 +263,7 @@
 
   function failToolExecution(agentId, callId, found, err, phase, executionId, expectedStatus) {
     if (err && err.code !== 'TOOL_CANCELLED' && aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: found.toolCall.toolId }, err)
-    const envelope = failureEnvelope(found.toolCall.toolId, phase || 'run', err)
+    const envelope = failureEnvelope(found.toolCall.toolId, err)
     const patch = { status: 'failed', error: envelope.message, errorDetails: envelope }
     if (phase === 'preview') patch.preview = envelope
     else if (phase === 'apply') patch.applyResult = envelope
@@ -406,7 +423,7 @@
   function failToolCall(agentId, callId, value, phase) {
     const found = findToolCall(agentId, callId)
     if (!found) return null
-    const envelope = failureEnvelope(found.toolCall.toolId, phase || 'run', value)
+    const envelope = failureEnvelope(found.toolCall.toolId, value)
     traceTool(found, 'tool_completed', 'failed', envelope.message)
     return updateToolCall(agentId, callId, {
       status: 'failed',
@@ -431,7 +448,7 @@
         const promise = Promise.resolve(result).then(function (done) {
           if (resultFailed(done)) {
             traceTool(found, 'tool_preview_completed', 'failed', previewFailureMessage(done))
-            return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: done, error: previewFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', done) })
+            return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: done, error: previewFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, done) })
           }
           traceTool(found, 'tool_preview_completed', 'previewed', found.toolCall.toolId)
           return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'previewed', preview: done, error: null })
@@ -443,7 +460,7 @@
       }
       if (resultFailed(result)) {
         traceTool(found, 'tool_preview_completed', 'failed', previewFailureMessage(result))
-        return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: result, error: previewFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', result) })
+        return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: result, error: previewFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, result) })
       }
       traceTool(found, 'tool_preview_completed', 'previewed', found.toolCall.toolId)
       return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'previewed', preview: result, error: null })
@@ -482,7 +499,7 @@
     }).then(function (result) {
       if (resultFailed(result)) {
         traceTool(found, 'tool_run_completed', 'failed', errorMessage(result))
-        return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'failed', result: result, error: errorMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'run', result) })
+        return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'failed', result: result, error: errorMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, result) })
       }
       traceTool(found, 'tool_run_completed', 'completed', found.toolCall.toolId)
       return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'completed', result: result, error: null })
@@ -505,13 +522,13 @@
         traceTool(found, 'tool_apply_completed', applySucceeded(result) ? 'applied' : 'failed', applySucceeded(result) ? found.toolCall.toolId : applyFailureMessage(result))
         return applySucceeded(result)
           ? settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'applied', applyResult: result, error: null })
-          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: result, error: applyFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', result) })
+          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: result, error: applyFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, result) })
       }
       const promise = Promise.resolve(result).then(function (done) {
         traceTool(found, 'tool_apply_completed', applySucceeded(done) ? 'applied' : 'failed', applySucceeded(done) ? found.toolCall.toolId : applyFailureMessage(done))
         return applySucceeded(done)
           ? settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'applied', applyResult: done, error: null })
-          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: done, error: applyFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', done) })
+          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: done, error: applyFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, done) })
       }, function (err) {
         traceTool(found, 'tool_apply_completed', 'failed', errorMessage(err))
         return failToolExecution(agentId, callId, found, err, 'apply', execution.executionId, 'applying')
@@ -540,7 +557,7 @@
             executionId: null,
             approvalPhase: null,
             error: error,
-            errorDetails: failureEnvelope(call.toolId, 'run', { code: 'TOOL_CANCELLED', message: error }),
+            errorDetails: failureEnvelope(call.toolId, { code: 'TOOL_CANCELLED', message: error }),
             updatedAt: Date.now(),
           })
         })
@@ -586,4 +603,5 @@
   ai.failToolCall = failToolCall
   ai.cancelRunToolCalls = cancelRunToolCalls
   ai.createRunContext = createRunContext
+  ai.tools.invoke = invokeTool
 })(window.aiditor = window.aiditor || {})

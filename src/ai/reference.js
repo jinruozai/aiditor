@@ -21,7 +21,6 @@
   function inferResolver(uri, kind) {
     const text = String(uri || '')
     if (text === 'aiditor://api' || text.indexOf('aiditor://api/') === 0) return 'api'
-    if (text === 'aiditor://skills' || text.indexOf('aiditor://skills/') === 0) return 'skills'
     if (text === 'aiditor://host' || text.indexOf('aiditor://host/') === 0) return 'editor'
     const idx = text.indexOf('://')
     if (idx > 0) return text.slice(0, idx)
@@ -238,7 +237,15 @@
     if (title.indexOf(needle) >= 0) return 250
     if (uri.indexOf(needle) >= 0) return 100
     if (summary.indexOf(needle) >= 0) return 50
-    return 0
+    const terms = needle.split(/\s+/).filter(Boolean)
+    let score = 0
+    for (let i = 0; i < terms.length; i++) {
+      if (title.indexOf(terms[i]) >= 0) score += 25
+      else if (uri.indexOf(terms[i]) >= 0) score += 10
+      else if (summary.indexOf(terms[i]) >= 0) score += 5
+      else return 0
+    }
+    return score
   }
 
   function selectedReferences(ctx) {
@@ -641,7 +648,6 @@
     ai.tools.register('aiditor.previewOperation', {
       title: 'Preview Editor Operation',
       description: 'Preview a registered editor operation. Never apply invalid previews; repair input from returned validation errors.',
-      exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
       resolveModelSpecs: function () { return [] },
@@ -658,7 +664,6 @@
     ai.tools.register('aiditor.applyOperation', {
       title: 'Apply Editor Operation',
       description: 'Preview and apply a registered editor operation through the host transaction bridge.',
-      exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
       resolveModelSpecs: function (ctx) { return operationModelSpecs(ctx) },

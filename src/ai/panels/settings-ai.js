@@ -23,6 +23,14 @@
       description: 'Connection used by newly created agents.',
       order: 10,
     },
+    {
+      key: 'ai.debug.logProviderRequest',
+      label: 'Debug Mode',
+      type: 'boolean',
+      default: false,
+      description: 'Print the complete request body sent to the AI provider in the browser console.',
+      order: 20,
+    },
   ])
 
   aiditor.effect(function () {
@@ -76,6 +84,12 @@
     ui.collect(root, aiditor.effect(function () {
       selected()
       renderConnectionDetail(detail, selected, root)
+    }))
+    root.appendChild(settingSwitch({
+      key: 'ai.debug.logProviderRequest',
+      label: 'Debug Mode',
+      defaultValue: false,
+      desc: 'Print the complete request body sent to the AI provider in the browser console. Use for local debugging only.',
     }))
 
     return root

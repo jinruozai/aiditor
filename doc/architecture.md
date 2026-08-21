@@ -150,8 +150,8 @@ The public AI model has six concepts:
 
 ```text
 Agent             conversation, memory, runtime state
-Skill             discoverable focused capability
-Tool              Skill-owned executable action
+Skill             discoverable instructions and Tool grouping
+Tool              Skill-grouped executable action
 Context Reference stable pointer to readable bounded context
 Operation         previewable/applyable mutation
 ChangeSet         grouped review/apply container

@@ -2,6 +2,7 @@
   'use strict'
 
   const ui = aiditor.ui
+  const format = aiditor.ai.metricFormat
 
   function read(v) {
     return ui.isSignal(v) ? v() : v
@@ -122,28 +123,21 @@
     return 0
   }
 
-  function formatDuration(ms) {
-    if (!ms || ms < 0) return ''
-    if (ms < 1000) return String(Math.max(1, Math.round(ms))) + ' ms'
-    if (ms < 10000) return (ms / 1000).toFixed(1).replace(/\.0$/, '') + ' s'
-    return String(Math.round(ms / 1000)) + ' s'
-  }
-
   function metricText(msg) {
     const parts = []
     const ms = durationMs(msg)
-    if (ms) parts.push(formatDuration(ms))
+    if (ms) parts.push(format.duration(ms))
     const stats = msg.stats || msg.meta || {}
-    if (stats.ttftMs > 0) parts.push('TTFT ' + formatDuration(stats.ttftMs))
+    if (stats.ttftMs > 0) parts.push('TTFT ' + format.duration(stats.ttftMs))
     const usage = usageOf(msg)
     const out = usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
     const total = usageNumber(usage, ['total_tokens', 'totalTokens'])
-    if (total) parts.push(String(total) + ' tok')
-    else if (out) parts.push(String(out) + ' out')
+    if (total) parts.push(format.tokens(total) + ' tok')
+    else if (out) parts.push(format.tokens(out) + ' out')
     const speedMs = (stats.generationMs > 0 ? stats.generationMs : ms)
-    if (out && speedMs) parts.push((out / Math.max(speedMs / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
+    if (out && speedMs) parts.push(format.rate(out / Math.max(speedMs / 1000, 0.001)) + ' tok/s')
     const cost = msg.stats && msg.stats.cost
-    if (cost && cost.amount > 0) parts.push(formatCost(cost))
+    if (cost && cost.amount > 0) parts.push(format.cost(cost))
     return parts.join(' · ')
   }
 
@@ -193,19 +187,12 @@
     const metrics = info && info.metrics
     if (!metrics) return fallback || ''
     const parts = []
-    if (metrics.durationMs) parts.push(formatDuration(metrics.durationMs))
-    if (metrics.totalTokens) parts.push(String(metrics.totalTokens) + ' tok')
-    else if (metrics.outputTokens) parts.push(String(metrics.outputTokens) + ' out')
-    if (metrics.tokensPerSecond > 0) parts.push(metrics.tokensPerSecond.toFixed(1).replace(/\.0$/, '') + ' tok/s')
-    if (metrics.cost && metrics.cost.amount > 0) parts.push(formatCost(metrics.cost))
+    if (metrics.durationMs) parts.push(format.duration(metrics.durationMs))
+    if (metrics.totalTokens) parts.push(format.tokens(metrics.totalTokens) + ' tok')
+    else if (metrics.outputTokens) parts.push(format.tokens(metrics.outputTokens) + ' out')
+    if (metrics.tokensPerSecond > 0) parts.push(format.rate(metrics.tokensPerSecond) + ' tok/s')
+    if (metrics.cost && metrics.cost.amount > 0) parts.push(format.cost(metrics.cost))
     return parts.join(' · ') || fallback || ''
-  }
-
-  function formatCost(cost) {
-    const n = Number(cost.amount || 0)
-    if (!n) return ''
-    const digits = n < 0.0001 ? 6 : (n < 0.01 ? 5 : 4)
-    return '$' + n.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '')
   }
 
   function textPartItems(text) {
@@ -337,7 +324,7 @@
     row.appendChild(ui.h('span', 'aiditor-ai-quest-agent', { text: quest.agentId }))
     row.appendChild(ui.h('span', 'aiditor-ai-quest-status', { text: quest.status }))
     row.appendChild(ui.h('span', 'aiditor-ai-quest-id', { text: quest.questId }))
-    if (quest.completedAt && quest.createdAt) row.appendChild(ui.h('span', 'aiditor-ai-quest-time', { text: formatDuration(quest.completedAt - quest.createdAt) }))
+    if (quest.completedAt && quest.createdAt) row.appendChild(ui.h('span', 'aiditor-ai-quest-time', { text: format.duration(quest.completedAt - quest.createdAt) }))
     if (quest.resultId) {
       row.appendChild(ui.button({
         text: 'View result',

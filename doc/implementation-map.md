@@ -66,35 +66,34 @@ preserved or deliberately replaced.
 
 | Source | Document | Notes |
 | --- | --- | --- |
-| `src/ai/name-generator.js` | [ai-runtime.md](./ai-runtime.md) | Agent name generation. |
+| `src/ai/agent/name-generator.js` | [ai-runtime.md](./ai-runtime.md) | Agent name generation. |
 | `src/ai/i18n.js` | [ai-runtime.md](./ai-runtime.md) | Built-in AI Host UI dictionaries; Core i18n and the host own locale selection. |
 | `src/ai/schema.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | Shared JSON-schema normalization, concrete tagged-union diagnostics, strict Tool wire-schema compilation, and structured-output parsing. |
 | `src/ai/serialize.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | JSON-safe cloning plus canonical summaries and stable hashes for bounded AI diagnostics. |
 | `src/ai/permission.js` | [ai-permission-policy.md](./ai-permission-policy.md), [ai-runtime.md](./ai-runtime.md) | Permission resolver, default hierarchy policy, path rules, and audit log. |
 | `src/ai/tool/scheduler.js` | [ai-runtime.md](./ai-runtime.md) | Ordered Tool parallel groups, exclusive barriers, execution deadline, and cooperative cancellation. |
-| `src/ai/store.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Complete in-memory Agent/message/quest state, JSON-safe snapshots, mutation version, attachments, and permission-scoped read facades. |
-| `src/ai/persistence.js` | [ai-persistence.md](./ai-persistence.md) | Complete IndexedDB transcript persistence, bootstrap manifest, async hydration merge, serialized saves, and storage adapters. |
-| `src/ai/compaction.js` | [ai-context-compaction.md](./ai-context-compaction.md), [ai-runtime.md](./ai-runtime.md) | Semantic compaction records, safe range planning, request filtering, and compaction context messages. |
-| `src/ai/runtime.js` | [ai-runtime.md](./ai-runtime.md) | Scheduler, runs, resume, Tool approval, canonical projection routing, batch argument fidelity, and bounded same-run correction. |
-| `src/ai/checkpoints.js` | [ai-persistence.md](./ai-persistence.md) | Optional runtime checkpoint policy using the shared async storage adapter contract. |
-| `src/ai/evals.js` | [ai-evals.md](./ai-evals.md) | Sequential deterministic eval cases, evaluators, reports, and trace association. |
-| `src/ai/orchestration.js` | [ai-runtime.md](./ai-runtime.md) | Agent, quest, message tools. |
-| `src/ai/request.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-assembly.md](./ai-context-assembly.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Runtime request assembly: context cards, attachments, compaction, tool visibility, and budgeted transcript fallback. |
+| `src/ai/agent/store.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Complete in-memory Agent/message/quest state, JSON-safe snapshots, mutation version, attachments, and permission-scoped read facades. |
+| `src/ai/agent/persistence.js` | [ai-persistence.md](./ai-persistence.md) | Complete IndexedDB transcript persistence, bootstrap manifest, async hydration merge, serialized saves, and storage adapters. |
+| `src/ai/agent/compaction.js` | [ai-context-compaction.md](./ai-context-compaction.md), [ai-runtime.md](./ai-runtime.md) | Semantic compaction records, safe range planning, request filtering, and compaction context messages. |
+| `src/ai/agent/runtime.js` | [ai-runtime.md](./ai-runtime.md) | Scheduler, unlimited-by-default Runs, explicit budgets, resume, Tool approval, canonical projection routing, batch argument fidelity, and consecutive correction-chain protection. |
+| `src/ai/agent/checkpoints.js` | [ai-persistence.md](./ai-persistence.md) | Optional runtime checkpoint policy using the shared async storage adapter contract. |
+| `src/ai/agent/evals.js` | [ai-evals.md](./ai-evals.md) | Sequential deterministic eval cases, evaluators, reports, and trace association. |
+| `src/ai/agent/orchestration.js` | [ai-runtime.md](./ai-runtime.md) | Agent, quest, message tools. |
+| `src/ai/agent/request.js` | [ai-runtime.md](./ai-runtime.md), [ai-context-assembly.md](./ai-context-assembly.md), [ai-context-compaction.md](./ai-context-compaction.md), [ai-registries.md](./ai-registries.md) | Runtime request assembly: default/overridden system prompt, bounded Skill catalog, request-local Tool schema projection, explicit Skill instructions, factual context, attachments, and budgeted transcript. |
 | `src/ai/message-markdown.js` | [ai-message-rendering.md](./ai-message-rendering.md), [ai-runtime.md](./ai-runtime.md) | Safe zero-dependency Markdown rendering for ordinary model text, including stable streaming patching. |
 | `src/ai/message-renderers.js` | [ai-message-rendering.md](./ai-message-rendering.md), [ai-runtime.md](./ai-runtime.md) | Normalized message parts, built-in transcript part renderers, copy text, and host renderer extension points. |
 | `src/ai/contribution-registry.js` | [ai-registries.md](./ai-registries.md) | Shared exact-owner contribution lifecycle. |
 | `src/ai/tool/registry.js` | [ai-runtime.md](./ai-runtime.md), [ai-registries.md](./ai-registries.md) | Tool schema, capability, availability, and metadata registry. |
 | `src/ai/tool/runtime.js` | [ai-runtime.md](./ai-runtime.md) | Tool-call lifecycle and run context helpers. |
 | `src/ai/context/registry.js` | [ai-context-assembly.md](./ai-context-assembly.md) | Factual Context provider registry and capture. |
-| `src/ai/skill/registry.js` | [ai-skills.md](./ai-skills.md) | SkillSpec normalization, availability, catalog, and exact-owner lifecycle. |
-| `src/ai/skill/runtime.js` | [ai-skills.md](./ai-skills.md) | Model `skill.list` and run-scoped `skill.activate` controls. |
+| `src/ai/skill/registry.js` | [ai-skills.md](./ai-skills.md) | Stateless SkillSpec normalization, complete catalog, search/read, resources, and exact-owner lifecycle. |
+| `src/ai/skill/runtime.js` | [ai-skills.md](./ai-skills.md) | Model-facing `skill.read` and deterministic overflow-only `skill.list` Tools. |
 | `src/ai/skill/builtins.js` | [ai-skills.md](./ai-skills.md) | Complete non-overlapping framework Skill taxonomy. |
 | `src/ai/skill/packages.js` | [ai-skills.md](./ai-skills.md) | Bounded workspace `SKILL.md` package loading and on-demand reference access. |
-| `src/ai/skill/reference.js` | [ai-skills.md](./ai-skills.md) | Skill catalog and package reference projection. |
 | `src/ai/reference.js` | [ai-registries.md](./ai-registries.md), [ai.md](./ai.md) | Reference/operation protocol and direct request-local Operation Tool projections routed through the canonical preview/apply lifecycle. |
-| `src/ai/target.js` | [ai-registries.md](./ai-registries.md) | Add-to-chat targets, drag/drop, file targets. |
-| `src/ai/rich-prompt.js` | [ai-registries.md](./ai-registries.md), [ai-skills.md](./ai-skills.md) | Inline references and explicit Skill tokens in prompt text. |
-| `src/ai/change-set.js` | [ai-registries.md](./ai-registries.md) | Grouped review and apply/reject. |
+| `src/ai/context/target.js` | [ai-registries.md](./ai-registries.md) | Add-to-chat targets, drag/drop, file targets. |
+| `src/ai/context/rich-prompt.js` | [ai-registries.md](./ai-registries.md), [ai-skills.md](./ai-skills.md) | Inline references and explicit Skill tokens in prompt text. |
+| `src/ai/operation/change-set.js` | [ai-registries.md](./ai-registries.md) | Grouped review and apply/reject. |
 | `src/ai/workdir.js` | [workspace.md](./workspace.md), [workspace-precise-editing.md](./workspace-precise-editing.md), [agent-workspace-editing.md](./agent-workspace-editing.md) | Workspace module tool contributions; mutating tools should consume Core operation preview/apply instead of defining separate file semantics. |
 
 ## Outside Framework Bundle
@@ -134,5 +133,6 @@ preserved or deliberately replaced.
 | `src/ai/panels/chat.js` | [ai-runtime.md](./ai-runtime.md), [ai-registries.md](./ai-registries.md) | AI module component for chat input. |
 | `src/ai/panels/transcript.js` | [ai-runtime.md](./ai-runtime.md) | AI module component for message transcript. |
 | `src/ai/panels/chat-combined.js` | [ai-runtime.md](./ai-runtime.md) | AI module component for combined chat. |
+| `src/ai/panels/metrics-format.js` | [ai-runtime.md](./ai-runtime.md) | Shared compact presentation formatting for duration, token, rate, and cost metrics. |
 | `src/ai/panels/message-live-strip.js` | [ai-runtime.md](./ai-runtime.md), [provider.md](./provider.md) | AI module component for live run preview. |
 | `src/ai/panels/message-virtualizer.js` | [ai-runtime.md](./ai-runtime.md) | Transcript rendering performance. |

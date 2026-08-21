@@ -146,7 +146,7 @@
   }
 
   function createAgent(parentAgentId) {
-      aiditor.ai.createAgent({ parentAgentId: parentAgentId || null, skillRefs: ['aiditor.agent-orchestration'] })
+      aiditor.ai.createAgent({ parentAgentId: parentAgentId || null })
   }
 
   function renameNode(node) {

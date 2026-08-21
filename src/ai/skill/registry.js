@@ -1,17 +1,35 @@
-// AI Host discoverable Skill registry.
+// AI Host Skill registry. Skills are readable instructions; they have no activation state.
 ;(function (aiditor) {
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
-  const defaultRefsByOwner = {}
+  const TOOL_DISCLOSURES = ['always', 'onRead']
+
+  function skillError(code, message) {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
 
   function stringList(value, field) {
     if (value == null) return []
     if (!Array.isArray(value)) throw new Error('Invalid skill ' + field + ': expected array')
-    return value.map(function (item) { return String(item) })
+    const out = []
+    for (let i = 0; i < value.length; i++) {
+      const item = String(value[i])
+      if (out.indexOf(item) >= 0) throw new Error('Invalid skill ' + field + ': duplicate "' + item + '"')
+      out.push(item)
+    }
+    return out
   }
 
-  function resources(value) {
+  function toolDisclosure(value) {
+    const disclosure = String(value || 'onRead')
+    if (TOOL_DISCLOSURES.indexOf(disclosure) < 0) throw new Error('Invalid skill toolDisclosure: ' + disclosure)
+    return disclosure
+  }
+
+  function normalizeResources(value) {
     if (value == null) return []
     if (!Array.isArray(value)) throw new Error('Invalid skill resources: expected array')
     return value.map(function (item) {
@@ -28,10 +46,14 @@
 
   function fingerprint(name, skill) {
     const text = JSON.stringify([
-      name, skill.title, skill.description, skill.argumentHint,
-      skill.userInvocable, skill.modelInvocable, skill.whenToUse,
-      skill.whenNotToUse, skill.systemPrompt, skill.rules, skill.examples,
-      skill.tools, skill.relatedApis, skill.resources,
+      name,
+      skill.title,
+      skill.description,
+      skill.argumentHint,
+      skill.instructions,
+      skill.toolDisclosure,
+      skill.tools,
+      skill.resources,
     ])
     let hash = 2166136261
     for (let i = 0; i < text.length; i++) {
@@ -43,28 +65,18 @@
 
   function normalize(name, skill) {
     if (!skill || typeof skill !== 'object' || Array.isArray(skill)) throw new Error('Invalid skill "' + name + '"')
-    if (skill.auto != null) throw new Error('Invalid skill "' + name + '": auto activation is not supported')
-    if (skill.available != null && typeof skill.available !== 'function') throw new Error('Invalid skill available predicate: ' + name)
-    if (skill.unavailableReason != null && typeof skill.unavailableReason !== 'function' && typeof skill.unavailableReason !== 'string')
-      throw new Error('Invalid skill unavailableReason: ' + name)
     if (skill.readResource != null && typeof skill.readResource !== 'function') throw new Error('Invalid skill resource reader: ' + name)
-    return Object.assign({}, skill, {
+    return {
       id: name,
       title: String(skill.title || name),
       description: String(skill.description || ''),
       argumentHint: String(skill.argumentHint || ''),
-      userInvocable: skill.userInvocable !== false,
-      modelInvocable: skill.modelInvocable !== false,
-      whenToUse: String(skill.whenToUse || ''),
-      whenNotToUse: String(skill.whenNotToUse || ''),
-      systemPrompt: String(skill.systemPrompt || ''),
-      rules: stringList(skill.rules, 'rules'),
-      examples: Array.isArray(skill.examples) ? skill.examples.slice() : [],
+      instructions: String(skill.instructions || ''),
+      toolDisclosure: toolDisclosure(skill.toolDisclosure),
       tools: stringList(skill.tools, 'tools'),
-      relatedApis: stringList(skill.relatedApis, 'relatedApis'),
-      resources: resources(skill.resources),
-      docPath: String(skill.docPath || ''),
-    })
+      resources: normalizeResources(skill.resources),
+      readResource: skill.readResource || null,
+    }
   }
 
   const registry = ai._contributionRegistry.create('ai.skills', {
@@ -73,133 +85,69 @@
     meta: function (name, skill, meta, raw) {
       const out = Object.assign({}, meta)
       out.source = String(raw.source || meta.source || meta.layer || 'runtime')
-      out.hash = String(raw.hash || skill.hash || fingerprint(name, skill))
+      out.hash = String(raw.hash || fingerprint(name, skill))
       return out
     },
   })
-  const unregisterRegistryOwner = registry.unregisterOwner
 
-  function availability(name, ctx) {
-    const skill = registry.get(name)
-    if (!skill) return { available: false, reason: 'Skill is not registered.' }
-    let available = true
-    if (skill.available) {
-      const value = aiditor.safeCall
-        ? aiditor.safeCall({ scope: 'ai.skill', skill: name, phase: 'available' }, function () { return skill.available(ctx || {}) })
-        : skill.available(ctx || {})
-      available = value === true
+  function entry(id) {
+    const skill = registry.get(id)
+    if (!skill) return null
+    const meta = registry.meta(id) || {}
+    return {
+      id: id,
+      title: skill.title,
+      description: skill.description,
+      argumentHint: skill.argumentHint,
+      toolDisclosure: skill.toolDisclosure,
+      tools: skill.tools.slice(),
+      resources: skill.resources.slice(),
+      owner: meta.owner || '',
+      layer: meta.layer || '',
+      source: meta.source || '',
+      hash: meta.hash || '',
     }
-    if (available) return { available: true, reason: '' }
-    let reason = skill.unavailableReason || 'Required runtime capability is unavailable.'
-    if (typeof reason === 'function') {
-      reason = aiditor.safeCall
-        ? aiditor.safeCall({ scope: 'ai.skill', skill: name, phase: 'unavailableReason' }, function () { return reason(ctx || {}) })
-        : reason(ctx || {})
+  }
+
+  function catalog() {
+    return registry.list().slice().sort().map(entry)
+  }
+
+  function page(cursor, limit) {
+    const match = cursor == null || cursor === '' ? null : /^skill:(\d+)$/.exec(String(cursor))
+    if (cursor != null && cursor !== '' && !match) throw skillError('SKILL_CURSOR_INVALID', 'Invalid Skill cursor')
+    const offset = match ? Number(match[1]) : 0
+    const max = limit == null ? 20 : Number(limit)
+    if (!Number.isInteger(max) || max < 1 || max > 20) throw skillError('SKILL_PAGE_LIMIT_INVALID', 'Invalid Skill page limit')
+    const entries = catalog()
+    const items = entries.slice(offset, offset + max)
+    const next = offset + items.length
+    return {
+      items: items,
+      total: entries.length,
+      nextCursor: next < entries.length ? 'skill:' + next : null,
     }
-    return { available: false, reason: String(reason || 'Required runtime capability is unavailable.') }
   }
 
-  function catalog(ctx, options) {
-    options = options || {}
-    const audience = options.audience === 'user' ? 'user' : 'model'
-    const query = String(options.query || '').trim().toLowerCase()
-    const limit = Math.max(1, Math.min(Number(options.limit) || 50, 100))
-    const out = []
-    const active = ctx && Array.isArray(ctx.skillRefs) ? ctx.skillRefs : []
-    const ids = registry.list().slice().sort()
-    for (let i = 0; i < ids.length; i++) {
-      const skill = registry.get(ids[i])
-      if (audience === 'user' ? !skill.userInvocable : !skill.modelInvocable) continue
-      const text = [ids[i], skill.title, skill.description, skill.whenToUse, skill.whenNotToUse].join('\n').toLowerCase()
-      if (query && text.indexOf(query) < 0) continue
-      const state = availability(ids[i], ctx)
-      const meta = registry.meta(ids[i])
-      out.push({
-        id: ids[i],
-        title: skill.title,
-        description: skill.description,
-        whenToUse: skill.whenToUse,
-        argumentHint: skill.argumentHint,
-        tools: skill.tools.slice(),
-        source: meta.source || '',
-        owner: meta.owner || '',
-        layer: meta.layer || '',
-        available: state.available,
-        unavailableReason: state.reason,
-      })
+  function read(id, resource) {
+    const skill = registry.get(id)
+    if (!skill) throw skillError('SKILL_NOT_FOUND', 'Skill not found: ' + id)
+    if (resource) {
+      if (!skill.readResource) throw skillError('SKILL_RESOURCE_UNAVAILABLE', 'Skill has no readable resources: ' + id)
+      return Promise.resolve(skill.readResource(String(resource)))
     }
-    out.sort(function (left, right) {
-      const leftActive = active.indexOf(left.id) >= 0
-      const rightActive = active.indexOf(right.id) >= 0
-      if (leftActive !== rightActive) return leftActive ? -1 : 1
-      const leftHost = left.layer === 'module' || left.layer === 'app' || left.layer === 'workspace'
-      const rightHost = right.layer === 'module' || right.layer === 'app' || right.layer === 'workspace'
-      if (leftHost !== rightHost) return leftHost ? -1 : 1
-      if (left.available !== right.available) return left.available ? -1 : 1
-      return left.id.localeCompare(right.id)
-    })
-    return out.slice(0, limit)
-  }
-
-  function configureDefaults(refs, meta) {
-    const owner = String(meta && meta.owner || '')
-    if (!owner) throw new Error('ai.skills.configureDefaults: owner is required')
-    if (!Array.isArray(refs)) throw new Error('ai.skills.configureDefaults: refs must be an array')
-    const out = []
-    const seen = {}
-    for (let i = 0; i < refs.length; i++) {
-      const id = String(refs[i] || '')
-      if (!id || seen[id]) continue
-      const skill = registry.get(id)
-      if (!skill || skill.modelInvocable === false) throw new Error('ai.skills.configureDefaults: Skill is not model-invocable: ' + id)
-      seen[id] = true
-      out.push(id)
+    return {
+      id: id,
+      instructions: skill.instructions,
+      resources: skill.resources.map(function (item) {
+        return { path: item.path, kind: item.kind }
+      }),
     }
-    defaultRefsByOwner[owner] = out
-    return out.slice()
-  }
-
-  function clearDefaults(meta) {
-    const owner = String(meta && meta.owner || '')
-    if (!owner) throw new Error('ai.skills.clearDefaults: owner is required')
-    const existed = Object.prototype.hasOwnProperty.call(defaultRefsByOwner, owner)
-    delete defaultRefsByOwner[owner]
-    return existed
-  }
-
-  function defaults() {
-    const out = []
-    const seen = {}
-    const owners = Object.keys(defaultRefsByOwner).sort()
-    for (let i = 0; i < owners.length; i++) {
-      const refs = defaultRefsByOwner[owners[i]]
-      for (let j = 0; j < refs.length; j++) {
-        if (seen[refs[j]]) continue
-        seen[refs[j]] = true
-        out.push(refs[j])
-      }
-    }
-    return out
-  }
-
-  function unregisterOwner(owner) {
-    delete defaultRefsByOwner[String(owner || '')]
-    return unregisterRegistryOwner(owner)
-  }
-
-  if (aiditor.runtime && aiditor.runtime.registerOwnerCleanup) {
-    aiditor.runtime.registerOwnerCleanup(function (owner) {
-      delete defaultRefsByOwner[String(owner || '')]
-      return {}
-    })
   }
 
   ai.skills = Object.assign(registry, {
-    availability: availability,
     catalog: catalog,
-    configureDefaults: configureDefaults,
-    clearDefaults: clearDefaults,
-    defaults: defaults,
-    unregisterOwner: unregisterOwner,
+    page: page,
+    read: read,
   })
 })(window.aiditor = window.aiditor || {})

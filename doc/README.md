@@ -158,7 +158,7 @@ standalone alternatives and must not be combined with Kernel/Core/Full.
 - [file-browser.md](./file-browser.md): neutral file browsing, lazy trees, and external file/directory drop normalization.
 - [ai.md](./ai.md): optional AI Host and the public AI concept model.
 - [ai-runtime.md](./ai-runtime.md): agents, skills, messages, queues, live run state, compaction, and persistence.
-- [ai-skills.md](./ai-skills.md): SkillSpec, activation attribution, owner lifecycle, progressive disclosure, and bounded `SKILL.md` packages.
+- [ai-skills.md](./ai-skills.md): stateless SkillSpec, complete compact catalog, read/search, owner lifecycle, and bounded `SKILL.md` packages.
 - [ai-persistence.md](./ai-persistence.md): complete IndexedDB transcript persistence, bootstrap metadata, hydration, and adapter contract.
 - [ai-evals.md](./ai-evals.md): deterministic case/evaluator runner over Agent outputs and compact traces.
 - [ai-permission-policy.md](./ai-permission-policy.md): unified permission resolver, audit, and always-allow policy.

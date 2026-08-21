@@ -8,14 +8,14 @@ for (const file of [
   'src/core/signal.js',
   'src/core/log.js',
   'src/core/names.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/serialize.js',
   'src/ai/schema.js',
   'src/ai/trace.js',
   'src/ai/context-pack.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
-  'src/ai/persistence.js',
+  'src/ai/agent/store.js',
+  'src/ai/agent/persistence.js',
   'src/ai/connection.js',
   'src/ai/adapter.js',
   'src/ai/provider.js',
@@ -26,8 +26,8 @@ for (const file of [
   'src/ai/skill/registry.js',
   'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
-  'src/ai/request.js',
-  'src/ai/runtime.js',
+  'src/ai/agent/request.js',
+  'src/ai/agent/runtime.js',
 ]) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 
 const ai = window.aiditor.ai
@@ -80,12 +80,11 @@ assert.equal(current.status, 'failed')
 ai.tools.register('structured.read', {
   run: function () { return { value: 2 } },
 }, { owner: 'test:output' })
-ai.skills.register('test.structured-output', { title: 'Structured Output', tools: ['structured.read'] }, { owner: 'test:output' })
+ai.skills.register('test.structured-output', { title: 'Structured Output', toolDisclosure: 'always', tools: ['structured.read'] }, { owner: 'test:output' })
 const toolAgent = ai.createAgent({
   name: 'Structured Tool Flow',
   connection: 'structured-test',
   outputSchema: outputSchema,
-  skillRefs: ['test.structured-output'],
 })
 replies.push({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1', toolId: 'structured.read', args: {} }], finishReason: 'tool_calls' })
 replies.push({ role: 'assistant', content: '{"name":"after tool","count":2}' })

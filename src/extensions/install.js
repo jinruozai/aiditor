@@ -103,7 +103,6 @@
         permissions: clone(t.permissions || ['tool.call']),
         risk: t.risk || (t.permission && t.permission.risk) || null,
         origin: 'extension:' + manifest.id,
-        exposeToModel: t.visibleToModel === true || t.exposeToModel === true,
         available: t.available,
         preview: t.preview || (adapterId ? makeAdapterCall(adapters, adapterId, 'preview') : null),
         run: t.run && typeof t.run === 'function'
@@ -132,17 +131,10 @@
         title: item.title || item.label || item.id,
         description: item.description || '',
         argumentHint: item.argumentHint || '',
-        userInvocable: item.userInvocable !== false,
-        modelInvocable: item.modelInvocable !== false,
-        whenToUse: item.whenToUse || '',
-        whenNotToUse: item.whenNotToUse || '',
-        systemPrompt: item.systemPrompt || '',
-        rules: clone(item.rules || []),
-        examples: clone(item.examples || []),
+        instructions: item.instructions || '',
+        toolDisclosure: item.toolDisclosure || 'onRead',
         tools: (item.tools || []).map(function (name) { return toolIds[name] || name }),
-        relatedApis: clone(item.relatedApis || []),
         resources: clone(item.resources || []),
-        docPath: item.docPath || '',
       }
       ai.skills.register(item.publicId, spec, { owner: owner, layer: manifest.layer, source: owner })
       rollback.push(function (name) {

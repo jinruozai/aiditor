@@ -245,7 +245,7 @@
 
   function validAgent(agent) {
     if (!agent || typeof agent !== 'object' || typeof agent.id !== 'string' || !agent.id) return false
-    const arrays = ['messages', 'compactions', 'queue', 'inbox', 'quests', 'contextRefs', 'skillRefs', 'toolRefs']
+    const arrays = ['messages', 'compactions', 'queue', 'inbox', 'quests', 'contextRefs', 'toolRefs']
     for (let i = 0; i < arrays.length; i++) {
       if (!optionalArray(agent, arrays[i])) return false
     }

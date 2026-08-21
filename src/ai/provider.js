@@ -55,6 +55,9 @@
   }
 
   function requestFetch(url, opts) {
+    if (aiditor.settings && aiditor.settings.get('ai.debug.logProviderRequest') && opts && opts.body) {
+      console.log('[AIditor AI request]', opts.body)
+    }
     return fetch(url, opts).catch(function (cause) {
       if (cause && cause.name === 'AbortError') throw cause
       const err = new Error(cause && cause.message ? cause.message : 'Provider network request failed')

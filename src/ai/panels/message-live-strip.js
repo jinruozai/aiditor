@@ -3,6 +3,7 @@
 
   const ui = aiditor.ui
   const ai = aiditor.ai = aiditor.ai || {}
+  const format = ai.metricFormat
 
   function usageNumber(usage, keys) {
     if (!usage) return 0
@@ -11,20 +12,6 @@
       if (v > 0) return v
     }
     return 0
-  }
-
-  function formatDuration(ms) {
-    if (!ms || ms < 0) return ''
-    if (ms < 1000) return String(Math.max(1, Math.round(ms))) + ' ms'
-    if (ms < 10000) return (ms / 1000).toFixed(1).replace(/\.0$/, '') + ' s'
-    return String(Math.round(ms / 1000)) + ' s'
-  }
-
-  function formatCost(cost) {
-    const n = Number(cost && cost.amount || 0)
-    if (!n) return ''
-    const digits = n < 0.0001 ? 6 : (n < 0.01 ? 5 : 4)
-    return '$' + n.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '')
   }
 
   function normalizePreview(text) {
@@ -44,7 +31,8 @@
     const model = displayModelTail(state && state.modelTail)
     const preview = model || normalizePreview(state && state.previewTail)
     const s = state && state.state || 'idle'
-    if ((s === 'tool' || s === 'waiting_approval') && activity) return activity + (preview ? ' | ' + preview : '')
+    if (s === 'waiting_approval') return activity
+    if (s === 'tool' && activity) return activity + (preview ? ' | ' + preview : '')
     return preview || activity
   }
 
@@ -59,18 +47,18 @@
     const parts = []
     const started = state.startedAt || null
     const ended = state.completedAt || null
-    if (started) parts.push(formatDuration((ended || Date.now()) - started))
+    if (started) parts.push(format.duration((ended || Date.now()) - started))
     if (!state.responseMetrics && state.turn != null) parts.push('turn ' + String(state.turn || 0))
-    if (!state.responseMetrics && state.firstTokenAt && started) parts.push('TTFT ' + formatDuration(state.firstTokenAt - started))
+    if (!state.responseMetrics && state.firstTokenAt && started) parts.push('TTFT ' + format.duration(state.firstTokenAt - started))
     const total = state.totalTokens || usageNumber(state.usage, ['total_tokens', 'totalTokens'])
     const out = state.outputTokens || usageNumber(state.usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
-    if (total) parts.push(String(total) + ' tok')
-    else if (out) parts.push(String(out) + ' out')
+    if (total) parts.push(format.tokens(total) + ' tok')
+    else if (out) parts.push(format.tokens(out) + ' out')
     const speedMs = state.responseMetrics
       ? state.generationMs
       : (state.firstTokenAt ? (ended || Date.now()) - state.firstTokenAt : (started ? (ended || Date.now()) - started : 0))
-    if (out && speedMs > 0) parts.push((out / Math.max(speedMs / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
-    if (state.cost && state.cost.amount > 0) parts.push(formatCost(state.cost))
+    if (out && speedMs > 0) parts.push(format.rate(out / Math.max(speedMs / 1000, 0.001)) + ' tok/s')
+    if (state.cost && state.cost.amount > 0) parts.push(format.cost(state.cost))
     return parts.join(' · ')
   }
 

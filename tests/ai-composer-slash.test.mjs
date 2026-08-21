@@ -14,7 +14,7 @@ for (const file of [
   'src/ai/tool/registry.js',
   'src/ai/context/registry.js',
   'src/ai/skill/registry.js',
-  'src/ai/rich-prompt.js',
+  'src/ai/context/rich-prompt.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -56,7 +56,6 @@ ai.skills.register('review.code', {
 }, { owner: 'test:skills', layer: 'workspace', source: 'project' })
 ai.skills.register('background.only', {
   title: 'Background Only',
-  userInvocable: false,
 }, { owner: 'test:skills' })
 ai.tools.register('raw.tool', { title: 'Raw Tool', run: function () {} }, { owner: 'test:tools' })
 
@@ -82,9 +81,10 @@ aiditor.commands.registerMenu('test.status.composer', {
 const projected = ai.composerSlash.items(rich.empty(), { agentId: 'agent-1' }, true)
 assert.deepEqual(projected.map(function (item) { return item.key }), [
   'command:test.status.composer',
+  'skill:background.only',
   'skill:review.code',
 ])
-assert.equal(projected.some(function (item) { return item.id === 'background.only' }), false)
+assert.equal(projected.some(function (item) { return item.id === 'background.only' }), true)
 assert.equal(projected.some(function (item) { return item.id === 'raw.tool' }), false)
 
 const slash = rich.insertText(rich.empty(), 0, '/')
@@ -128,7 +128,7 @@ selection = { start: 1, end: 1, collapsed: true }
 value.set(slash)
 assert.equal(opened.length, 1)
 assert.equal(opened[0].opts.query.peek(), '')
-const skillItem = opened[0].opts.items.peek().find(function (item) { return item.kind === 'skill' })
+const skillItem = opened[0].opts.items.peek().find(function (item) { return item.id === 'review.code' })
 opened[0].opts.onSelect(skillItem)
 assert.deepEqual(rich.skills(value.peek()), ['review.code'])
 assert.equal(focused, 1)

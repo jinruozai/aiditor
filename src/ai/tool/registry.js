@@ -74,9 +74,9 @@
     }
   }
 
-  function visible(name, ctx, selectedBySkill) {
+  function available(name, ctx) {
     const tool = registry.get(name)
-    if (!tool || (tool.exposeToModel === false && !selectedBySkill)) return false
+    if (!tool) return false
     if (typeof tool.available !== 'function') return true
     const value = aiditor.safeCall
       ? aiditor.safeCall({ scope: 'ai.tool', tool: name, phase: 'available' }, function () { return tool.available(ctx || {}) })
@@ -84,15 +84,11 @@
     return value === true
   }
 
-  function visibleList(names, ctx, selectedBySkill) {
+  function availableList(ctx) {
     const out = []
-    const seen = {}
-    for (let i = 0; i < (names || []).length; i++) {
-      const name = names[i]
-      if (!seen[name] && visible(name, ctx, selectedBySkill)) {
-        seen[name] = true
-        out.push(name)
-      }
+    const names = registry.list()
+    for (let i = 0; i < names.length; i++) {
+      if (available(names[i], ctx)) out.push(names[i])
     }
     return out
   }
@@ -153,8 +149,8 @@
   }
 
   ai.tools = Object.assign(registry, {
-    visible: visible,
-    visibleList: visibleList,
+    available: available,
+    availableList: availableList,
     capabilities: capabilities,
     schema: schema,
     executionMode: executionMode,

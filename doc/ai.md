@@ -15,8 +15,9 @@ Any AIditor module can contribute to AI by registering tools, context
 references, or operations. `workspace.*`, `theme.*`, `dock.*`, `ui.*`, extension
 prefixes, and product prefixes all use the same registries.
 
-Skills are agent behavior profiles. They add prompt guidance and rules to an
-agent; they are not tools, context references, or operations.
+Skills are stateless instruction packages and the model-facing organization for
+related Tools. Their `always | onRead` Tool disclosure keeps discovery compact
+without sending every Tool schema in every request.
 
 Generated API references are the exact-call companion to skills. Structured
 comments in `src/` generate `doc/api`, `dist/aiditor-api.json`, and runtime
@@ -24,10 +25,9 @@ comments in `src/` generate `doc/api`, `dist/aiditor-api.json`, and runtime
 agents should read generated API references before calling unfamiliar framework
 APIs.
 
-Skills are discoverable too. `aiditor://skills` lists registered skills and
-when to use them; concrete skill URIs contain the full rules. This keeps the
-default prompt small while still letting agents choose the correct AIditor
-workflow.
+Every request contains the bounded Skill catalog. `skill.read` provides normal
+progressive disclosure; deterministic `skill.list` appears only when the
+catalog omitted entries. There is no activation or loaded-Skill system.
 
 ## Public Concept Model
 
@@ -35,8 +35,8 @@ Expose six concepts at the architecture level:
 
 ```text
 Agent             conversation, memory, runtime state
-Skill             discoverable focused capability
-Tool              Skill-owned executable action
+Skill             discoverable instructions and Tool grouping
+Tool              Skill-grouped executable action
 Context Reference stable pointer to bounded readable context
 Operation         previewable/applyable mutation
 ChangeSet         grouped review/apply container
@@ -96,8 +96,9 @@ aiditor.ai.tools.list(prefix)
 Tool names use dotted paths. Prefixes are public grouping. Extension lifecycle
 cleanup uses owner metadata for exact removal.
 
-The request builder sends only model-visible and currently available tools to
-the provider:
+The request builder first selects Tools from `always` Skills, explicitly
+selected Skills, and Skills read in visible conversation context, then applies
+the Tool's current availability predicate:
 
 ```js
 aiditor.ai.tools.register('workspace.readText', {
@@ -106,12 +107,16 @@ aiditor.ai.tools.register('workspace.readText', {
 })
 ```
 
-Low-level host escape hatches can stay registered for framework code while being
-kept out of normal model requests with `exposeToModel: false`.
+There is no Tool visibility flag. Skill `toolDisclosure` controls request disclosure,
+not authorization. A host function that must never be called by a model is an
+internal API, not a Tool. Tool Runtime rechecks `available(ctx)` at execution
+time; Permission remains the authorization boundary.
 
-Each run freezes the resulting Tool ids, model Tool ids, specs, and routes.
-Continuations and approval waits execute that request surface; registry and
-availability changes apply to the next request.
+Thrown Tool failures are normalized to `{ ok: false, code, message, hint? }`.
+Tools that need a semantic code or recovery hint must provide it explicitly;
+the runtime does not infer semantics from error-message text and does not expose
+a generic `recoverable` flag. Provider transport retryability remains a separate
+connection concern.
 
 ### Tool Argument Transport
 
@@ -170,22 +175,24 @@ the next Provider request can replay the actual call; malformed JSON has no
 invented argument object. Error metadata and traces contain only a bounded
 canonical summary and stable argument hash, never the full argument payload.
 
-Tool argument correction has one run-scoped budget, configured by
-`maxToolArgumentCorrections` and defaulting to two. When every failed call has a
-compiled strict schema, the first correction may be a hidden constrained request
-that exposes exactly the original Tool-call set. Otherwise the Host records the
-whole zero-execution batch as failed Tool calls, appends structured Tool Results,
-and lets the model correct the call through the ordinary continuation path.
-`json` and `structured` modes therefore remain honestly best-effort, but a
-model-correctable argument error does not immediately terminate the run.
+Tool argument correction is one consecutive correction chain. When every failed
+call has a compiled strict schema, the first correction may be a hidden
+constrained request that exposes exactly the original Tool-call set. Otherwise
+the Host records the whole zero-execution batch as failed Tool calls, appends
+structured Tool Results, and lets the model correct the call through the ordinary
+continuation path. `json` and `structured` modes therefore remain honestly
+best-effort, but a model-correctable argument error does not immediately
+terminate the run.
 
-The correction state belongs to the current run, not a Tool or project. Its
+The chain state belongs to the current Run, not a Tool or project. Its
 fingerprint includes the Tool id, canonical argument hash, and concrete error
-result. Only an identical Tool, argument value, and validation failure counts as
-a repeat; a different argument may continue within the same bounded budget. An
-exhausted budget terminates the turn. Network, authentication, cancellation,
-provider completion, and run-budget errors never enter this correction path.
-The Host does not repair JSON, recurse into JSON-looking strings, or infer
+result. A different invalid argument may continue correction. Repeating any
+identical failure within the same uninterrupted chain proves that the model made
+no progress and terminates the turn. A schema-valid Tool-call batch ends the
+chain, so a later independent mistake starts fresh. There is no cumulative
+correction budget across a long Run. Network, authentication, cancellation,
+provider completion, and explicit Run-budget errors never enter this correction
+path. The Host does not repair JSON, recurse into JSON-looking strings, or infer
 business fields.
 
 A successful hidden recovery enters the ordinary Tool lifecycle exactly once
@@ -304,9 +311,8 @@ explicit opt-in: `exposeToModel: true` requires `inputSchema`, a preview functio
 and an apply function. Operations without that flag remain available to trusted
 host code but never enter the model surface.
 
-`aiditor.previewOperation` and `aiditor.applyOperation` are canonical execution
-gateways, not model Tools or operation catalogs. When the hidden apply gateway is
-present in the effective capability set, the request builder projects every
+`aiditor.previewOperation` and `aiditor.applyOperation` are canonical Tool
+gateways. The request builder projects every
 model-exposed, currently available operation as one direct request-local Tool:
 
 ```text

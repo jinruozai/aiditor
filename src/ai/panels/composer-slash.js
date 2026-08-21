@@ -75,7 +75,7 @@
         icon: 'tag',
         group: 'Skills',
         disabled: !!active[id] || unavailable,
-        search: [id, skill.title, skill.description, skill.whenToUse, skill.argumentHint, meta.owner, meta.layer, meta.source, (skill.tools || []).join(' ')],
+        search: [id, skill.title, skill.description, skill.argumentHint, meta.owner, meta.layer, meta.source, (skill.tools || []).join(' ')],
         skill: skill,
       })
     }

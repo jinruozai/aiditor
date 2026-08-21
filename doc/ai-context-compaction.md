@@ -30,6 +30,7 @@ These are runtime shapes, not new AI registries.
 The model-facing registries remain:
 
 ```text
+skills     disclose instructions and organize tools
 tools      execute actions
 context    provide bounded readable content
 operations preview/apply changes
@@ -89,7 +90,8 @@ that is a fallback. The normal path is semantic compaction.
 
 The request builder always preserves:
 
-- runtime guide, active skills, permission state, and current workspace metadata;
+- runtime guide, Skill catalog, explicit Skill instructions, permission state,
+  and current workspace metadata;
 - the current user input;
 - queued interruption metadata;
 - pending approvals and unresolved tool calls;
@@ -312,25 +314,25 @@ service and still obey normal tool permissions.
 
 Current code already has useful pieces:
 
-- `src/ai/request.js` estimates model context and budgets recent messages.
-- `src/ai/request.js` truncates large strings, tool args, and context payloads.
-- `src/ai/request.js` groups assistant tool-call messages with their matching
+- `src/ai/agent/request.js` estimates model context and budgets recent messages.
+- `src/ai/agent/request.js` truncates large strings, tool args, and context payloads.
+- `src/ai/agent/request.js` groups assistant tool-call messages with their matching
   tool results so provider history is not split by budgeting.
-- `src/ai/store.js` owns the complete in-memory transcript and publishes a
+- `src/ai/agent/store.js` owns the complete in-memory transcript and publishes a
   JSON-safe snapshot plus mutation version.
-- `src/ai/persistence.js` stores that complete snapshot in IndexedDB. It does
+- `src/ai/agent/persistence.js` stores that complete snapshot in IndexedDB. It does
   not reuse model-facing compaction or trim the transcript to satisfy a storage
   budget; see [ai-persistence.md](./ai-persistence.md).
-- `src/ai/store.js` keeps messages, queue, inbox, quests, and runtime status in
+- `src/ai/agent/store.js` keeps messages, queue, inbox, quests, and runtime status in
   the agent record.
-- `src/ai/memory.js` provides conservative durable memory updates from explicit
+- `src/ai/agent/memory.js` provides conservative durable memory updates from explicit
   compaction markers.
-- `src/ai/compaction.js` provides deterministic semantic compaction records,
+- `src/ai/agent/compaction.js` provides deterministic semantic compaction records,
   safe range planning, request filtering, memory messages, and compaction
   context messages.
-- `src/ai/compaction.js` registers command wrappers for compacting, listing, and
+- `src/ai/agent/compaction.js` registers command wrappers for compacting, listing, and
   clearing the current agent compactions.
-- `src/ai/runtime.js` triggers compaction at scheduler-safe points before
+- `src/ai/agent/runtime.js` triggers compaction at scheduler-safe points before
   normal requests, tool continuations, and approval resumes.
 - `src/ai/panels/message-live-strip.js` exposes live run state independently
   from transcript rendering.

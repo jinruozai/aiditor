@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
 global.window = { aiditor: {} }
-vm.runInThisContext(readFileSync('src/ai/rich-prompt.js', 'utf8'), { filename: 'ai/rich-prompt.js' })
+vm.runInThisContext(readFileSync('src/ai/context/rich-prompt.js', 'utf8'), { filename: 'ai/context/rich-prompt.js' })
 
 const rich = window.aiditor.ai.richPrompt
 

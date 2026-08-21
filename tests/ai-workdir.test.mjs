@@ -9,9 +9,9 @@ for (const file of [
   'src/core/log.js',
   'src/core/workspace.js',
   'src/core/names.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
+  'src/ai/agent/store.js',
   'src/ai/connection.js',
   'src/ai/adapter.js',
   'src/ai/schema.js',
@@ -24,7 +24,7 @@ for (const file of [
   'src/ai/skill/builtins.js',
   'src/ai/workdir.js',
   'src/ai/code.js',
-  'src/ai/request.js',
+  'src/ai/agent/request.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -39,34 +39,36 @@ const workspace = aiditor.workspace.memory({
   'README.md': 'hello workspace',
 })
 
-const agent = ai.createAgent({ name: 'Workspace Agent', permissionMode: 'default', skillRefs: ['aiditor.workspace-authoring'] })
+const agent = ai.createAgent({ name: 'Workspace Agent', permissionMode: 'default' })
 const noWorkspaceRequest = ai.planRequest(agent, null, 'run_no_workspace_tools', 'user', 0)
 assert.equal(noWorkspaceRequest.tools.some(function (tool) { return tool.indexOf('workspace.') === 0 }), false)
 assert.equal(noWorkspaceRequest.tools.some(function (tool) { return tool.indexOf('code.') === 0 }), false)
 const blockedUiRequest = ai.planRequest(agent, { role: 'user', content: '写一个简单的背包界面，放在主dock' }, 'run_blocked_ui_tools', 'user', 0)
 assert.equal(blockedUiRequest.tools.length, 0)
 assert.doesNotMatch(blockedUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
-assert.equal(blockedUiRequest.skills.includes('aiditor.workspace-authoring'), false)
-assert.equal(ai.skills.availability('aiditor.workspace-authoring', {}).available, false)
-assert.match(blockedUiRequest.messages[0].content, /Current runtime state and available tools/)
+assert.equal(blockedUiRequest.messages.some(function (message) {
+  return message.meta && message.meta.contextCardId === 'skill-catalog' && /aiditor\.workspace-authoring/.test(message.content)
+}), true)
+assert.match(blockedUiRequest.messages[0].content, /current workspace, runtime state, and Tool results/)
 const escapedChineseUiRequest = ai.planRequest(agent, { role: 'user', content: '\u5199\u4e00\u4e2a\u7b80\u5355\u7684\u80cc\u5305\u754c\u9762\uff0c\u653e\u5728\u4e3bdock' }, 'run_escaped_chinese_ui_tools', 'user', 0)
 assert.equal(escapedChineseUiRequest.tools.length, 0)
 assert.doesNotMatch(escapedChineseUiRequest.messages[0].content, /CURRENT_REQUEST_BLOCKED/)
 const dir = ai.setWorkspace(workspace, { id: 'memory:test', label: 'Test Workspace', kind: 'memory' })
 const plainWorkspaceRequest = ai.planRequest(ai.createAgent({ name: 'Plain Workspace Agent' }), null, 'run_plain_workspace', 'user', 0)
-assert.deepEqual(plainWorkspaceRequest.tools, [])
-assert.equal(plainWorkspaceRequest.skills.includes('aiditor.workspace-authoring'), false)
-const workspaceRequest = ai.planRequest(agent, null, 'run_workspace_tools', 'user', 0)
+assert.equal(plainWorkspaceRequest.tools.includes('workspace.fileSummary'), false)
+const workspaceRequest = ai.planRequest(agent, {
+  role: 'user',
+  content: 'inspect workspace',
+  meta: { skills: ['aiditor.workspace-authoring'] },
+}, 'run_workspace_tools', 'user', 0)
 assert.equal(workspaceRequest.tools.includes('workspace.fileSummary'), true)
 assert.equal(workspaceRequest.tools.includes('workspace.mkdir'), true)
 assert.equal(workspaceRequest.tools.includes('workspace.move'), true)
 assert.equal(workspaceRequest.tools.includes('code.map'), true)
-assert.equal(workspaceRequest.skills.includes('aiditor.workspace-authoring'), true)
-assert.match(workspaceRequest.messages[0].content, /bounded workspace contract/)
 assert.equal(workspaceRequest.messages[0].meta.contextLayer, 'runtime')
-assert.equal(workspaceRequest.messages[1].meta.contextLayer, 'workspace')
-assert.match(workspaceRequest.messages[1].content, /Current workspace context/)
-assert.match(workspaceRequest.messages[1].content, /workspace\.editText/)
+const workspaceMessage = workspaceRequest.messages.find(function (message) { return message.meta && message.meta.contextLayer === 'workspace' })
+assert.match(workspaceMessage.content, /Current workspace context/)
+assert.match(workspaceMessage.content, /workspace\.editText/)
 assert.equal(workspaceRequest.messages.some(function (message) { return message.meta && message.meta.contextLayer === 'task' }), false)
 
 assert.deepEqual(dir, { id: 'memory:test', label: 'Test Workspace', kind: 'memory' })

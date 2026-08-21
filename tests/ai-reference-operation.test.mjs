@@ -6,26 +6,20 @@ global.window = { aiditor: {} }
 vm.runInThisContext(readFileSync('src/core/signal.js', 'utf8'), { filename: 'signal.js' })
 vm.runInThisContext(readFileSync('src/core/log.js', 'utf8'), { filename: 'log.js' })
 vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'names.js' })
-vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/name-generator.js', 'utf8'), { filename: 'ai/agent/name-generator.js' })
 vm.runInThisContext(readFileSync('src/ai/serialize.js', 'utf8'), { filename: 'ai/serialize.js' })
 vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
-vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/store.js', 'utf8'), { filename: 'ai/agent/store.js' })
 vm.runInThisContext(readFileSync('src/ai/connection.js', 'utf8'), { filename: 'ai/connection.js' })
 vm.runInThisContext(readFileSync('src/ai/schema.js', 'utf8'), { filename: 'ai/schema.js' })
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
-vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/request.js', 'utf8'), { filename: 'ai/agent/request.js' })
 
 const ai = window.aiditor.ai
 const TEST_META = { owner: 'test:reference-operation' }
-let nextSkill = 1
-function skillRefs(tools) {
-  const id = 'test.operation.' + nextSkill++
-  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
-  return [id]
-}
 function registerReference(name, spec, meta) { return ai.references.register(name, spec, meta || TEST_META) }
 function registerOperation(name, spec, meta) { return ai.operations.register(name, spec, meta || TEST_META) }
 assert.throws(function () { ai.references.register('owner.missing', {}) }, /owner is required/)
@@ -210,14 +204,19 @@ assert.equal(asyncApplied.value, 11)
 assert.equal(asyncValue, 11)
 
 const agent = ai.createAgent({ name: 'Reference Agent' })
+ai.skills.register('test.reference-operations', {
+  title: 'Reference Operations',
+  toolDisclosure: 'always',
+  tools: ['aiditor.previewOperation', 'aiditor.applyOperation'],
+}, TEST_META)
 const defaultRequest = ai.planRequest(agent, null, 'inspect', 'user', 0)
-assert.equal(defaultRequest.tools.includes('aiditor.previewOperation'), false)
-assert.equal(defaultRequest.tools.includes('aiditor.applyOperation'), false)
+assert.equal(defaultRequest.tools.includes('aiditor.previewOperation'), true)
+assert.equal(defaultRequest.tools.includes('aiditor.applyOperation'), true)
 const explicitRequest = ai.planRequest(ai.createAgent({
   name: 'Explicit Operation Agent',
-  skillRefs: skillRefs(['aiditor.previewOperation', 'aiditor.applyOperation']),
 }), null, 'inspect_explicit', 'user', 0)
-assert.deepEqual(explicitRequest.tools, ['aiditor.previewOperation', 'aiditor.applyOperation'])
+assert.equal(explicitRequest.tools.includes('aiditor.previewOperation'), true)
+assert.equal(explicitRequest.tools.includes('aiditor.applyOperation'), true)
 const operationToolSpec = explicitRequest.toolSpecs.find(function (tool) { return tool.id === 'case.setValue' })
 assert.equal(operationToolSpec.schema.properties.value.type, 'number')
 assert.equal(operationToolSpec.schema.additionalProperties, false)
@@ -244,7 +243,6 @@ registerOperation('case.sharedSchema', {
 })
 const sharedSchemaRequest = ai.planRequest(ai.createAgent({
   name: 'Shared Schema Agent',
-  skillRefs: skillRefs(['aiditor.applyOperation']),
 }), null, 'inspect_shared_schema', 'user', 0)
 const sharedSchemaSpec = sharedSchemaRequest.toolSpecs.find(function (tool) {
   return tool.id === 'case.sharedSchema'
@@ -256,10 +254,9 @@ ai.operations.unregister('case.sharedSchema', TEST_META)
 unavailableOperationEnabled = true
 const requestWithAvailableOperation = ai.planRequest(ai.createAgent({
   name: 'Available Operation Agent',
-  skillRefs: skillRefs(['aiditor.applyOperation']),
 }), null, 'inspect_available', 'user', 0)
 assert.deepEqual(
-  requestWithAvailableOperation.toolSpecs.map(function (tool) { return tool.route.args.op }),
+  requestWithAvailableOperation.toolSpecs.filter(function (tool) { return tool.route && tool.route.args && tool.route.args.op }).map(function (tool) { return tool.route.args.op }),
   ['case.setAsyncValue', 'case.setValue', 'case.unavailable']
 )
 unavailableOperationEnabled = false
@@ -268,12 +265,17 @@ ai.tools.register('case.setValue', {
   schema: { type: 'object', properties: {} },
   run: function () { return null },
 }, TEST_META)
+ai.skills.register('test.conflicting-operation-tool', {
+  title: 'Conflicting Operation Tool',
+  toolDisclosure: 'always',
+  tools: ['case.setValue'],
+}, TEST_META)
 assert.throws(function () {
   ai.planRequest(ai.createAgent({
     name: 'Conflicting Operation Agent',
-    skillRefs: skillRefs(['case.setValue', 'aiditor.applyOperation']),
   }), null, 'inspect_conflict', 'user', 0)
 }, /Model Tool id conflict: case\.setValue/)
+ai.skills.unregister('test.conflicting-operation-tool', TEST_META)
 ai.tools.unregister('case.setValue', TEST_META)
 
 const previewGateway = ai.tools.get('aiditor.previewOperation')

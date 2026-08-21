@@ -8,9 +8,9 @@ vm.runInThisContext(readFileSync('src/core/i18n.js', 'utf8'), { filename: 'i18n.
 vm.runInThisContext(readFileSync('src/ai/i18n.js', 'utf8'), { filename: 'ai/i18n.js' })
 vm.runInThisContext(readFileSync('src/core/log.js', 'utf8'), { filename: 'log.js' })
 vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'names.js' })
-vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/name-generator.js', 'utf8'), { filename: 'ai/agent/name-generator.js' })
 vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
-vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/store.js', 'utf8'), { filename: 'ai/agent/store.js' })
 vm.runInThisContext(readFileSync('src/ai/connection.js', 'utf8'), { filename: 'ai/connection.js' })
 vm.runInThisContext(readFileSync('src/ai/adapter.js', 'utf8'), { filename: 'ai/adapter.js' })
 vm.runInThisContext(readFileSync('src/ai/provider.js', 'utf8'), { filename: 'ai/provider.js' })
@@ -22,9 +22,9 @@ for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js'
 vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
 vm.runInThisContext(readFileSync('src/ai/reference.js', 'utf8'), { filename: 'ai/reference.js' })
-vm.runInThisContext(readFileSync('src/ai/change-set.js', 'utf8'), { filename: 'ai/change-set.js' })
-vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
-vm.runInThisContext(readFileSync('src/ai/runtime.js', 'utf8'), { filename: 'ai/runtime.js' })
+vm.runInThisContext(readFileSync('src/ai/operation/change-set.js', 'utf8'), { filename: 'ai/operation/change-set.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/request.js', 'utf8'), { filename: 'ai/agent/request.js' })
+vm.runInThisContext(readFileSync('src/ai/agent/runtime.js', 'utf8'), { filename: 'ai/agent/runtime.js' })
 
 const aiditor = window.aiditor
 const ai = aiditor.ai
@@ -313,7 +313,7 @@ function assertRegistryContracts(agentId) {
     run: function (args) { return { ok: true, args: args } },
     apply: function (result) { return { applied: result.ok } },
   }, { owner: 'test:registry' })
-  ai.skills.register('review', { id: 'review', title: 'Review', tools: ['diff-preview'] }, { owner: 'test:registry' })
+  ai.skills.register('review', { id: 'review', title: 'Review', toolDisclosure: 'always', tools: ['diff-preview'] }, { owner: 'test:registry' })
   ai.context.register('selection', {
     capture: function () { return { text: 'selected' } },
   }, { owner: 'test:registry' })
@@ -328,7 +328,6 @@ function assertRegistryContracts(agentId) {
   assert.equal(ai.skills.meta('plugin-skill').owner, 'test:plugin')
 
   ai.updateAgent(agentId, {
-    skillRefs: ['review'],
     state: {
       projectRule: {
         maxRows: 3,
@@ -376,8 +375,8 @@ async function assertSendRunStatusAndRequest(agentId, resourceCheck) {
   assert.equal(requestSeen.connection, 'capture')
   assert.equal(requestSeen.model, 'reasoning')
   assert.deepEqual(requestSeen.attachments, [{ uri: 'case://selection/item-1', text: 'resolved:case://selection/item-1' }])
-  assert.deepEqual(requestSeen.tools, ['diff-preview'])
-  assert.deepEqual(requestSeen.skills, ['review'])
+  assert.equal(requestSeen.tools.includes('diff-preview'), true)
+  assert.equal(Object.hasOwn(requestSeen, 'skills'), false)
   assert.equal(ctxSeen.canRead(agentId), true)
   assert.equal(ctxSeen.canSend(agentId), true)
   assert.equal(ctxSeen.canManage(agentId), true)
@@ -621,9 +620,38 @@ async function assertGdePatchPreviewRendering() {
   vm.runInThisContext(readFileSync('src/ui/data/changeReview.js', 'utf8'), { filename: 'ui/data/changeReview.js' })
   vm.runInThisContext(readFileSync('src/ai/message-markdown.js', 'utf8'), { filename: 'ai/message-markdown.js' })
   vm.runInThisContext(readFileSync('src/ai/message-renderers.js', 'utf8'), { filename: 'ai/message-renderers.js' })
+  vm.runInThisContext(readFileSync('src/ai/panels/metrics-format.js', 'utf8'), { filename: 'ai/panels/metrics-format.js' })
   vm.runInThisContext(readFileSync('src/ai/panels/message-live-strip.js', 'utf8'), { filename: 'ai/panels/message-live-strip.js' })
   vm.runInThisContext(readFileSync('src/ai/panels/message-virtualizer.js', 'utf8'), { filename: 'ai/panels/message-virtualizer.js' })
   vm.runInThisContext(readFileSync('src/ai/panels/transcript.js', 'utf8'), { filename: 'ai/panels/transcript.js' })
+
+  assert.equal(ai.metricFormat.duration(945000), '15m 45s')
+  assert.equal(ai.metricFormat.duration(72000000), '20h')
+  assert.equal(ai.metricFormat.tokens(5345461), '5.35M')
+  assert.equal(ai.metricFormat.rate(635.3), '635.3')
+  assert.equal(ai.metricFormat.rate(12345.6), '12.3K')
+  assert.equal(ai.metricFormat.cost({ amount: 0.7393 }), '$0.7393')
+
+  const compactMetricStrip = ai.createMessageLiveStrip()
+  compactMetricStrip.update({
+    state: 'idle',
+    responseMetrics: true,
+    startedAt: 1000,
+    completedAt: 946000,
+    totalTokens: 5345461,
+    outputTokens: 635300,
+    generationMs: 1000000,
+    cost: { amount: 0.7393 },
+  })
+  assert.equal(collectText(compactMetricStrip.el.querySelector('.aiditor-ai-live-run-metrics')), '15m 45s · 5.35M tok · 635.3 tok/s · $0.7393')
+
+  const waitingStrip = ai.createMessageLiveStrip()
+  waitingStrip.update({
+    state: 'waiting_approval',
+    activityText: 'awaiting approval agent.delegate · 1/2',
+    modelTail: 'agent.delegate{"outputSchema":{"type":"object"}}',
+  })
+  assert.equal(waitingStrip.el.querySelector('.aiditor-ai-live-run-preview').textContent, 'awaiting approval agent.delegate · 1/2')
 
   const preview = aiditor.changeSet.normalize({
     title: 'Tune swords',

@@ -5,17 +5,15 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const runs = {}
   const waitingRuns = {}
-  const runSkillRefs = {}
   const budgetTimers = {}
   const runtimeConfig = {
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
     maxConcurrentTools: 4,
     maxDelegationDepth: 4,
-    maxToolArgumentCorrections: 2,
     limits: {
-      maxTurns: 32,
-      timeoutMs: 600000,
+      maxTurns: null,
+      timeoutMs: null,
       maxTokens: null,
     },
   }
@@ -51,75 +49,6 @@
         next = iterator.next()
       }
     })()
-  }
-
-  function inactiveSkillIdsForTool(request, toolId) {
-    if (!ai.skills || !ai.skills.list) return []
-    const active = {}
-    const activeIds = request && request.skills || []
-    for (let i = 0; i < activeIds.length; i++) active[activeIds[i]] = true
-    const matches = []
-    const ids = ai.skills.list()
-    const skillCtx = Object.assign({}, request || {}, {
-      ai: ai,
-      agent: request && request.agent || null,
-      actor: request && request.actor || 'user',
-      runId: request && request.runId || null,
-      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
-      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
-      runtimeContext: request && request.runtimeContext || [],
-    })
-    for (let j = 0; j < ids.length; j++) {
-      const id = ids[j]
-      if (active[id]) continue
-      const skill = ai.skills.get(id)
-      if (!skill || skill.modelInvocable === false || (skill.tools || []).indexOf(toolId) < 0) continue
-      const availability = ai.skills.availability(id, skillCtx)
-      if (availability.available) matches.push(id)
-    }
-    return matches
-  }
-
-  function canonicalToolCandidates(value) {
-    if (!ai.tools) return []
-    if (ai.tools.get(value)) return [value]
-    return ai.providerToolAliasCandidates
-      ? ai.providerToolAliasCandidates(value, ai.tools.list())
-      : []
-  }
-
-  function unavailableToolFailure(request, value, providerName) {
-    const candidates = canonicalToolCandidates(value)
-    const toolId = candidates.length === 1 ? candidates[0] : value
-    const skillIds = candidates.length === 1 ? inactiveSkillIdsForTool(request, toolId) : []
-    if (skillIds.length) {
-      const message = 'Skill activation is required for this request before calling Tool: ' + toolId
-      return {
-        ok: false,
-        code: 'SKILL_ACTIVATION_REQUIRED',
-        error: message,
-        message: message,
-        hint: 'Call skill.activate with one of: ' + skillIds.join(', ') + '. The Tool becomes available on the next continuation. Run-scoped activation from an earlier request does not carry over. Persistent agent.skillRefs are configured only by the user, host, or parent Agent.',
-        toolId: toolId,
-        providerName: providerName || value,
-        skillIds: skillIds,
-        lifetime: 'run',
-      }
-    }
-    const message = candidates.length
-      ? 'Tool was not available in this request: ' + toolId
-      : 'Tool was not found: ' + value
-    const failure = {
-      ok: false,
-      code: candidates.length ? 'TOOL_UNAVAILABLE_IN_REQUEST' : 'TOOL_NOT_FOUND',
-      error: message,
-      message: message,
-      hint: 'Use the Tools exposed in the current request. Call skill.list to discover available capabilities.',
-      toolId: toolId,
-      providerName: providerName || value,
-    }
-    if (candidates.length > 1) failure.candidateToolIds = candidates
-    return failure
   }
 
   function deltaContent(delta) {
@@ -160,7 +89,6 @@
   function normalizeToolCalls(calls, actor) {
     const request = actor && actor.toolSpecs ? actor : null
     const who = request ? request.agent.id : actor
-    const allowed = requestToolMap(request)
     const list = calls || []
     const aliases = request && ai.toolAliasMap ? ai.toolAliasMap(request) : { byName: {} }
     const expectedNames = list.map(function (call) {
@@ -187,7 +115,6 @@
         id = call.id || call.providerCallId || id
         providerName = call.providerName || providerName
         providerToolId = call.toolId || call.name || call.tool || providerToolId
-        const denied = allowed && !allowed[providerToolId]
         spec = requestToolSpec(request, providerToolId)
         argumentMode = call.argumentMode || spec && spec.argumentMode || argumentMode
         providerArgs = ai.toolArguments.read(call, providerToolId)
@@ -196,8 +123,17 @@
         const route = spec && spec.route
         const executorToolId = route && route.toolId || null
         const executorArgs = routeToolArguments(providerArgs, route)
-        const unavailable = denied ? unavailableToolFailure(request, providerToolId, providerName) : null
-        normalizedToolId = unavailable ? unavailable.toolId : providerToolId
+        normalizedToolId = providerToolId
+        if (!route && !ai.tools.get(normalizedToolId) && ai.providerToolAliasCandidates) {
+          const candidates = ai.providerToolAliasCandidates(normalizedToolId, ai.tools.list())
+          if (candidates.length === 1) normalizedToolId = candidates[0]
+        }
+        if (!spec && ai.tools.get(normalizedToolId)) {
+          assertToolArguments(providerArgs, {
+            id: normalizedToolId,
+            schema: ai.tools.schema(normalizedToolId, request || {}),
+          }, id, argumentMode)
+        }
         normalized.push(Object.assign({}, call, {
           id: id,
           toolId: normalizedToolId,
@@ -209,9 +145,9 @@
           executorToolId: executorToolId,
           executorArgs: route ? executorArgs : null,
           argumentMode: argumentMode,
-          status: denied ? 'failed' : (call.status || 'proposed'),
-          error: denied ? unavailable.message : call.error,
-          errorDetails: denied ? unavailable : call.errorDetails,
+          status: call.status || 'proposed',
+          error: call.error,
+          errorDetails: call.errorDetails,
           actor: who || 'user',
           createdAt: call.createdAt || Date.now(),
           updatedAt: call.updatedAt || Date.now(),
@@ -280,16 +216,6 @@
 
   function toolArgumentSummary(args) {
     return ai.serialize.compactString(ai.serialize.stableStringify(args), 320)
-  }
-
-  function requestToolMap(request) {
-    if (!request) return null
-    const map = {}
-    const specs = request.toolSpecs || []
-    const refs = request.tools || []
-    for (let i = 0; i < specs.length; i++) map[specs[i].id] = true
-    if (!specs.length) for (let j = 0; j < refs.length; j++) map[refs[j]] = true
-    return map
   }
 
   function appendCapped(target, key, text, max, label) {
@@ -407,6 +333,15 @@
     })
   }
 
+  function approvalActivity(message) {
+    const calls = message && message.toolCalls || []
+    for (let i = 0; i < calls.length; i++) {
+      if (!calls[i].approvalPhase) continue
+      return 'awaiting approval ' + toolCallName(calls[i]) + ' · ' + String(i + 1) + '/' + String(calls.length)
+    }
+    return 'awaiting tool approval'
+  }
+
   function usageNumber(usage, keys) {
     if (!usage) return 0
     for (let i = 0; i < keys.length; i++) {
@@ -431,11 +366,12 @@
   function effectiveRunBudget(budget) {
     const requested = budget || {}
     const limits = runtimeConfig.limits || {}
-    return {
+    const effective = {
       maxTurns: clampLimit(requested.maxTurns, limits.maxTurns),
       timeoutMs: clampLimit(requested.timeoutMs, limits.timeoutMs),
       maxTokens: clampLimit(requested.maxTokens, limits.maxTokens),
     }
+    return effective.maxTurns || effective.timeoutMs || effective.maxTokens ? effective : null
   }
 
   function emptyUsage() {
@@ -941,7 +877,12 @@
           job = Promise.reject(err)
         }
         return job.catch(function (err) {
-          appendToolResult(agentId, call, { error: String(err && err.message || err) }, 'error')
+          const found = ai.findToolCall ? ai.findToolCall(agentId, call.id) : null
+          const current = found && found.toolCall
+          const failed = current && isTerminalToolStatus(current.status)
+            ? current
+            : ai.failToolCall(agentId, call.id, err, 'run')
+          if (!hasToolResult(ai.findAgent(agentId), call.id)) appendToolResult(agentId, call, failedToolPayload(failed || call), 'error')
           if (err && err.code !== 'TOOL_CANCELLED' && aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: call.toolId || call.name || 'tool' }, err)
           return { waiting: false, error: err }
         })
@@ -1170,9 +1111,6 @@
     const fingerprint = toolArgumentFingerprint(error)
     if (current.fingerprints.indexOf(fingerprint) >= 0) {
       return { allowed: false, reason: 'repeated', state: current }
-    }
-    if (current.count >= runtimeConfig.maxToolArgumentCorrections) {
-      return { allowed: false, reason: 'budget', state: current }
     }
     return {
       allowed: true,
@@ -1509,10 +1447,15 @@
       if (controller.signal.aborted || !state.count) return message
       const current = ai.findAgent(agentId)
       if (!current || state.waiting) {
+        const waitingMessage = ai.readMessage(agentId, message.id) || message
         trace({ type: 'run_waiting_approval', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: message.id, questId: request.input && request.input.questId || null, status: 'waiting_approval', summary: 'waiting for tool approval' })
         publishRunState(agentId, {
           messageId: message.id,
           content: message.content || '',
+          previewTail: '',
+          modelTail: '',
+          activityText: approvalActivity(waitingMessage),
+          previewUpdatedAt: Date.now(),
           startTime: request.startTime || (message.stats && message.stats.startTime) || Date.now(),
           firstTokenAt: message.stats && message.stats.firstTokenAt || null,
           usage: message.usage || (message.stats && message.stats.usage) || null,
@@ -1545,11 +1488,12 @@
         return message
       }
       if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agentId, null, { phase: 'before_tool_continuation' })
-      const nextRequest = planRunRequest(ai.findAgent(agentId) || current, null, request.runId, actor, (request.turn || 0) + 1)
-      nextRequest.input = request.input
+      const nextRequest = planRunRequest(ai.findAgent(agentId) || current, request.input, request.runId, actor, (request.turn || 0) + 1)
       nextRequest.budget = request.budget
       nextRequest.startedAt = request.startedAt
-      nextRequest.toolArgumentCorrection = request.toolArgumentCorrection || null
+      nextRequest.toolArgumentCorrection = calls.some(function (call) {
+        return call.status === 'failed' && isToolArgumentError(call.errorDetails)
+      }) ? (request.toolArgumentCorrection || null) : null
       const nextCtx = ai.createRunContext(nextRequest, controller)
       return runChatTurn(agentId, provider, nextRequest, nextCtx, controller, actor)
     })
@@ -1562,17 +1506,14 @@
   }
 
   function consumedBudgetStopReason(budget, turns, usage) {
+    if (!budget) return null
     if (budget.maxTurns && turns >= budget.maxTurns) return 'max_turns'
     if (budget.maxTokens && usage && usage.reported && usage.totalTokens >= budget.maxTokens) return 'max_tokens'
     return null
   }
 
   function planRunRequest(agent, input, runId, actor, turn) {
-    const selected = runSkillRefs[runId] || []
-    const requestInput = selected.length
-      ? Object.assign({}, input || {}, { selectedSkillRefs: selected.slice() })
-      : input
-    const request = ai.planRequest(agent, requestInput, runId, actor, turn)
+    const request = ai.planRequest(agent, input, runId, actor, turn)
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
     request.budget = quest && quest.budget || effectiveRunBudget()
     request.startedAt = quest && quest.startedAt || Date.now()
@@ -1640,7 +1581,6 @@
   function failRunningRequest(agentId, request, controller, key, err) {
     clearBudgetTimer(agentId)
     delete runs[key]
-    delete runSkillRefs[request.runId]
     const input = request.input
     const stopped = controller.signal.aborted
     if (input && input.id) ai.updateMessage(agentId, input.id, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now() })
@@ -1667,7 +1607,7 @@
     return null
   }
 
-  function startRunningRequest(agentId, request, actor, statusText, markInputStarted) {
+  function startRunningRequest(agentId, request, actor, statusText, markInputStarted, execute) {
     const controller = new AbortController()
     const runner = providerRunner()
     const ctx = ai.createRunContext(request, controller)
@@ -1675,10 +1615,6 @@
     const input = request.input
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agentId, input.questId) : null
     request.startedAt = quest && quest.startedAt || request.startedAt || Date.now()
-    const transientSkills = (request.skillActivations || []).filter(function (item) {
-      return item.reason === 'explicit' || item.reason === 'selected'
-    }).map(function (item) { return item.id })
-    if (transientSkills.length) runSkillRefs[request.runId] = transientSkills
     runs[key] = {
       controller: controller,
       connection: runner,
@@ -1712,7 +1648,9 @@
     armBudgetTimer(agentId, request)
 
     const promise = Promise.resolve().then(function () {
-      return runChatTurn(agentId, runner, request, ctx, controller, actor)
+      return execute
+        ? execute(runner, request, ctx, controller, actor)
+        : runChatTurn(agentId, runner, request, ctx, controller, actor)
     }).then(function (result) {
       if (controller.signal.aborted) return null
       return finishAgentRun(agentId, request, result, key, controller)
@@ -1757,7 +1695,6 @@
     delete runs[key]
     const current = ai.findAgent(agentId)
     if (current && current.status === 'waiting_approval') return result
-    delete runSkillRefs[request.runId]
     clearBudgetTimer(agentId)
     completeMessageExecution(agentId, request, result)
     trace({
@@ -2211,7 +2148,6 @@
         else run.connection.abort(run.runId)
       }
       delete runs[agent.id]
-      delete runSkillRefs[run.runId]
     }
     if (waiting) {
       ai.setActiveRunState(agent.id, {
@@ -2225,7 +2161,6 @@
       stopQuestExecution(agent.id, input, stopReason, waiting.usage)
       trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       delete waitingRuns[agent.id]
-      delete runSkillRefs[waiting.runId]
     }
     ai.setAgentStatus(agent.id, status || 'idle')
     return true
@@ -2238,20 +2173,24 @@
     if (!canStartRun(agent.id)) return null
     const message = ai.readMessage(agent.id, waiting.messageId)
     const toolState = appendResolvedToolResults(agent.id, message)
-    if (toolState.pending) return null
-    const budgetReason = consumedBudgetStopReason(waiting.request.budget, waiting.turn + 1, waiting.usage)
-    if (budgetReason) {
-      stopRun(agent.id, 'idle', budgetReason)
-      scheduleQueuedAgents()
-      return null
+    if (!toolState.pending) {
+      const budgetReason = consumedBudgetStopReason(waiting.request.budget, waiting.turn + 1, waiting.usage)
+      if (budgetReason) {
+        stopRun(agent.id, 'idle', budgetReason)
+        scheduleQueuedAgents()
+        return null
+      }
     }
     delete waitingRuns[agent.id]
     if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agent.id, waiting.request.input, { phase: 'before_resume' })
 
-    const request = planRunRequest(ai.findAgent(agent.id), waiting.request.input, waiting.runId, waiting.actor, waiting.turn + 1)
+    const request = Object.assign({}, waiting.request)
     request.accumulatedUsage = waiting.usage || emptyUsage()
     request.startedAt = waiting.request.startedAt
-    return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing after tool approval', false)
+    return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing tool calls', false, function (provider, nextRequest, ctx, controller, nextActor) {
+      const currentMessage = ai.readMessage(agent.id, waiting.messageId) || message
+      return continueAfterTools(agent.id, provider, currentMessage, null, nextRequest, controller, nextActor)
+    })
   }
 
   function stopAgent(agentId) {
@@ -2575,14 +2514,6 @@
     }
   }
 
-  function runRecord(runId) {
-    const agentIds = Object.keys(runs)
-    for (let i = 0; i < agentIds.length; i++) if (runs[agentIds[i]].runId === runId) return runs[agentIds[i]]
-    const waitingIds = Object.keys(waitingRuns)
-    for (let j = 0; j < waitingIds.length; j++) if (waitingRuns[waitingIds[j]].runId === runId) return waitingRuns[waitingIds[j]]
-    return null
-  }
-
   function runStatusText(input) {
     const content = input && input.content
     if (content == null) return ''
@@ -2592,67 +2523,9 @@
     return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 120)
   }
 
-  function activateRunSkill(runId, skillId, ctx) {
-    const record = runRecord(runId)
-    if (!record) throw new Error('Skill activation requires a live run.')
-    skillId = normalizedSkillId(skillId)
-    const skill = ai.skills && ai.skills.get(skillId)
-    if (!skill || skill.modelInvocable === false) throw new Error('Skill is not model-invocable: ' + skillId)
-    const request = record.request || {}
-    const availability = ai.skills.availability(skillId, runSkillContext(runId, ctx))
-    if (!availability.available) {
-      return { outcome: 'unavailable', id: skillId, reason: availability.reason }
-    }
-    const active = (request.skills || []).indexOf(skillId) >= 0
-    const selected = runSkillRefs[runId] = runSkillRefs[runId] || []
-    if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId, lifetime: 'run' }
-    selected.push(skillId)
-    return { outcome: 'activated', id: skillId, continuation: true, lifetime: 'run' }
-  }
-
-  function normalizedSkillId(value) {
-    const text = String(value || '')
-    const prefix = 'aiditor://skills/'
-    if (text.indexOf(prefix) !== 0) return text
-    const path = text.slice(prefix.length).split('/')[0]
-    try { return decodeURIComponent(path) } catch (_) { return path }
-  }
-
-  function runSkillContext(runId, ctx) {
-    const record = runRecord(runId)
-    const request = record && record.request || {}
-    const active = []
-    const seen = {}
-    const requestSkills = request.skills || []
-    const selected = runSkillRefs[runId] || []
-    for (let i = 0; i < requestSkills.length; i++) {
-      if (!seen[requestSkills[i]]) active.push(requestSkills[i])
-      seen[requestSkills[i]] = true
-    }
-    for (let j = 0; j < selected.length; j++) {
-      if (!seen[selected[j]]) active.push(selected[j])
-      seen[selected[j]] = true
-    }
-    return Object.assign({}, ctx || {}, {
-      ai: ai,
-      agent: request.agent,
-      actor: request.actor,
-      runId: runId,
-      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
-      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
-      runtimeContext: request.runtimeContext || [],
-      skillRefs: active,
-      toolIds: request.tools ? request.tools.slice() : [],
-      modelToolIds: request.modelToolIds ? request.modelToolIds.slice() : [],
-      configuredSkillRefs: request.agent && request.agent.skillRefs ? request.agent.skillRefs.slice() : [],
-    })
-  }
-
   ai.runAgent = runAgent
   ai.stopAgent = stopAgent
   ai.resumeAgent = resumeAgent
-  ai.activateRunSkill = activateRunSkill
-  ai._runSkillContext = runSkillContext
   ai.flushToolResults = flushToolResults
   ai.scheduleAgent = scheduleAgent
   ai.configureRuntime = function (config) {
@@ -2661,7 +2534,6 @@
     if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
     if (next.maxConcurrentTools != null) runtimeConfig.maxConcurrentTools = next.maxConcurrentTools
     if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
-    if (next.maxToolArgumentCorrections != null) runtimeConfig.maxToolArgumentCorrections = next.maxToolArgumentCorrections
     if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)
     scheduleQueuedAgents()
     return ai.runtimeConfig()

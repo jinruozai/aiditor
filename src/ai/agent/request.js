@@ -3,6 +3,17 @@
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const DEFAULT_SYSTEM_PROMPT = [
+    'You are an AI agent.',
+    'Complete the user\'s request using the capabilities available in the current request.',
+    'Treat the current workspace, runtime state, and Tool results as the source of truth.',
+    'Never claim an action that was not completed.',
+    'If blocked, state the exact blocker.',
+    'Keep responses concise, clear, and limited to what is necessary.',
+  ].join('\n')
+  const SKILL_BOOTSTRAP_TOOLS = ['skill.read']
+  const SKILL_CATALOG_MAX_TOKENS = 2000
+  const SKILL_CATALOG_CONTEXT_RATIO = 0.02
 
   function resolveAttachmentRef(ref, all) {
     if (typeof ref === 'string') return all.find(function (item) { return item.id === ref }) || { id: ref }
@@ -103,16 +114,30 @@
     })
   }
 
-  function resolveToolRefs(ctx, skillSpecs) {
-    const refs = []
-    const seen = {}
-    const controls = ai.skillControlTools || []
-    for (let i = 0; i < controls.length; i++) addUnique(refs, seen, controls[i])
-    for (let j = 0; j < (skillSpecs || []).length; j++) {
-      const tools = skillSpecs[j].tools || []
-      for (let k = 0; k < tools.length; k++) addUnique(refs, seen, tools[k])
+  function availableSkillTools(skill, ctx) {
+    const out = []
+    const tools = skill && skill.tools || []
+    for (let i = 0; i < tools.length; i++) {
+      if (ai.tools && ai.tools.available && ai.tools.available(tools[i], ctx)) out.push(tools[i])
     }
-    return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, true) : refs
+    return out
+  }
+
+  function resolveToolRefs(ctx, skills, includeSkillList) {
+    const out = []
+    const seen = {}
+    function add(id) {
+      if (!id || seen[id] || !ai.tools.available(id, ctx)) return
+      seen[id] = true
+      out.push(id)
+    }
+    for (let i = 0; i < SKILL_BOOTSTRAP_TOOLS.length; i++) add(SKILL_BOOTSTRAP_TOOLS[i])
+    if (includeSkillList) add('skill.list')
+    for (let i = 0; i < (skills || []).length; i++) {
+      const tools = skills[i].tools || []
+      for (let j = 0; j < tools.length; j++) add(tools[j])
+    }
+    return out
   }
 
   function resolveTools(ctx, toolIds) {
@@ -158,39 +183,10 @@
     list.push(id)
   }
 
-  function skillPromptLines(skill) {
-    const lines = []
-    if (skill.systemPrompt) lines.push(skill.title + ': ' + skill.systemPrompt)
-    const rules = skill.rules || []
-    for (let i = 0; i < rules.length; i++) lines.push('- ' + rules[i])
-    return lines
-  }
-
-  function addSkillActivation(list, seen, id, reason, ctx) {
-    if (!id || seen[id]) return
-    const skill = ai.skills && ai.skills.get ? ai.skills.get(id) : null
-    if (!skill) return
-    const availability = ai.skills.availability ? ai.skills.availability(id, ctx || {}) : { available: true }
-    if (!availability.available) return
-    seen[id] = true
-    const meta = ai.skills.meta ? ai.skills.meta(id) : {}
-    list.push({
-      id: id,
-      reason: reason,
-      spec: skill,
-      owner: meta.owner || null,
-      layer: meta.layer || null,
-      source: meta.source || null,
-      hash: meta.hash || null,
-      promptChars: skillPromptLines(skill).join('\n').length,
-      tools: (skill.tools || []).slice(),
-    })
-  }
-
-  function explicitSkillRefs(input) {
+  function requestedSkillIds(input) {
     const out = []
     const seen = {}
-    const direct = input && (input.skillRefs || input.meta && input.meta.skillRefs) || []
+    const direct = input && (input.skills || input.meta && input.meta.skills) || []
     for (let i = 0; i < direct.length; i++) addUnique(out, seen, direct[i])
     const content = input && input.content
     if (content && content.type === 'rich-prompt' && ai.richPrompt && ai.richPrompt.skills) {
@@ -200,39 +196,61 @@
     return out
   }
 
-  function resolveSkillActivations(agent, input, ctx) {
-    const activations = []
-    const seen = {}
-    const explicit = explicitSkillRefs(input)
-    for (let e = 0; e < explicit.length; e++) addSkillActivation(activations, seen, explicit[e], 'explicit', ctx)
-    const defaults = ai.skills && ai.skills.defaults ? ai.skills.defaults() : []
-    for (let d = 0; d < defaults.length; d++) addSkillActivation(activations, seen, defaults[d], 'host', ctx)
-    const configured = agent.skillRefs || []
-    for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured', ctx)
-    const selected = input && input.selectedSkillRefs || []
-    for (let j = 0; j < selected.length; j++) addSkillActivation(activations, seen, selected[j], 'selected', ctx)
-    return activations
+  function requestedSkills(input) {
+    const ids = requestedSkillIds(input)
+    const out = []
+    for (let i = 0; i < ids.length; i++) {
+      const skill = ai.skills && ai.skills.get ? ai.skills.get(ids[i]) : null
+      if (skill) out.push(skill)
+    }
+    return out
   }
 
-  function activationDetails(activations) {
-    return activations.map(function (activation) {
-      return {
-        id: activation.id,
-        reason: activation.reason,
-        owner: activation.owner,
-        layer: activation.layer,
-        source: activation.source,
-        hash: activation.hash,
-        promptChars: activation.promptChars,
-        tools: activation.tools.slice(),
+  function contextReadSkills(agent, input) {
+    const messages = ai.compaction && ai.compaction.requestMessages
+      ? ai.compaction.requestMessages(agent, input)
+      : (agent.messages || [])
+    const completed = {}
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i]
+      if (message.role === 'tool' && message.status !== 'error' && message.meta && message.meta.toolCallId) {
+        completed[message.meta.toolCallId] = true
       }
-    })
+    }
+    const out = []
+    const seen = {}
+    for (let i = 0; i < messages.length; i++) {
+      const calls = messages[i].toolCalls || []
+      for (let j = 0; j < calls.length; j++) {
+        const call = calls[j]
+        if (call.toolId !== 'skill.read' || !completed[call.id] || call.args && call.args.resource) continue
+        const id = call.args && call.args.id
+        const skill = id && ai.skills && ai.skills.get ? ai.skills.get(String(id)) : null
+        if (!skill || seen[skill.id]) continue
+        seen[skill.id] = true
+        out.push(skill)
+      }
+    }
+    return out
   }
 
-  function resolveSkillSpecs(activations) {
-    return activations.map(function (activation) {
-      return Object.assign({ id: activation.id }, activation.spec)
-    })
+  function projectedSkills(agent, input, requested) {
+    const out = []
+    const seen = {}
+    function add(skill) {
+      if (!skill || seen[skill.id]) return
+      seen[skill.id] = true
+      out.push(skill)
+    }
+    const ids = ai.skills && ai.skills.list ? ai.skills.list() : []
+    for (let i = 0; i < ids.length; i++) {
+      const skill = ai.skills.get(ids[i])
+      if (skill && skill.toolDisclosure === 'always') add(skill)
+    }
+    for (let i = 0; i < requested.length; i++) add(requested[i])
+    const read = contextReadSkills(agent, input)
+    for (let i = 0; i < read.length; i++) add(read[i])
+    return out
   }
 
   function compactJson(value, max) {
@@ -593,67 +611,110 @@
     )
   }
 
-  function skillLines(agent, input, requestCtx) {
-    const specs = requestCtx && requestCtx.skillSpecs || resolveSkillSpecs(resolveSkillActivations(agent, input, requestCtx))
-    const lines = []
-    for (let i = 0; i < specs.length; i++) {
-      lines.push.apply(lines, skillPromptLines(specs[i]))
-    }
-    return lines
-  }
-
-  function skillCatalogMessage(requestCtx) {
-    if (!ai.skills || !ai.skills.catalog) return null
-    const active = requestCtx && requestCtx.skillRefs || []
-    const items = ai.skills.catalog(requestCtx || {}, { limit: 50 }).map(function (item) {
-      return {
-        id: item.id,
-        description: String(item.description || item.whenToUse || '').slice(0, 320),
-        active: active.indexOf(item.id) >= 0,
-        available: item.available,
-        unavailableReason: item.available ? '' : item.unavailableReason,
-      }
-    })
-    if (!items.length) return null
-    return contextCardMessage(
-      'skills',
-      'skill-catalog',
-      75,
-      'Available Skills for this runtime. Active Skills provide the current instructions and Tools. When a required capability is inactive, call skill.activate with its id; the next continuation will expose it. Model-selected activation lasts for the current run only and must be repeated in a new request unless the Skill is configured in agent.skillRefs. Unavailable Skills state the missing host capability.\n' + compactJson(items, 6000),
-      7000
-    )
-  }
-
-  function runtimeGuideMessage(agent, requestCtx) {
-    const lines = [
-      'You are an AIditor AI agent running inside an editor runtime.',
-      'Complete the current request with the capabilities exposed in this request; never claim an action that was not performed.',
-      'Current runtime state and available tools override older transcript claims about capabilities.',
-      'Stop with a clear result when complete, or report the exact blocker when required state, permission, or user input is missing.',
-      'Do not retry an equivalent failed tool call under guessed names.',
-      'Invoke tools only through the provider tool-calling interface. Never print or imitate XML tool-call markup such as <invoke> in assistant text.',
-      'CURRENT_AGENT_ID: ' + (agent.id || ''),
-      'CURRENT_AGENT_NAME: ' + (agent.name || ''),
-      'CURRENT_PARENT_AGENT_ID: ' + (agent.parentAgentId || ''),
-    ]
-    if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
-    if (!requestCtx || !(requestCtx.modelToolIds || []).length) {
-      lines.push('AVAILABLE_TOOLS: none. Report that the required capability is unavailable instead of imitating a tool call.')
-    }
-    const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
-    if (skills.length) lines.push('ACTIVE_SKILLS:\n' + skills.join('\n'))
+  function runtimeGuideMessage(agent) {
+    const content = agent.systemPrompt == null ? DEFAULT_SYSTEM_PROMPT : String(agent.systemPrompt)
+    if (!content) return null
     return {
       id: 'system-runtime-' + Date.now().toString(36),
       from: 'system',
       role: 'system',
       status: 'done',
-      content: lines.join('\n'),
+      content: content,
       meta: {
         contextLayer: 'runtime',
         contextCardId: 'runtime',
         contextPriority: 100,
       },
     }
+  }
+
+  function skillToolCountLabel(skill, requestCtx) {
+    const total = (skill.tools || []).length
+    if (!total) return 'instruction only'
+    const available = availableSkillTools(skill, requestCtx || {}).length
+    return available === total
+      ? total + (total === 1 ? ' tool' : ' tools')
+      : available + '/' + total + ' tools available'
+  }
+
+  function truncatedSkillDescription(value, maxChars) {
+    const text = String(value || '').trim().replace(/\s+/g, ' ')
+    if (!maxChars) return ''
+    if (text.length <= maxChars) return text
+    return text.slice(0, Math.max(1, maxChars - 1)).trim() + '…'
+  }
+
+  function skillCatalogLine(skill, requestCtx, descriptionChars) {
+    const description = truncatedSkillDescription(skill.description, descriptionChars)
+    return '- ' + skill.id + (description ? ': ' + description : '') + ' (' + skillToolCountLabel(skill, requestCtx) + ')'
+  }
+
+  function skillCatalogText(lines, omitted) {
+    const out = [
+      'Available Skills. Use skill.read({ id }) to load one Skill\'s instructions and currently available Tool schemas.',
+    ].concat(lines)
+    if (omitted) out.push(omitted + ' additional Skills omitted; use skill.list and follow nextCursor to enumerate all Skills.')
+    return out.join('\n')
+  }
+
+  function buildSkillCatalog(agent, requestCtx) {
+    if (!ai.skills || !ai.skills.catalog) return null
+    const skills = ai.skills.catalog()
+    if (!skills.length) return null
+    const tokenBudget = Math.max(256, Math.min(
+      SKILL_CATALOG_MAX_TOKENS,
+      Math.floor(modelContextLimit(agent) * SKILL_CATALOG_CONTEXT_RATIO)
+    ))
+    const descriptionCaps = [240, 160, 120, 80, 40, 0]
+    for (let i = 0; i < descriptionCaps.length; i++) {
+      const lines = skills.map(function (skill) {
+        return skillCatalogLine(skill, requestCtx, descriptionCaps[i])
+      })
+      const content = skillCatalogText(lines, 0)
+      if (estimateTokens(content) <= tokenBudget) {
+        return { content: content, total: skills.length, included: skills.length, omitted: 0 }
+      }
+    }
+    const lines = []
+    for (let i = 0; i < skills.length; i++) {
+      const next = lines.concat([skillCatalogLine(skills[i], requestCtx, 0)])
+      const omitted = skills.length - next.length
+      if (estimateTokens(skillCatalogText(next, omitted)) > tokenBudget) break
+      lines.push(next[next.length - 1])
+    }
+    const omitted = skills.length - lines.length
+    return {
+      content: skillCatalogText(lines, omitted),
+      total: skills.length,
+      included: lines.length,
+      omitted: omitted,
+    }
+  }
+
+  function skillCatalogMessage(requestCtx) {
+    const catalog = requestCtx && requestCtx.skillCatalog
+    if (!catalog) return null
+    return contextCardMessage(
+      'skills',
+      'skill-catalog',
+      75,
+      catalog.content,
+      catalog.content.length + 1
+    )
+  }
+
+  function skillInstructionsMessage(requestCtx) {
+    const skills = requestCtx && requestCtx.requestedSkills || []
+    if (!skills.length) return null
+    return contextCardMessage(
+      'skills',
+      'skill-instructions',
+      76,
+      skills.map(function (skill) {
+        return skill.title + ' (' + skill.id + ')\n' + skill.instructions
+      }).join('\n\n'),
+      16000
+    )
   }
 
   function outputSchemaMessage(requestCtx) {
@@ -733,19 +794,23 @@
   }
 
   function prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolIds) {
-    const out = [runtimeGuideMessage(agent, requestCtx)]
+    const out = []
+    const runtimeGuide = runtimeGuideMessage(agent)
+    const skillCatalog = skillCatalogMessage(requestCtx)
+    const skillInstructions = skillInstructionsMessage(requestCtx)
     const output = outputSchemaMessage(requestCtx)
     const workspace = workspaceContextMessage(requestCtx, toolIds)
     const task = taskStateContextMessage(agent, input, requestCtx, requestCtx && requestCtx.modelToolIds || toolIds)
-    const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
     const inbox = inboxContextMessage(agent, input)
     const queued = queuedContextMessage(agent, input)
+    if (runtimeGuide) out.push(runtimeGuide)
     if (output) out.push(output)
+    if (skillCatalog) out.push(skillCatalog)
+    if (skillInstructions) out.push(skillInstructions)
     if (workspace) out.push(workspace)
     if (task) out.push(task)
-    if (skills) out.push(skills)
     if (runtimeContext) out.push(runtimeContext)
     if (attachments) out.push(attachments)
     const compacted = compactionContextMessages(agent)
@@ -802,14 +867,15 @@
       event: input && input.event ? input.event : null,
     }
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
-    const skillActivationRecords = resolveSkillActivations(agent, input, baseCtx)
-    const skillRefs = skillActivationRecords.map(function (activation) { return activation.id })
-    const skillSpecs = resolveSkillSpecs(skillActivationRecords)
-    const skillActivations = activationDetails(skillActivationRecords)
-    baseCtx.skillRefs = skillRefs
-    baseCtx.skillSpecs = skillSpecs
-    baseCtx.skillActivations = skillActivations
-    const tools = connectionCapabilities.toolCalling ? resolveToolRefs(baseCtx, skillSpecs) : []
+    baseCtx.requestedSkills = requestedSkills(input)
+    baseCtx.skillCatalog = buildSkillCatalog(agent, baseCtx)
+    const tools = connectionCapabilities.toolCalling
+      ? resolveToolRefs(
+          baseCtx,
+          projectedSkills(agent, input, baseCtx.requestedSkills),
+          !!(baseCtx.skillCatalog && baseCtx.skillCatalog.omitted)
+        )
+      : []
     baseCtx.toolIds = tools
     const toolSpecs = ai.toolArguments && ai.toolArguments.prepareSpecs
       ? ai.toolArguments.prepareSpecs(resolveTools(baseCtx, tools), connectionCapabilities)
@@ -818,22 +884,6 @@
     const messages = requestMessages(agent, input, attachmentRefs, [], baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
-      for (let i = 0; i < skillActivations.length; i++) {
-        const activation = skillActivations[i]
-        ai.trace.append({
-          type: 'skill_activated',
-          runId: runId,
-          traceId: runId,
-          agentId: agent.id,
-          messageId: input && input.id || null,
-          questId: input && input.questId || null,
-          phase: 'request',
-          entry: activation.id,
-          status: 'active',
-          summary: activation.reason + ' skill: ' + activation.id,
-          meta: activation,
-        })
-      }
       ai.trace.append({
         type: 'request_built',
         runId: runId,
@@ -849,8 +899,8 @@
           toolCount: toolSpecs.length,
           gatewayCount: tools.length,
           toolIds: tools.slice(),
-          skillRefs: skillRefs.slice(),
-          skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
+          requestedSkills: baseCtx.requestedSkills.map(function (skill) { return skill.id }),
+          omittedSkills: baseCtx.skillCatalog && baseCtx.skillCatalog.omitted || 0,
           toolProtocol: connectionCapabilities.toolProtocol || 'none',
           toolArguments: connectionCapabilities.toolArguments || 'none',
           strictToolCount: toolSpecs.filter(function (tool) { return tool.argumentMode === 'strict' }).length,
@@ -880,9 +930,7 @@
       tools: tools,
       toolSpecs: toolSpecs,
       modelToolIds: baseCtx.modelToolIds.slice(),
-      skills: skillRefs,
-      skillSpecs: skillSpecs,
-      skillActivations: skillActivations,
+      requestedSkills: baseCtx.requestedSkills.map(function (skill) { return skill.id }),
       outputSchema: agent.outputSchema || null,
       stream: stream,
       target: agent,

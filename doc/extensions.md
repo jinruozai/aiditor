@@ -54,15 +54,15 @@ reported before any registry is mutated.
         id: 'makeThing',
         adapter: 'sample.adapter',
         permissions: ['tool.call', 'tool.apply'],
-        risk: 'write',
-        visibleToModel: true
+        risk: 'write'
       }
     ],
     skills: [
       {
         id: 'authoring',
         description: 'Guide an Agent through this extension workflow.',
-        systemPrompt: 'Use the extension tools through their registered ids.',
+        instructions: 'Use the extension tools through their registered ids.',
+        toolDisclosure: 'onRead',
         tools: ['makeThing']
       }
     ],
@@ -135,6 +135,10 @@ Commands are UI/human actions for menus, buttons, command palettes, shortcuts,
 and context menus. Tools are AI/model actions with schemas, permissions,
 tool-call state, and model-visible results. Extensions may contribute both when
 the same feature should be available to both humans and agents.
+
+Extension Skills use `toolDisclosure: always | onRead`. The default is
+`onRead`; Tool schemas are projected after `skill.read` or an explicit Skill
+selection. `always` projects currently available schemas in every request.
 
 Implemented extension APIs currently include:
 

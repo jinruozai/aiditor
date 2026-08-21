@@ -39,9 +39,9 @@ for (const file of [
   'src/core/workspace.js',
   'src/tree/tree.js',
   'src/core/registry.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
+  'src/ai/agent/store.js',
   'src/ai/connection.js',
   'src/ai/schema.js',
   'src/ai/contribution-registry.js',
@@ -56,7 +56,7 @@ for (const file of [
   'src/extensions/install.js',
   'src/extensions/runtime.js',
   'src/extensions/ai.js',
-  'src/ai/request.js',
+  'src/ai/agent/request.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -73,18 +73,18 @@ assert.equal(typeof ai.tools.get('aiditor.addPanelToDock').preview, 'function')
 assert.equal(typeof ai.tools.get('aiditor.reloadPanel').preview, 'function')
 ai.skills.register('test.extension-runtime', {
   title: 'Extension Runtime Test',
-  tools: ['aiditor.inspectDocks', 'aiditor.addPanelToDock'],
+  toolDisclosure: 'always',
+  tools: ['aiditor.installExtension', 'aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.applyOperation'],
 }, { owner: 'test:extension-runtime' })
 const extensionAgent = ai.createAgent({
   name: 'Extension Agent',
-  skillRefs: ['test.extension-runtime'],
 })
 const extensionRequest = ai.planRequest(extensionAgent, null, 'run_extension_tools', 'user', 0)
-assert.equal(extensionRequest.tools.includes('aiditor.installExtension'), false)
+assert.equal(extensionRequest.tools.includes('aiditor.installExtension'), true)
 assert.equal(extensionRequest.tools.includes('aiditor.inspectDocks'), true)
 assert.equal(extensionRequest.tools.includes('aiditor.addPanelToDock'), true)
 assert.equal(extensionRequest.tools.includes('aiditor.previewOperation'), false)
-assert.equal(extensionRequest.tools.includes('aiditor.applyOperation'), false)
+assert.equal(extensionRequest.tools.includes('aiditor.applyOperation'), true)
 const hiddenOperation = ai.tools.get('aiditor.previewOperation').run(
   { op: 'aiditor.installExtension', input: { manifest: {} } },
   { actor: 'user', agent: extensionAgent }
@@ -241,7 +241,7 @@ aiditor.extensions.install({
     references: [{ id: 'data', provider: {} }],
     operations: [{ id: 'patch', risk: 'edit' }],
     tools: [{ id: 'read', title: 'Nested Read', run: function () { return 'parent' } }],
-    skills: [{ id: 'review', title: 'Nested Review', tools: ['read'], rules: ['Review nested data'] }],
+    skills: [{ id: 'review', title: 'Nested Review', toolDisclosure: 'onRead', tools: ['read'], instructions: 'Review nested data' }],
     context: [{ id: 'ctx', provider: { capture: function () { return 'parent' } } }],
     commands: [{ id: 'refresh', title: 'Nested Refresh' }],
     menus: [{ target: 'dock.panel.context', command: 'refresh', label: 'Nested Refresh' }],
@@ -255,7 +255,7 @@ aiditor.extensions.install({
     references: [{ id: 'data', provider: {} }],
     operations: [{ id: 'patch', risk: 'edit' }],
     tools: [{ id: 'read', title: 'Nested Child Read', run: function () { return 'child' } }],
-    skills: [{ id: 'review', title: 'Nested Child Review', tools: ['read'], rules: ['Review child data'] }],
+    skills: [{ id: 'review', title: 'Nested Child Review', tools: ['read'], instructions: 'Review child data' }],
     context: [{ id: 'ctx', provider: { capture: function () { return 'child' } } }],
     commands: [{ id: 'refresh', title: 'Nested Child Refresh' }],
     menus: [{ target: 'dock.panel.context', command: 'refresh', label: 'Nested Child Refresh' }],
@@ -278,6 +278,7 @@ assert.notEqual(ai.operations.get('nested.child.patch'), null)
 assert.notEqual(ai.tools.get('nested.child.read'), undefined)
 assert.notEqual(ai.skills.get('nested.child.review'), undefined)
 assert.deepEqual(ai.skills.get('nested.child.review').tools, ['nested.child.read'])
+assert.equal(ai.skills.get('nested.child.review').toolDisclosure, 'onRead')
 assert.equal(ai.skills.meta('nested.child.review').owner, 'extension:nested.child')
 assert.notEqual(ai.context.get('nested.child.ctx'), null)
 assert.notEqual(aiditor.commands.get('nested.child.refresh'), null)

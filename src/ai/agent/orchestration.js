@@ -23,6 +23,12 @@
     return error
   }
 
+  function permissionError(message) {
+    const error = new Error(message || 'Permission denied')
+    error.code = 'PERMISSION_DENIED'
+    return error
+  }
+
   function questAccessError(args, ctx) {
     const who = actor(ctx)
     const agentId = args && args.agentId || ''
@@ -52,19 +58,19 @@
   }
 
   function requireRead(ctx, agentId) {
-    if (!ai.canRead(actor(ctx), agentId, 'agent.full')) throw new Error('Permission denied')
+    if (!ai.canRead(actor(ctx), agentId, 'agent.full')) throw permissionError()
   }
 
   function requireSend(ctx, agentId) {
-    if (!ai.canSend(actor(ctx), agentId)) throw new Error('Permission denied')
+    if (!ai.canSend(actor(ctx), agentId)) throw permissionError()
   }
 
   function requireManage(ctx, agentId) {
-    if (!ai.canManage(actor(ctx), agentId)) throw new Error('Permission denied')
+    if (!ai.canManage(actor(ctx), agentId)) throw permissionError()
   }
 
   function requireConfigure(ctx, agentId) {
-    if (actor(ctx) === agentId) throw new Error('Permission denied: agents cannot configure themselves')
+    if (actor(ctx) === agentId) throw permissionError('Permission denied: agents cannot configure themselves')
     requireManage(ctx, agentId)
   }
 
@@ -116,7 +122,7 @@
       if (parentAgentId) requireManageOrSelf(ctx, parentAgentId)
       return parentAgentId
     }
-    if (!parentAgentId) throw new Error('Permission denied: agents cannot create or move root agents')
+    if (!parentAgentId) throw permissionError('Permission denied: agents cannot create or move root agents')
     requireManageOrSelf(ctx, parentAgentId)
     const resultingDepth = agentDepth(parentAgentId) + 1 + subtreeHeight(movingAgentId)
     if (resultingDepth > maxDelegationDepth()) throw new Error('Delegation depth limit reached')
@@ -132,10 +138,9 @@
       parentAgentId: parentAgentId,
       connection: args.connection || (inherited && inherited.connection) || ai.defaultConnection || 'mock',
       model: args.model || (inherited && inherited.model) || '',
-      systemPrompt: args.systemPrompt || '',
+      systemPrompt: hasOwn(args, 'systemPrompt') ? args.systemPrompt : null,
       outputSchema: args.outputSchema ? ai.schema.normalize(args.outputSchema, 'outputSchema') : null,
       contextRefs: clone(args.contextRefs || []),
-      skillRefs: clone(args.skillRefs || []),
       permissionMode: inherited && inherited.permissionMode || 'auto',
       permissions: clone(inherited && inherited.permissions || null),
     }
@@ -177,13 +182,12 @@
       unreadInboxCount: (agent.inbox || []).filter(function (event) { return !event.consumed }).length,
       recentQuests: (agent.quests || []).slice(-8).map(function (quest) { return questSummary(agent.id, quest) }),
       contextRefs: clone(agent.contextRefs || []),
-      skillRefs: clone(agent.skillRefs || []),
       permissions: clone(agent.permissions),
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
     }
     if (profile) {
-      out.systemPrompt = agent.systemPrompt || ''
+      out.systemPrompt = agent.systemPrompt
       out.outputSchema = clone(agent.outputSchema || null)
     }
     return out
@@ -250,13 +254,7 @@
     return Object.assign({ applied: true }, agentSummary(agent, true))
   }
 
-  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs', 'skillRefs']
-
-  function validateRegisteredRefs(ids, registry, label) {
-    for (let i = 0; i < ids.length; i++) {
-      if (!registry.get(ids[i])) throw new Error('Unknown ' + label + ': ' + ids[i])
-    }
-  }
+  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs']
 
   function agentConfigPatch(args) {
     const patch = {}
@@ -268,7 +266,6 @@
     if (hasOwn(patch, 'name') && !String(patch.name || '').trim()) throw new Error('Agent name cannot be empty')
     if (hasOwn(patch, 'connection') && !ai.getConnection(patch.connection)) throw new Error('Unknown connection: ' + patch.connection)
     if (hasOwn(patch, 'outputSchema') && patch.outputSchema) patch.outputSchema = ai.schema.normalize(patch.outputSchema, 'outputSchema')
-    if (patch.skillRefs) validateRegisteredRefs(patch.skillRefs, ai.skills, 'skill')
     return patch
   }
 
@@ -295,7 +292,7 @@
     const target = args.agentId ? ai.findAgent(args.agentId) : null
     if (args.agentId) {
       if (!target) throw new Error('Agent not found')
-      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema', 'skillRefs']
+      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema']
       for (let i = 0; i < creationKeys.length; i++) {
         if (hasOwn(args, creationKeys[i])) throw new Error('Agent configuration is only valid when delegate creates a new agent')
       }
@@ -511,7 +508,7 @@
 
   ai.tools.register('agent.create', {
     title: 'Create Agent',
-    description: 'Create an AI agent after preview approval. Creation only creates the agent; if the user asked this agent to do work, continue with agent.send unless the request only asked for creation.',
+    description: 'Create an idle AI agent profile after preview approval. Do not use this when the user asks an Agent to perform work; use agent.delegate instead.',
     schema: {
       type: 'object',
       properties: {
@@ -522,7 +519,6 @@
         systemPrompt: { type: 'string' },
         outputSchema: { type: 'object', description: 'JSON schema for the final assistant output.' },
         contextRefs: STRING_ARRAY_SCHEMA,
-        skillRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -545,7 +541,6 @@
         systemPrompt: { type: 'string' },
         outputSchema: { type: ['object', 'null'], description: 'JSON schema for the final assistant output, or null to clear it.' },
         contextRefs: STRING_ARRAY_SCHEMA,
-        skillRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -556,7 +551,7 @@
 
   ai.tools.register('agent.delegate', {
     title: 'Delegate Agent Task',
-    description: 'Create or reuse an agent and send it a delegated task in one workflow. A new agent defaults under the calling agent, or at root when called by the user. Returns agentId and questId. Delegation does not force the parent to wait.',
+    description: 'Use this when an Agent should perform work. Create or reuse an agent and send it a delegated task in one workflow. A new agent defaults under the calling agent, or at root when called by the user. Returns agentId and questId. Delegation does not force the parent to wait.',
     schema: {
       type: 'object',
       required: ['content'],
@@ -568,7 +563,6 @@
         model: { type: 'string' },
         systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
         outputSchema: { type: 'object', description: 'JSON schema for the newly created agent final outputs.' },
-        skillRefs: STRING_ARRAY_SCHEMA,
         content: { type: 'string' },
         contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },

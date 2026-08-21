@@ -9,13 +9,13 @@ function loadCore(storage) {
   vm.runInThisContext(readFileSync('src/core/log.js', 'utf8'), { filename: 'log.js' })
   vm.runInThisContext(readFileSync('src/core/names.js', 'utf8'), { filename: 'names.js' })
   vm.runInThisContext(readFileSync('src/core/commands.js', 'utf8'), { filename: 'commands.js' })
-  vm.runInThisContext(readFileSync('src/ai/name-generator.js', 'utf8'), { filename: 'ai/name-generator.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/name-generator.js', 'utf8'), { filename: 'ai/agent/name-generator.js' })
   vm.runInThisContext(readFileSync('src/ai/serialize.js', 'utf8'), { filename: 'ai/serialize.js' })
   vm.runInThisContext(readFileSync('src/ai/permission.js', 'utf8'), { filename: 'ai/permission.js' })
-  vm.runInThisContext(readFileSync('src/ai/store.js', 'utf8'), { filename: 'ai/store.js' })
-  vm.runInThisContext(readFileSync('src/ai/persistence.js', 'utf8'), { filename: 'ai/persistence.js' })
-  vm.runInThisContext(readFileSync('src/ai/memory.js', 'utf8'), { filename: 'ai/memory.js' })
-  vm.runInThisContext(readFileSync('src/ai/compaction.js', 'utf8'), { filename: 'ai/compaction.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/store.js', 'utf8'), { filename: 'ai/agent/store.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/persistence.js', 'utf8'), { filename: 'ai/agent/persistence.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/memory.js', 'utf8'), { filename: 'ai/agent/memory.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/compaction.js', 'utf8'), { filename: 'ai/agent/compaction.js' })
 }
 
 function loadRequestRuntime() {
@@ -29,8 +29,8 @@ function loadRequestRuntime() {
 for (const file of ['src/ai/contribution-registry.js', 'src/ai/tool/registry.js', 'src/ai/context/registry.js', 'src/ai/skill/registry.js']) vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
   vm.runInThisContext(readFileSync('src/ai/tool/scheduler.js', 'utf8'), { filename: 'ai/tool/scheduler.js' })
 vm.runInThisContext(readFileSync('src/ai/tool/runtime.js', 'utf8'), { filename: 'ai/tool/runtime.js' })
-  vm.runInThisContext(readFileSync('src/ai/request.js', 'utf8'), { filename: 'ai/request.js' })
-  vm.runInThisContext(readFileSync('src/ai/runtime.js', 'utf8'), { filename: 'ai/runtime.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/request.js', 'utf8'), { filename: 'ai/agent/request.js' })
+  vm.runInThisContext(readFileSync('src/ai/agent/runtime.js', 'utf8'), { filename: 'ai/agent/runtime.js' })
 }
 
 function storage() {

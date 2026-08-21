@@ -8,9 +8,9 @@ for (const file of [
   'src/core/signal.js',
   'src/core/log.js',
   'src/core/names.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
+  'src/ai/agent/store.js',
   'src/ai/connection.js',
   'src/ai/adapter.js',
   'src/ai/provider.js',
@@ -25,9 +25,9 @@ for (const file of [
   'src/ai/skill/builtins.js',
   'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
-  'src/ai/orchestration.js',
-  'src/ai/request.js',
-  'src/ai/runtime.js',
+  'src/ai/agent/orchestration.js',
+  'src/ai/agent/request.js',
+  'src/ai/agent/runtime.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
@@ -67,7 +67,7 @@ assert.equal(builtinTools.includes('agent.stop'), true)
 assert.equal(builtinTools.includes('agent.delete'), true)
 assert.equal(builtinTools.includes('agent.reparent'), true)
 assert.equal(ai.tools.get('agent.delegate').schema.properties.systemPrompt.type, 'string')
-assert.equal(ai.tools.get('agent.delegate').schema.properties.skillRefs.items.type, 'string')
+assert.equal('skillRefs' in ai.tools.get('agent.delegate').schema.properties, false)
 assert.equal('toolRefs' in ai.tools.get('agent.delegate').schema.properties, false)
 assert.equal(ai.tools.get('agent.delegate').schema.properties.budget.properties.timeoutMs.type, 'number')
 assert.equal('guidance' in ai.tools.get('agent.delegate').schema.properties, false)
@@ -75,12 +75,20 @@ assert.equal('guidance' in ai.tools.get('agent.send').schema.properties, false)
 assert.equal('permissions' in ai.tools.get('agent.create').schema.properties, false)
 assert.deepEqual(ai.tools.get('agent.reparent').schema.required, ['agentId', 'parentAgentId'])
 assert.match(ai.tools.get('agent.read').description, /direct children/)
+assert.match(ai.tools.get('agent.create').description, /idle AI agent profile/)
+assert.match(ai.tools.get('agent.create').description, /agent\.delegate/)
+assert.match(ai.tools.get('agent.delegate').description, /when an Agent should perform work/)
 assert.match(ai.tools.get('agent.delegate').schema.properties.parentAgentId.description, /calling agent/)
 assert.equal(ai.skills.get('aiditor.agent-orchestration').tools.includes('agent.delegate'), true)
+assert.equal(ai.skills.get('aiditor.agent-orchestration').tools.indexOf('agent.delegate') < ai.skills.get('aiditor.agent-orchestration').tools.indexOf('agent.create'), true)
+assert.match(ai.skills.get('aiditor.agent-orchestration').instructions, /call agent\.delegate directly/)
+assert.equal(ai.skills.get('aiditor.agent-orchestration').toolDisclosure, 'onRead')
+assert.equal(ai.skills.get('aiditor.editor-control').toolDisclosure, 'always')
+assert.equal(ai.skills.get('aiditor.workspace-authoring').toolDisclosure, 'onRead')
+assert.equal(ai.skills.get('aiditor.ai-host-authoring').toolDisclosure, 'onRead')
 
 const root = ai.createAgent({
   name: 'Root',
-  skillRefs: ['aiditor.agent-orchestration'],
   permissionMode: 'full',
 })
 assert.throws(function () {
@@ -172,7 +180,7 @@ const recursiveAgents = await runCall(root.id, 'agent.read', { parentAgentId: ro
 assert.equal(recursiveAgents.result.some(function (agent) { return agent.id === reparented.id }), true)
 
 const exactAgent = await runCall(root.id, 'agent.read', { agentId: createdAgent.id }, root.id)
-assert.equal(exactAgent.result.systemPrompt, '')
+assert.equal(exactAgent.result.systemPrompt, null)
 assert.equal('messages' in exactAgent.result, false)
 assert.equal('queue' in exactAgent.result, false)
 assert.equal('inbox' in exactAgent.result, false)
@@ -181,11 +189,10 @@ const configuredAgent = previewApply(root.id, 'agent.configure', {
   agentId: createdAgent.id,
   model: 'configured-model',
   systemPrompt: 'Review precisely.',
-  skillRefs: ['aiditor.agent-orchestration'],
 }, root.id)
 assert.equal(configuredAgent.model, 'configured-model')
 assert.equal(configuredAgent.systemPrompt, 'Review precisely.')
-assert.deepEqual(configuredAgent.skillRefs, ['aiditor.agent-orchestration'])
+assert.equal('skillRefs' in configuredAgent, false)
 assert.equal('toolRefs' in configuredAgent, false)
 
 const selfConfigureCall = ai.createToolCall(createdAgent.id, {
@@ -194,12 +201,6 @@ const selfConfigureCall = ai.createToolCall(createdAgent.id, {
 }, createdAgent.id)
 assert.equal(ai.previewToolCall(createdAgent.id, selfConfigureCall.id, createdAgent.id).status, 'failed')
 assert.equal(ai.findAgent(createdAgent.id).systemPrompt, 'Review precisely.')
-
-const unknownSkillConfigureCall = ai.createToolCall(root.id, {
-  toolId: 'agent.configure',
-  args: { agentId: createdAgent.id, skillRefs: ['missing.skill'] },
-}, root.id)
-assert.equal(ai.previewToolCall(root.id, unknownSkillConfigureCall.id, root.id).status, 'failed')
 
 let sentRequest = null
 ai.registerTransport('capture-send', {
@@ -273,13 +274,12 @@ assert.equal(!!delegatedExisting.questId, true)
 const delegatedNew = previewApply(root.id, 'agent.delegate', {
   name: 'Poet',
   systemPrompt: 'Write concise poems.',
-  skillRefs: ['aiditor.agent-orchestration'],
   content: 'write a poem',
 }, root.id)
 const delegatedPoet = ai.findAgent(delegatedNew.agentId)
 assert.equal(delegatedPoet.parentAgentId, root.id)
 assert.equal(delegatedPoet.systemPrompt, 'Write concise poems.')
-assert.deepEqual(delegatedPoet.skillRefs, ['aiditor.agent-orchestration'])
+assert.equal('skillRefs' in delegatedPoet, false)
 assert.equal('toolRefs' in delegatedPoet, false)
 assert.equal(!!delegatedNew.questId, true)
 

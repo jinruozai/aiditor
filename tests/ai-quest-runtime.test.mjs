@@ -8,9 +8,9 @@ for (const file of [
   'src/core/signal.js',
   'src/core/log.js',
   'src/core/names.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
+  'src/ai/agent/store.js',
   'src/ai/connection.js',
   'src/ai/adapter.js',
   'src/ai/provider.js',
@@ -24,24 +24,24 @@ for (const file of [
   'src/ai/skill/registry.js',
   'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
-  'src/ai/orchestration.js',
-  'src/ai/request.js',
-  'src/ai/runtime.js',
+  'src/ai/agent/orchestration.js',
+  'src/ai/agent/request.js',
+  'src/ai/agent/runtime.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
 
 const ai = window.aiditor.ai
 const TEST_META = { owner: 'test:quest-runtime' }
-let nextSkill = 1
 function registerTool(name, spec) { return ai.tools.register(name, spec, TEST_META) }
-function skillRefs(tools) {
-  const id = 'test.quest.' + nextSkill++
-  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
-  return [id]
-}
 const replies = []
 const requests = []
+
+assert.deepEqual(ai.runtimeConfig().limits, {
+  maxTurns: null,
+  timeoutMs: null,
+  maxTokens: null,
+})
 
 async function flush(count = 1) {
   for (let i = 0; i < count; i++) await new Promise(function (resolve) { setTimeout(resolve, 0) })
@@ -66,6 +66,7 @@ const quest = ai.agent.send(child.id, {
 })
 assert.equal(quest.agentId, child.id)
 assert.equal(quest.questId, quest.messageId)
+assert.equal(ai.findQuest(child.id, quest.questId).budget, null)
 assert.equal(ai.message.read(child.id, quest.messageId, parent.id).content, 'first task')
 
 await flush()
@@ -212,7 +213,7 @@ ai.registerTransport('delegate-parent', {
   },
 })
 ai.registerConnection('delegate-parent', { auth: { type: 'none' }, transport: { type: 'delegate-parent' }, configDefaults: {} })
-ai.updateAgent(parent.id, { connection: 'delegate-parent', skillRefs: skillRefs(['agent.send']) })
+ai.updateAgent(parent.id, { connection: 'delegate-parent' })
 const delegated = ai.message.send(parent.id, { content: 'delegate to child' })
 await delegated.promise
 assert.equal(ai.findAgent(child.id).quests.some(function (item) {
@@ -242,7 +243,7 @@ ai.registerTransport('approval-flow', {
   },
 })
 ai.registerConnection('approval-flow', { auth: { type: 'none' }, transport: { type: 'approval-flow' }, configDefaults: {} })
-const approvalAgent = ai.createAgent({ name: 'Approval', parentAgentId: parent.id, connection: 'approval-flow', permissionMode: 'auto', skillRefs: skillRefs(['approval-edit']) })
+const approvalAgent = ai.createAgent({ name: 'Approval', parentAgentId: parent.id, connection: 'approval-flow', permissionMode: 'auto' })
 const approvalRun = ai.message.send(approvalAgent.id, { content: 'needs approval' })
 await approvalRun.promise
 assert.equal(ai.findAgent(approvalAgent.id).status, 'waiting_approval')
@@ -259,6 +260,94 @@ await resumed.promise
 assert.equal(ai.findAgent(approvalAgent.id).status, 'idle')
 assert.equal(ai.findAgent(approvalAgent.id).messages.some(function (message) {
   return message.content === 'applied and continued'
+}), true)
+
+let approvalBatchRequests = 0
+ai.registerTransport('approval-batch-flow', {
+  toolProtocol: 'native',
+  send: function () {
+    approvalBatchRequests++
+    if (approvalBatchRequests === 1) {
+      return {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { toolId: 'approval-edit', args: { before: 1, after: 2 } },
+          { toolId: 'approval-edit', args: { before: 2, after: 3 } },
+        ],
+      }
+    }
+    return { role: 'assistant', content: 'batch applied and continued' }
+  },
+})
+ai.registerConnection('approval-batch-flow', { auth: { type: 'none' }, transport: { type: 'approval-batch-flow' }, configDefaults: {} })
+const approvalBatchAgent = ai.createAgent({ name: 'Approval Batch', parentAgentId: parent.id, connection: 'approval-batch-flow', permissionMode: 'auto' })
+const approvalBatchRun = ai.message.send(approvalBatchAgent.id, { content: 'needs two approvals' })
+await approvalBatchRun.promise
+const approvalBatchMessage = ai.findAgent(approvalBatchAgent.id).messages.find(function (message) {
+  return message.toolCalls && message.toolCalls.length === 2
+})
+assert.deepEqual(approvalBatchMessage.toolCalls.map(function (call) { return call.status }), ['previewed', 'proposed'])
+assert.deepEqual(approvalBatchMessage.toolCalls.map(function (call) { return call.approvalPhase || null }), ['apply', null])
+assert.equal(ai.peekActiveRunState(approvalBatchAgent.id).activityText, 'awaiting approval approval-edit · 1/2')
+
+assert.equal(ai.applyToolCall(approvalBatchAgent.id, approvalBatchMessage.toolCalls[0].id, 'user').status, 'applied')
+const approvalBatchResumeFirst = ai.resumeAgent(approvalBatchAgent.id, 'user')
+await approvalBatchResumeFirst.promise
+const approvalBatchAfterFirst = ai.readMessage(approvalBatchAgent.id, approvalBatchMessage.id)
+assert.deepEqual(approvalBatchAfterFirst.toolCalls.map(function (call) { return call.status }), ['applied', 'previewed'])
+assert.deepEqual(approvalBatchAfterFirst.toolCalls.map(function (call) { return call.approvalPhase || null }), [null, 'apply'])
+assert.equal(ai.findAgent(approvalBatchAgent.id).status, 'waiting_approval')
+assert.equal(ai.peekActiveRunState(approvalBatchAgent.id).activityText, 'awaiting approval approval-edit · 2/2')
+assert.equal(approvalBatchRequests, 1)
+
+assert.equal(ai.applyToolCall(approvalBatchAgent.id, approvalBatchAfterFirst.toolCalls[1].id, 'user').status, 'applied')
+const approvalBatchResumeSecond = ai.resumeAgent(approvalBatchAgent.id, 'user')
+await approvalBatchResumeSecond.promise
+assert.equal(approvalBatchRequests, 2)
+assert.equal(ai.findAgent(approvalBatchAgent.id).status, 'idle')
+assert.equal(ai.findAgent(approvalBatchAgent.id).messages.some(function (message) {
+  return message.content === 'batch applied and continued'
+}), true)
+const approvalBatchResults = ai.findAgent(approvalBatchAgent.id).messages.filter(function (message) {
+  return message.role === 'tool' && message.meta && approvalBatchMessage.toolCalls.some(function (call) { return call.id === message.meta.toolCallId })
+})
+assert.deepEqual(approvalBatchResults.map(function (message) { return message.meta.toolCallId }).sort(), approvalBatchMessage.toolCalls.map(function (call) { return call.id }).sort())
+
+registerTool('action-state-error', {
+  run: function () { return { ok: true } },
+})
+let actionStateErrorRequests = 0
+ai.registerTransport('action-state-error-flow', {
+  toolProtocol: 'native',
+  send: function () {
+    actionStateErrorRequests++
+    if (actionStateErrorRequests === 1) {
+      return { role: 'assistant', content: '', toolCalls: [{ toolId: 'action-state-error', args: {} }] }
+    }
+    return { role: 'assistant', content: 'continued after tool state error' }
+  },
+})
+ai.registerConnection('action-state-error-flow', { auth: { type: 'none' }, transport: { type: 'action-state-error-flow' }, configDefaults: {} })
+const actionStateErrorAgent = ai.createAgent({ name: 'Action State Error', parentAgentId: parent.id, connection: 'action-state-error-flow', permissionMode: 'full' })
+const getToolCallActionState = ai.getToolCallActionState
+ai.getToolCallActionState = function (agentId, callId, actor) {
+  const found = ai.findToolCall(agentId, callId)
+  if (found && found.toolCall.toolId === 'action-state-error') throw new Error('action state failed')
+  return getToolCallActionState(agentId, callId, actor)
+}
+await ai.message.send(actionStateErrorAgent.id, { content: 'handle tool state failure' }).promise
+ai.getToolCallActionState = getToolCallActionState
+const actionStateErrorMessage = ai.findAgent(actionStateErrorAgent.id).messages.find(function (message) {
+  return message.toolCalls && message.toolCalls[0] && message.toolCalls[0].toolId === 'action-state-error'
+})
+assert.equal(actionStateErrorMessage.toolCalls[0].status, 'failed')
+assert.match(actionStateErrorMessage.toolCalls[0].error, /action state failed/)
+assert.equal(ai.findAgent(actionStateErrorAgent.id).messages.filter(function (message) {
+  return message.role === 'tool' && message.meta && message.meta.toolCallId === actionStateErrorMessage.toolCalls[0].id
+}).length, 1)
+assert.equal(ai.findAgent(actionStateErrorAgent.id).messages.some(function (message) {
+  return message.content === 'continued after tool state error'
 }), true)
 
 let approvalRunRequests = 0
@@ -281,7 +370,7 @@ ai.registerTransport('approval-run-flow', {
   },
 })
 ai.registerConnection('approval-run-flow', { auth: { type: 'none' }, transport: { type: 'approval-run-flow' }, configDefaults: {} })
-const approvalRunAgent = ai.createAgent({ name: 'Approval Run', parentAgentId: parent.id, connection: 'approval-run-flow', permissionMode: 'auto', skillRefs: skillRefs(['approval-run-edit']) })
+const approvalRunAgent = ai.createAgent({ name: 'Approval Run', parentAgentId: parent.id, connection: 'approval-run-flow', permissionMode: 'auto' })
 const approvalRunFlow = ai.message.send(approvalRunAgent.id, { content: 'needs approval after run' })
 await approvalRunFlow.promise
 assert.equal(ai.findAgent(approvalRunAgent.id).status, 'waiting_approval')
@@ -322,7 +411,7 @@ ai.registerTransport('full-access-flow', {
   },
 })
 ai.registerConnection('full-access-flow', { auth: { type: 'none' }, transport: { type: 'full-access-flow' }, configDefaults: {} })
-const fullAccessAgent = ai.createAgent({ name: 'Full Access', parentAgentId: parent.id, connection: 'full-access-flow', permissionMode: 'full', skillRefs: skillRefs(['full-access-edit']) })
+const fullAccessAgent = ai.createAgent({ name: 'Full Access', parentAgentId: parent.id, connection: 'full-access-flow', permissionMode: 'full' })
 const fullAccessRun = ai.message.send(fullAccessAgent.id, { content: 'apply without asking' })
 await flush(3)
 const previewingFullAccessCall = ai.findAgent(fullAccessAgent.id).messages.find(function (message) {
@@ -364,7 +453,6 @@ const permissionHintAgent = ai.createAgent({
   parentAgentId: parent.id,
   connection: 'permission-hint-flow',
   permissionMode: 'full',
-  skillRefs: skillRefs(['agent.read', 'agent.stop']),
 })
 await ai.message.send(permissionHintAgent.id, { content: 'try inaccessible agent controls' }).promise
 const permissionHintCalls = ai.findAgent(permissionHintAgent.id).messages.find(function (message) {
@@ -396,7 +484,7 @@ ai.registerTransport('capped-tool-flow', {
 })
 ai.registerConnection('capped-tool-flow', { auth: { type: 'none' }, transport: { type: 'capped-tool-flow' }, configDefaults: {} })
 ai.configureRuntime({ limits: { maxTurns: 1 } })
-const cappedAgent = ai.createAgent({ name: 'Capped Tools', parentAgentId: parent.id, connection: 'capped-tool-flow', permissionMode: 'full', skillRefs: skillRefs(['capped-read']) })
+const cappedAgent = ai.createAgent({ name: 'Capped Tools', parentAgentId: parent.id, connection: 'capped-tool-flow', permissionMode: 'full' })
 const cappedRun = ai.message.send(cappedAgent.id, { content: 'run capped read' })
 await cappedRun.promise
 assert.equal(cappedRequests, 1)
@@ -414,7 +502,28 @@ assert.equal(cappedRequests, 2)
 assert.equal(ai.findAgent(cappedAgent.id).messages.some(function (message) {
   return message.content === 'continued after capped tool'
 }), true)
-ai.configureRuntime({ limits: { maxTurns: 32 } })
+ai.configureRuntime({ limits: { maxTurns: null } })
+
+let unboundedRequests = 0
+ai.registerTransport('unbounded-tool-flow', {
+  toolProtocol: 'native',
+  send: function () {
+    unboundedRequests += 1
+    if (unboundedRequests <= 40) {
+      return {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ toolId: 'capped-read', args: { id: unboundedRequests } }],
+      }
+    }
+    return { role: 'assistant', content: 'long run complete' }
+  },
+})
+ai.registerConnection('unbounded-tool-flow', { auth: { type: 'none' }, transport: { type: 'unbounded-tool-flow' }, configDefaults: {} })
+const unboundedAgent = ai.createAgent({ name: 'Unbounded Tools', parentAgentId: parent.id, connection: 'unbounded-tool-flow', permissionMode: 'full' })
+const unboundedReply = await ai.message.send(unboundedAgent.id, { content: 'continue beyond the old default turn limit' }).promise
+assert.equal(unboundedReply.content, 'long run complete')
+assert.equal(unboundedRequests, 41)
 
 registerTool('budget-read', {
   run: function () { return { ok: true } },
@@ -430,7 +539,7 @@ ai.registerTransport('budget-turns', {
   },
 })
 ai.registerConnection('budget-turns', { auth: { type: 'none' }, transport: { type: 'budget-turns' }, configDefaults: {} })
-const turnBudgetAgent = ai.createAgent({ name: 'Turn Budget', parentAgentId: parent.id, connection: 'budget-turns', permissionMode: 'full', skillRefs: skillRefs(['budget-read']) })
+const turnBudgetAgent = ai.createAgent({ name: 'Turn Budget', parentAgentId: parent.id, connection: 'budget-turns', permissionMode: 'full' })
 const turnBudgetSend = ai.agent.send(turnBudgetAgent.id, {
   fromAgentId: parent.id,
   content: 'bounded turn task',
@@ -456,7 +565,7 @@ ai.registerTransport('budget-tokens', {
   },
 })
 ai.registerConnection('budget-tokens', { auth: { type: 'none' }, transport: { type: 'budget-tokens' }, configDefaults: {} })
-const tokenBudgetAgent = ai.createAgent({ name: 'Token Budget', parentAgentId: parent.id, connection: 'budget-tokens', permissionMode: 'full', skillRefs: skillRefs(['budget-read']) })
+const tokenBudgetAgent = ai.createAgent({ name: 'Token Budget', parentAgentId: parent.id, connection: 'budget-tokens', permissionMode: 'full' })
 const tokenBudgetSend = ai.agent.send(tokenBudgetAgent.id, {
   fromAgentId: parent.id,
   content: 'bounded token task',
@@ -481,7 +590,7 @@ ai.registerTransport('budget-approval', {
   },
 })
 ai.registerConnection('budget-approval', { auth: { type: 'none' }, transport: { type: 'budget-approval' }, configDefaults: {} })
-const budgetApprovalAgent = ai.createAgent({ name: 'Budget Approval', parentAgentId: parent.id, connection: 'budget-approval', permissionMode: 'auto', skillRefs: skillRefs(['approval-edit']) })
+const budgetApprovalAgent = ai.createAgent({ name: 'Budget Approval', parentAgentId: parent.id, connection: 'budget-approval', permissionMode: 'auto' })
 const budgetApprovalSend = ai.agent.send(budgetApprovalAgent.id, {
   fromAgentId: parent.id,
   content: 'bounded approval task',
@@ -550,7 +659,7 @@ assert.equal(budgetRequest.messages.length < 42, true)
 assert.equal(budgetRequest.messages[0].role, 'system')
 assert.equal(budgetRequest.messages[0].content.includes('Do not stop after a partial setup step'), false)
 assert.equal(budgetRequest.messages[0].content.includes('NO_CURRENT_AI_WORKSPACE'), false)
-assert.equal(budgetRequest.messages[0].content.includes('Complete the current request'), true)
+assert.equal(budgetRequest.messages[0].content.includes("Complete the user's request"), true)
 
 const hugeToolAgent = ai.createAgent({ name: 'Huge Tool History', parentAgentId: parent.id, connection: 'quest-capture', model: 'tiny', contextBudgetTokens: 200000 })
 const hugeSource = 'function (propsSig, ctx) {\n' + 'x'.repeat(120000) + '\n}'
@@ -627,7 +736,6 @@ const createBatchParent = ai.createAgent({
   parentAgentId: parent.id,
   connection: 'batch-create-parent',
   permissionMode: 'full',
-  skillRefs: skillRefs(['agent.create']),
 })
 const createBatchRun = ai.message.send(createBatchParent.id, { content: 'create two agents' })
 await createBatchRun.promise
@@ -671,7 +779,7 @@ ai.registerTransport('batch-parent', {
   },
 })
 ai.registerConnection('batch-parent', { auth: { type: 'none' }, transport: { type: 'batch-parent' }, configDefaults: {} })
-const batchParent = ai.createAgent({ name: 'Batch Parent', parentAgentId: parent.id, connection: 'batch-parent', permissionMode: 'full', skillRefs: skillRefs(['agent.delegate', 'quest.result']) })
+const batchParent = ai.createAgent({ name: 'Batch Parent', parentAgentId: parent.id, connection: 'batch-parent', permissionMode: 'full' })
 const batchChildA = ai.createAgent({ name: 'Batch A', parentAgentId: batchParent.id, connection: 'batch-child' })
 const batchChildB = ai.createAgent({ name: 'Batch B', parentAgentId: batchParent.id, connection: 'batch-child' })
 const batchRun = ai.message.send(batchParent.id, { content: 'delegate two and do local work' })

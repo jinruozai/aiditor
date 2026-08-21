@@ -1,50 +1,67 @@
-// Model-facing Skill discovery and run-scoped activation controls.
+// Model-facing deterministic Skill discovery and reading.
 ;(function (aiditor) {
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
   const META = { owner: 'aiditor.ai.skills', layer: 'builtin', source: 'builtin' }
 
+  function toolCounts(skill, ctx) {
+    const tools = skill && skill.tools || []
+    let available = 0
+    for (let i = 0; i < tools.length; i++) {
+      if (ai.tools.available(tools[i], ctx || {})) available++
+    }
+    return { available: available, total: tools.length }
+  }
+
+  function summary(skill, ctx) {
+    const description = String(skill.description || '').trim().replace(/\s+/g, ' ')
+    return {
+      id: skill.id,
+      description: description.length > 160 ? description.slice(0, 159).trim() + '…' : description,
+      tools: toolCounts(skill, ctx),
+    }
+  }
+
   ai.tools.register('skill.list', {
     title: 'List Skills',
-    description: 'Discover focused capabilities and their current active/configured state. Use this when the task needs a capability that is not already active.',
+    description: 'List registered Skills deterministically. Follow nextCursor to enumerate every page without repeating earlier pages.',
     schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        query: { type: 'string', description: 'Optional intent or capability query.' },
-        limit: { type: 'number', minimum: 1, maximum: 100 },
+        cursor: { type: 'string', pattern: '^skill:[0-9]+$' },
+        limit: { type: 'integer', minimum: 1, maximum: 20 },
       },
     },
-    run: function (input, ctx) {
-      const catalogCtx = ai._runSkillContext ? ai._runSkillContext(ctx && ctx.runId, ctx || {}) : (ctx || {})
-      const active = catalogCtx.skillRefs || []
-      const configured = catalogCtx.configuredSkillRefs || catalogCtx.agent && catalogCtx.agent.skillRefs || []
+    run: function (args, ctx) {
+      const page = ai.skills.page(args && args.cursor, args && args.limit)
       return {
-        skills: ai.skills.catalog(catalogCtx, input || {}).map(function (skill) {
-          const isConfigured = configured.indexOf(skill.id) >= 0
-          return Object.assign({}, skill, {
-            active: active.indexOf(skill.id) >= 0,
-            configured: isConfigured,
-            lifetime: isConfigured ? 'agent' : 'run',
-          })
-        }),
+        total: page.total,
+        nextCursor: page.nextCursor,
+        skills: page.items.map(function (skill) { return summary(skill, ctx) }),
       }
     },
   }, META)
 
-  ai.tools.register('skill.activate', {
-    title: 'Activate Skill',
-    description: 'Activate one available Skill for the current run only. Its instructions and Tools become available on the next continuation. Activate it again in a new request unless it is configured in agent.skillRefs.',
+  ai.tools.register('skill.read', {
+    title: 'Read Skill',
+    description: 'Read the complete instructions for one registered Skill, or one readable resource from that Skill.',
     schema: {
       type: 'object',
       required: ['id'],
-      properties: { id: { type: 'string' } },
+      additionalProperties: false,
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        resource: { type: 'string', minLength: 1 },
+      },
     },
-    run: function (input, ctx) {
-      if (!ai.activateRunSkill) throw new Error('Skill activation requires an active Agent run.')
-      return ai.activateRunSkill(ctx && ctx.runId, input.id, ctx || {})
+    run: function (args, ctx) {
+      const id = String(args.id)
+      const resource = args.resource == null ? '' : String(args.resource)
+      const result = ai.skills.read(id, resource)
+      if (resource || result && typeof result.then === 'function') return result
+      return Object.assign({}, result, { tools: toolCounts(ai.skills.get(id), ctx) })
     },
   }, META)
-
-  ai.skillControlTools = Object.freeze(['skill.list', 'skill.activate'])
 })(window.aiditor = window.aiditor || {})

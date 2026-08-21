@@ -254,7 +254,7 @@ records can be correlated.
 
 ## Request Adapter
 
-Request assembly belongs to `src/ai/request.js`: it builds the runtime,
+Request assembly belongs to `src/ai/agent/request.js`: it builds the runtime,
 workspace, task, context, attachment, memory, compaction, queue, and transcript
 messages before a provider sees the request.
 
@@ -269,11 +269,10 @@ schemas, assistant tool calls, replay, and response decoding. Aliases are wire
 identifiers only; permission checks, execution, logs, and UI always use the
 public tool id.
 
-When provider output repeats an alias for a Tool omitted from the current
-request, Runtime may resolve it against registered Tool ids only for diagnostics.
-One unique alias candidate is restored to its canonical id so Skill activation
-guidance remains accurate. Multiple candidates remain ambiguous and must never
-be guessed or executed.
+When provider output uses an alias, Runtime resolves it against registered Tool
+ids. One unique candidate is restored to its canonical id; multiple candidates
+remain ambiguous and must never be guessed. This is wire-name decoding, not a
+request Tool-surface authorization check.
 
 Tool schemas are normalized and validated when tools are registered. An object
 schema with `required` entries must define matching `properties`; invalid schemas

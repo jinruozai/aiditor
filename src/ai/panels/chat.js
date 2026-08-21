@@ -603,7 +603,7 @@
       }
       if (aiditor.ai.richPrompt.isEmpty(currentDraft)) return
       const refs = aiditor.ai.richPrompt.refs(currentDraft)
-      const skillRefs = aiditor.ai.richPrompt.skills(currentDraft)
+      const skills = aiditor.ai.richPrompt.skills(currentDraft)
       const content = aiditor.ai.richPrompt.content(currentDraft)
       aiditor.ai.updateAgent(agent.id, {
         connection: connection.peek(),
@@ -615,7 +615,7 @@
         model: model.peek() || defaultModel(connection.peek()),
         permissionMode: permissionMode.peek(),
         attachmentRefs: refs,
-        skillRefs: skillRefs,
+        skills: skills,
         renderedText: content.renderedText,
       }
       if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel({ connection: meta.connection, model: meta.model })

@@ -3,7 +3,7 @@
  * Sources: 57 files concatenated in dependency order.
  */
 
-/* ---- ai/name-generator.js ---- */
+/* ---- ai/agent/name-generator.js ---- */
 // aiditor.ai agent name generator.
 ;(function (aiditor) {
   'use strict'
@@ -1255,7 +1255,7 @@
   ai.clearPermissionAudit = function () { permissionAuditSig.set([]) }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/store.js ---- */
+/* ---- ai/agent/store.js ---- */
 // aiditor.ai store - agents, messages, and chat attachments.
 ;(function (aiditor) {
   'use strict'
@@ -1341,7 +1341,7 @@
       statusText: spec.statusText || '',
       activeMessageId: spec.activeMessageId || null,
       activeQuestId: spec.activeQuestId || null,
-      systemPrompt: spec.systemPrompt || '',
+      systemPrompt: spec.systemPrompt == null ? null : String(spec.systemPrompt),
       outputSchema: spec.outputSchema ? ai.schema.normalize(spec.outputSchema, 'outputSchema') : null,
       messages: (spec.messages || []).map(makeMessage),
       compactions: (spec.compactions || []).map(makeCompaction),
@@ -1351,7 +1351,6 @@
       contextRefs: spec.contextRefs ? spec.contextRefs.slice() : [],
       memory: spec.memory || {},
       state: spec.state || {},
-      skillRefs: spec.skillRefs ? spec.skillRefs.slice() : [],
       permissions: normalizePermissionList(spec.permissions),
       createdAt: spec.createdAt || now(),
       updatedAt: spec.updatedAt || now(),
@@ -2301,7 +2300,7 @@
 
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/persistence.js ---- */
+/* ---- ai/agent/persistence.js ---- */
 // aiditor.ai complete transcript persistence.
 ;(function (aiditor) {
   'use strict'
@@ -2549,7 +2548,7 @@
 
   function validAgent(agent) {
     if (!agent || typeof agent !== 'object' || typeof agent.id !== 'string' || !agent.id) return false
-    const arrays = ['messages', 'compactions', 'queue', 'inbox', 'quests', 'contextRefs', 'skillRefs', 'toolRefs']
+    const arrays = ['messages', 'compactions', 'queue', 'inbox', 'quests', 'contextRefs', 'toolRefs']
     for (let i = 0; i < arrays.length; i++) {
       if (!optionalArray(agent, arrays[i])) return false
     }
@@ -2864,7 +2863,7 @@
   installLifecycleFlush()
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/memory.js ---- */
+/* ---- ai/agent/memory.js ---- */
 // aiditor.ai memory - conservative durable memory helpers.
 ;(function (aiditor) {
   'use strict'
@@ -2936,7 +2935,7 @@
   }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/compaction.js ---- */
+/* ---- ai/agent/compaction.js ---- */
 // aiditor.ai semantic context compaction runtime service.
 ;(function (aiditor) {
   'use strict'
@@ -4704,6 +4703,9 @@
   }
 
   function requestFetch(url, opts) {
+    if (aiditor.settings && aiditor.settings.get('ai.debug.logProviderRequest') && opts && opts.body) {
+      console.log('[AIditor AI request]', opts.body)
+    }
     return fetch(url, opts).catch(function (cause) {
       if (cause && cause.name === 'AbortError') throw cause
       const err = new Error(cause && cause.message ? cause.message : 'Provider network request failed')
@@ -5471,9 +5473,9 @@
     }
   }
 
-  function visible(name, ctx, selectedBySkill) {
+  function available(name, ctx) {
     const tool = registry.get(name)
-    if (!tool || (tool.exposeToModel === false && !selectedBySkill)) return false
+    if (!tool) return false
     if (typeof tool.available !== 'function') return true
     const value = aiditor.safeCall
       ? aiditor.safeCall({ scope: 'ai.tool', tool: name, phase: 'available' }, function () { return tool.available(ctx || {}) })
@@ -5481,15 +5483,11 @@
     return value === true
   }
 
-  function visibleList(names, ctx, selectedBySkill) {
+  function availableList(ctx) {
     const out = []
-    const seen = {}
-    for (let i = 0; i < (names || []).length; i++) {
-      const name = names[i]
-      if (!seen[name] && visible(name, ctx, selectedBySkill)) {
-        seen[name] = true
-        out.push(name)
-      }
+    const names = registry.list()
+    for (let i = 0; i < names.length; i++) {
+      if (available(names[i], ctx)) out.push(names[i])
     }
     return out
   }
@@ -5550,8 +5548,8 @@
   }
 
   ai.tools = Object.assign(registry, {
-    visible: visible,
-    visibleList: visibleList,
+    available: available,
+    availableList: availableList,
     capabilities: capabilities,
     schema: schema,
     executionMode: executionMode,
@@ -5703,20 +5701,38 @@
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ai/skill/registry.js ---- */
-// AI Host discoverable Skill registry.
+// AI Host Skill registry. Skills are readable instructions; they have no activation state.
 ;(function (aiditor) {
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
-  const defaultRefsByOwner = {}
+  const TOOL_DISCLOSURES = ['always', 'onRead']
+
+  function skillError(code, message) {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
 
   function stringList(value, field) {
     if (value == null) return []
     if (!Array.isArray(value)) throw new Error('Invalid skill ' + field + ': expected array')
-    return value.map(function (item) { return String(item) })
+    const out = []
+    for (let i = 0; i < value.length; i++) {
+      const item = String(value[i])
+      if (out.indexOf(item) >= 0) throw new Error('Invalid skill ' + field + ': duplicate "' + item + '"')
+      out.push(item)
+    }
+    return out
   }
 
-  function resources(value) {
+  function toolDisclosure(value) {
+    const disclosure = String(value || 'onRead')
+    if (TOOL_DISCLOSURES.indexOf(disclosure) < 0) throw new Error('Invalid skill toolDisclosure: ' + disclosure)
+    return disclosure
+  }
+
+  function normalizeResources(value) {
     if (value == null) return []
     if (!Array.isArray(value)) throw new Error('Invalid skill resources: expected array')
     return value.map(function (item) {
@@ -5733,10 +5749,14 @@
 
   function fingerprint(name, skill) {
     const text = JSON.stringify([
-      name, skill.title, skill.description, skill.argumentHint,
-      skill.userInvocable, skill.modelInvocable, skill.whenToUse,
-      skill.whenNotToUse, skill.systemPrompt, skill.rules, skill.examples,
-      skill.tools, skill.relatedApis, skill.resources,
+      name,
+      skill.title,
+      skill.description,
+      skill.argumentHint,
+      skill.instructions,
+      skill.toolDisclosure,
+      skill.tools,
+      skill.resources,
     ])
     let hash = 2166136261
     for (let i = 0; i < text.length; i++) {
@@ -5748,28 +5768,18 @@
 
   function normalize(name, skill) {
     if (!skill || typeof skill !== 'object' || Array.isArray(skill)) throw new Error('Invalid skill "' + name + '"')
-    if (skill.auto != null) throw new Error('Invalid skill "' + name + '": auto activation is not supported')
-    if (skill.available != null && typeof skill.available !== 'function') throw new Error('Invalid skill available predicate: ' + name)
-    if (skill.unavailableReason != null && typeof skill.unavailableReason !== 'function' && typeof skill.unavailableReason !== 'string')
-      throw new Error('Invalid skill unavailableReason: ' + name)
     if (skill.readResource != null && typeof skill.readResource !== 'function') throw new Error('Invalid skill resource reader: ' + name)
-    return Object.assign({}, skill, {
+    return {
       id: name,
       title: String(skill.title || name),
       description: String(skill.description || ''),
       argumentHint: String(skill.argumentHint || ''),
-      userInvocable: skill.userInvocable !== false,
-      modelInvocable: skill.modelInvocable !== false,
-      whenToUse: String(skill.whenToUse || ''),
-      whenNotToUse: String(skill.whenNotToUse || ''),
-      systemPrompt: String(skill.systemPrompt || ''),
-      rules: stringList(skill.rules, 'rules'),
-      examples: Array.isArray(skill.examples) ? skill.examples.slice() : [],
+      instructions: String(skill.instructions || ''),
+      toolDisclosure: toolDisclosure(skill.toolDisclosure),
       tools: stringList(skill.tools, 'tools'),
-      relatedApis: stringList(skill.relatedApis, 'relatedApis'),
-      resources: resources(skill.resources),
-      docPath: String(skill.docPath || ''),
-    })
+      resources: normalizeResources(skill.resources),
+      readResource: skill.readResource || null,
+    }
   }
 
   const registry = ai._contributionRegistry.create('ai.skills', {
@@ -5778,134 +5788,70 @@
     meta: function (name, skill, meta, raw) {
       const out = Object.assign({}, meta)
       out.source = String(raw.source || meta.source || meta.layer || 'runtime')
-      out.hash = String(raw.hash || skill.hash || fingerprint(name, skill))
+      out.hash = String(raw.hash || fingerprint(name, skill))
       return out
     },
   })
-  const unregisterRegistryOwner = registry.unregisterOwner
 
-  function availability(name, ctx) {
-    const skill = registry.get(name)
-    if (!skill) return { available: false, reason: 'Skill is not registered.' }
-    let available = true
-    if (skill.available) {
-      const value = aiditor.safeCall
-        ? aiditor.safeCall({ scope: 'ai.skill', skill: name, phase: 'available' }, function () { return skill.available(ctx || {}) })
-        : skill.available(ctx || {})
-      available = value === true
+  function entry(id) {
+    const skill = registry.get(id)
+    if (!skill) return null
+    const meta = registry.meta(id) || {}
+    return {
+      id: id,
+      title: skill.title,
+      description: skill.description,
+      argumentHint: skill.argumentHint,
+      toolDisclosure: skill.toolDisclosure,
+      tools: skill.tools.slice(),
+      resources: skill.resources.slice(),
+      owner: meta.owner || '',
+      layer: meta.layer || '',
+      source: meta.source || '',
+      hash: meta.hash || '',
     }
-    if (available) return { available: true, reason: '' }
-    let reason = skill.unavailableReason || 'Required runtime capability is unavailable.'
-    if (typeof reason === 'function') {
-      reason = aiditor.safeCall
-        ? aiditor.safeCall({ scope: 'ai.skill', skill: name, phase: 'unavailableReason' }, function () { return reason(ctx || {}) })
-        : reason(ctx || {})
+  }
+
+  function catalog() {
+    return registry.list().slice().sort().map(entry)
+  }
+
+  function page(cursor, limit) {
+    const match = cursor == null || cursor === '' ? null : /^skill:(\d+)$/.exec(String(cursor))
+    if (cursor != null && cursor !== '' && !match) throw skillError('SKILL_CURSOR_INVALID', 'Invalid Skill cursor')
+    const offset = match ? Number(match[1]) : 0
+    const max = limit == null ? 20 : Number(limit)
+    if (!Number.isInteger(max) || max < 1 || max > 20) throw skillError('SKILL_PAGE_LIMIT_INVALID', 'Invalid Skill page limit')
+    const entries = catalog()
+    const items = entries.slice(offset, offset + max)
+    const next = offset + items.length
+    return {
+      items: items,
+      total: entries.length,
+      nextCursor: next < entries.length ? 'skill:' + next : null,
     }
-    return { available: false, reason: String(reason || 'Required runtime capability is unavailable.') }
   }
 
-  function catalog(ctx, options) {
-    options = options || {}
-    const audience = options.audience === 'user' ? 'user' : 'model'
-    const query = String(options.query || '').trim().toLowerCase()
-    const limit = Math.max(1, Math.min(Number(options.limit) || 50, 100))
-    const out = []
-    const active = ctx && Array.isArray(ctx.skillRefs) ? ctx.skillRefs : []
-    const ids = registry.list().slice().sort()
-    for (let i = 0; i < ids.length; i++) {
-      const skill = registry.get(ids[i])
-      if (audience === 'user' ? !skill.userInvocable : !skill.modelInvocable) continue
-      const text = [ids[i], skill.title, skill.description, skill.whenToUse, skill.whenNotToUse].join('\n').toLowerCase()
-      if (query && text.indexOf(query) < 0) continue
-      const state = availability(ids[i], ctx)
-      const meta = registry.meta(ids[i])
-      out.push({
-        id: ids[i],
-        title: skill.title,
-        description: skill.description,
-        whenToUse: skill.whenToUse,
-        argumentHint: skill.argumentHint,
-        tools: skill.tools.slice(),
-        source: meta.source || '',
-        owner: meta.owner || '',
-        layer: meta.layer || '',
-        available: state.available,
-        unavailableReason: state.reason,
-      })
+  function read(id, resource) {
+    const skill = registry.get(id)
+    if (!skill) throw skillError('SKILL_NOT_FOUND', 'Skill not found: ' + id)
+    if (resource) {
+      if (!skill.readResource) throw skillError('SKILL_RESOURCE_UNAVAILABLE', 'Skill has no readable resources: ' + id)
+      return Promise.resolve(skill.readResource(String(resource)))
     }
-    out.sort(function (left, right) {
-      const leftActive = active.indexOf(left.id) >= 0
-      const rightActive = active.indexOf(right.id) >= 0
-      if (leftActive !== rightActive) return leftActive ? -1 : 1
-      const leftHost = left.layer === 'module' || left.layer === 'app' || left.layer === 'workspace'
-      const rightHost = right.layer === 'module' || right.layer === 'app' || right.layer === 'workspace'
-      if (leftHost !== rightHost) return leftHost ? -1 : 1
-      if (left.available !== right.available) return left.available ? -1 : 1
-      return left.id.localeCompare(right.id)
-    })
-    return out.slice(0, limit)
-  }
-
-  function configureDefaults(refs, meta) {
-    const owner = String(meta && meta.owner || '')
-    if (!owner) throw new Error('ai.skills.configureDefaults: owner is required')
-    if (!Array.isArray(refs)) throw new Error('ai.skills.configureDefaults: refs must be an array')
-    const out = []
-    const seen = {}
-    for (let i = 0; i < refs.length; i++) {
-      const id = String(refs[i] || '')
-      if (!id || seen[id]) continue
-      const skill = registry.get(id)
-      if (!skill || skill.modelInvocable === false) throw new Error('ai.skills.configureDefaults: Skill is not model-invocable: ' + id)
-      seen[id] = true
-      out.push(id)
+    return {
+      id: id,
+      instructions: skill.instructions,
+      resources: skill.resources.map(function (item) {
+        return { path: item.path, kind: item.kind }
+      }),
     }
-    defaultRefsByOwner[owner] = out
-    return out.slice()
-  }
-
-  function clearDefaults(meta) {
-    const owner = String(meta && meta.owner || '')
-    if (!owner) throw new Error('ai.skills.clearDefaults: owner is required')
-    const existed = Object.prototype.hasOwnProperty.call(defaultRefsByOwner, owner)
-    delete defaultRefsByOwner[owner]
-    return existed
-  }
-
-  function defaults() {
-    const out = []
-    const seen = {}
-    const owners = Object.keys(defaultRefsByOwner).sort()
-    for (let i = 0; i < owners.length; i++) {
-      const refs = defaultRefsByOwner[owners[i]]
-      for (let j = 0; j < refs.length; j++) {
-        if (seen[refs[j]]) continue
-        seen[refs[j]] = true
-        out.push(refs[j])
-      }
-    }
-    return out
-  }
-
-  function unregisterOwner(owner) {
-    delete defaultRefsByOwner[String(owner || '')]
-    return unregisterRegistryOwner(owner)
-  }
-
-  if (aiditor.runtime && aiditor.runtime.registerOwnerCleanup) {
-    aiditor.runtime.registerOwnerCleanup(function (owner) {
-      delete defaultRefsByOwner[String(owner || '')]
-      return {}
-    })
   }
 
   ai.skills = Object.assign(registry, {
-    availability: availability,
     catalog: catalog,
-    configureDefaults: configureDefaults,
-    clearDefaults: clearDefaults,
-    defaults: defaults,
-    unregisterOwner: unregisterOwner,
+    page: page,
+    read: read,
   })
 })(window.aiditor = window.aiditor || {})
 
@@ -6049,10 +5995,14 @@
       toolCall: found.toolCall,
       runId: found.message && found.message.meta && found.message.meta.runId || null,
       signal: signal || null,
+      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
+      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
+      tools: ai.tools,
+      skills: ai.skills,
       canRead: function (scope) { return ai.canRead(actor || found.toolCall.actor || 'user', found.agent.id, scope || 'agent.full') },
       canApply: function () { return toolPermissionDecision(found, actor || found.toolCall.actor || 'user', 'apply').allowed === true },
     }
-    return ctx.runId && ai._runSkillContext ? ai._runSkillContext(ctx.runId, ctx) : ctx
+    return ctx
   }
 
   function toolExecutorId(call) {
@@ -6065,14 +6015,45 @@
 
   function callToolPhase(agentId, callId, actor, phase, signal) {
     const found = findToolCall(agentId, callId)
-    const tool = found && ai.tools.get(toolExecutorId(found.toolCall))
-    const fn = tool && tool[phase]
-    if (!fn) return null
+    if (!found) return null
     const ctx = createToolContext(found, actor, signal)
     const input = phase === 'apply'
       ? (found.toolCall.result || found.toolCall.preview || toolExecutorArgs(found.toolCall))
       : toolExecutorArgs(found.toolCall)
-    return fn(input, ctx)
+    return invokeTool(toolExecutorId(found.toolCall), input, ctx, phase)
+  }
+
+  function invokeTool(name, args, ctx, phase) {
+    const tool = ai.tools.get(name)
+    if (!tool) {
+      const error = new Error('Tool not found: ' + name)
+      error.code = 'TOOL_NOT_FOUND'
+      throw error
+    }
+    if (!ai.tools.available(name, ctx || {})) {
+      const error = new Error('Tool is not currently available: ' + name)
+      error.code = 'TOOL_UNAVAILABLE'
+      throw error
+    }
+    const method = phase || 'run'
+    const fn = tool[method]
+    if (!fn) {
+      const error = new Error('Tool does not support phase "' + method + '": ' + name)
+      error.code = 'TOOL_PHASE_UNAVAILABLE'
+      throw error
+    }
+    if (method !== 'apply') {
+      const validation = ai.schema.validate(args, ai.tools.schema(name, ctx || {}))
+      if (!validation.valid) {
+        const first = validation.error
+        const error = new Error('Tool arguments do not match the schema for "' + name + '" at ' + first.path + ': ' + first.message)
+        error.code = 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+        error.toolName = name
+        error.schemaErrors = validation.errors
+        throw error
+      }
+    }
+    return fn(args, ctx || {})
   }
 
   function invokeToolPhase(agentId, callId, actor, phase, options) {
@@ -6106,19 +6087,6 @@
     return serialize(value)
   }
 
-  function errorCode(message) {
-    const text = String(message || '')
-    if (/baseHash mismatch/i.test(text)) return 'BASE_HASH_MISMATCH'
-    if (/permission denied/i.test(text)) return 'PERMISSION_DENIED'
-    if (/workspace.*not available|workspace.*required|No AI workspace/i.test(text)) return 'WORKSPACE_REQUIRED'
-    if (/file not found|path not found/i.test(text)) return 'FILE_NOT_FOUND'
-    if (/invalid JSON/i.test(text)) return 'INVALID_JSON'
-    if (/invalid JavaScript|syntax error/i.test(text)) return 'INVALID_JAVASCRIPT'
-    if (/not found/i.test(text)) return 'NOT_FOUND'
-    if (/not allowed|not available/i.test(text)) return 'NOT_ALLOWED'
-    return 'TOOL_FAILED'
-  }
-
   function recoverHint(code, toolId) {
     if (code === 'BASE_HASH_MISMATCH') return 'Read the current resource again, then retry with the new hash.'
     if (code === 'WORKSPACE_REQUIRED') return 'Ask the user to open or select a workspace before writing files.'
@@ -6134,21 +6102,16 @@
     return ''
   }
 
-  function failureEnvelope(toolId, phase, value) {
+  function failureEnvelope(toolId, value) {
     const message = errorMessage(value, 'Tool failed')
-    const code = value && value.code ? String(value.code) : errorCode(message)
+    const code = value && value.code ? String(value.code) : 'TOOL_FAILED'
     const out = {
       ok: false,
       code: code,
       message: message,
-      error: message,
-      toolId: toolId || '',
-      phase: phase || 'run',
-      recoverable: code !== 'PERMISSION_DENIED' && code !== 'TOOL_CANCELLED',
     }
     const hint = value && value.hint ? String(value.hint) : recoverHint(code, toolId)
     if (hint) out.hint = hint
-    if (value && typeof value === 'object') out.details = value
     return out
   }
 
@@ -6158,7 +6121,7 @@
 
   function failToolExecution(agentId, callId, found, err, phase, executionId, expectedStatus) {
     if (err && err.code !== 'TOOL_CANCELLED' && aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: found.toolCall.toolId }, err)
-    const envelope = failureEnvelope(found.toolCall.toolId, phase || 'run', err)
+    const envelope = failureEnvelope(found.toolCall.toolId, err)
     const patch = { status: 'failed', error: envelope.message, errorDetails: envelope }
     if (phase === 'preview') patch.preview = envelope
     else if (phase === 'apply') patch.applyResult = envelope
@@ -6318,7 +6281,7 @@
   function failToolCall(agentId, callId, value, phase) {
     const found = findToolCall(agentId, callId)
     if (!found) return null
-    const envelope = failureEnvelope(found.toolCall.toolId, phase || 'run', value)
+    const envelope = failureEnvelope(found.toolCall.toolId, value)
     traceTool(found, 'tool_completed', 'failed', envelope.message)
     return updateToolCall(agentId, callId, {
       status: 'failed',
@@ -6343,7 +6306,7 @@
         const promise = Promise.resolve(result).then(function (done) {
           if (resultFailed(done)) {
             traceTool(found, 'tool_preview_completed', 'failed', previewFailureMessage(done))
-            return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: done, error: previewFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', done) })
+            return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: done, error: previewFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, done) })
           }
           traceTool(found, 'tool_preview_completed', 'previewed', found.toolCall.toolId)
           return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'previewed', preview: done, error: null })
@@ -6355,7 +6318,7 @@
       }
       if (resultFailed(result)) {
         traceTool(found, 'tool_preview_completed', 'failed', previewFailureMessage(result))
-        return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: result, error: previewFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'preview', result) })
+        return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'failed', preview: result, error: previewFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, result) })
       }
       traceTool(found, 'tool_preview_completed', 'previewed', found.toolCall.toolId)
       return settleToolExecution(agentId, callId, execution.executionId, 'previewing', { status: 'previewed', preview: result, error: null })
@@ -6394,7 +6357,7 @@
     }).then(function (result) {
       if (resultFailed(result)) {
         traceTool(found, 'tool_run_completed', 'failed', errorMessage(result))
-        return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'failed', result: result, error: errorMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'run', result) })
+        return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'failed', result: result, error: errorMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, result) })
       }
       traceTool(found, 'tool_run_completed', 'completed', found.toolCall.toolId)
       return settleToolExecution(agentId, callId, execution.executionId, 'running', { status: 'completed', result: result, error: null })
@@ -6417,13 +6380,13 @@
         traceTool(found, 'tool_apply_completed', applySucceeded(result) ? 'applied' : 'failed', applySucceeded(result) ? found.toolCall.toolId : applyFailureMessage(result))
         return applySucceeded(result)
           ? settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'applied', applyResult: result, error: null })
-          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: result, error: applyFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', result) })
+          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: result, error: applyFailureMessage(result), errorDetails: failureEnvelope(found.toolCall.toolId, result) })
       }
       const promise = Promise.resolve(result).then(function (done) {
         traceTool(found, 'tool_apply_completed', applySucceeded(done) ? 'applied' : 'failed', applySucceeded(done) ? found.toolCall.toolId : applyFailureMessage(done))
         return applySucceeded(done)
           ? settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'applied', applyResult: done, error: null })
-          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: done, error: applyFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, 'apply', done) })
+          : settleToolExecution(agentId, callId, execution.executionId, 'applying', { status: 'failed', applyResult: done, error: applyFailureMessage(done), errorDetails: failureEnvelope(found.toolCall.toolId, done) })
       }, function (err) {
         traceTool(found, 'tool_apply_completed', 'failed', errorMessage(err))
         return failToolExecution(agentId, callId, found, err, 'apply', execution.executionId, 'applying')
@@ -6452,7 +6415,7 @@
             executionId: null,
             approvalPhase: null,
             error: error,
-            errorDetails: failureEnvelope(call.toolId, 'run', { code: 'TOOL_CANCELLED', message: error }),
+            errorDetails: failureEnvelope(call.toolId, { code: 'TOOL_CANCELLED', message: error }),
             updatedAt: Date.now(),
           })
         })
@@ -6498,62 +6461,80 @@
   ai.failToolCall = failToolCall
   ai.cancelRunToolCalls = cancelRunToolCalls
   ai.createRunContext = createRunContext
+  ai.tools.invoke = invokeTool
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ai/skill/runtime.js ---- */
-// Model-facing Skill discovery and run-scoped activation controls.
+// Model-facing deterministic Skill discovery and reading.
 ;(function (aiditor) {
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
   const META = { owner: 'aiditor.ai.skills', layer: 'builtin', source: 'builtin' }
 
+  function toolCounts(skill, ctx) {
+    const tools = skill && skill.tools || []
+    let available = 0
+    for (let i = 0; i < tools.length; i++) {
+      if (ai.tools.available(tools[i], ctx || {})) available++
+    }
+    return { available: available, total: tools.length }
+  }
+
+  function summary(skill, ctx) {
+    const description = String(skill.description || '').trim().replace(/\s+/g, ' ')
+    return {
+      id: skill.id,
+      description: description.length > 160 ? description.slice(0, 159).trim() + '…' : description,
+      tools: toolCounts(skill, ctx),
+    }
+  }
+
   ai.tools.register('skill.list', {
     title: 'List Skills',
-    description: 'Discover focused capabilities and their current active/configured state. Use this when the task needs a capability that is not already active.',
+    description: 'List registered Skills deterministically. Follow nextCursor to enumerate every page without repeating earlier pages.',
     schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        query: { type: 'string', description: 'Optional intent or capability query.' },
-        limit: { type: 'number', minimum: 1, maximum: 100 },
+        cursor: { type: 'string', pattern: '^skill:[0-9]+$' },
+        limit: { type: 'integer', minimum: 1, maximum: 20 },
       },
     },
-    run: function (input, ctx) {
-      const catalogCtx = ai._runSkillContext ? ai._runSkillContext(ctx && ctx.runId, ctx || {}) : (ctx || {})
-      const active = catalogCtx.skillRefs || []
-      const configured = catalogCtx.configuredSkillRefs || catalogCtx.agent && catalogCtx.agent.skillRefs || []
+    run: function (args, ctx) {
+      const page = ai.skills.page(args && args.cursor, args && args.limit)
       return {
-        skills: ai.skills.catalog(catalogCtx, input || {}).map(function (skill) {
-          const isConfigured = configured.indexOf(skill.id) >= 0
-          return Object.assign({}, skill, {
-            active: active.indexOf(skill.id) >= 0,
-            configured: isConfigured,
-            lifetime: isConfigured ? 'agent' : 'run',
-          })
-        }),
+        total: page.total,
+        nextCursor: page.nextCursor,
+        skills: page.items.map(function (skill) { return summary(skill, ctx) }),
       }
     },
   }, META)
 
-  ai.tools.register('skill.activate', {
-    title: 'Activate Skill',
-    description: 'Activate one available Skill for the current run only. Its instructions and Tools become available on the next continuation. Activate it again in a new request unless it is configured in agent.skillRefs.',
+  ai.tools.register('skill.read', {
+    title: 'Read Skill',
+    description: 'Read the complete instructions for one registered Skill, or one readable resource from that Skill.',
     schema: {
       type: 'object',
       required: ['id'],
-      properties: { id: { type: 'string' } },
+      additionalProperties: false,
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        resource: { type: 'string', minLength: 1 },
+      },
     },
-    run: function (input, ctx) {
-      if (!ai.activateRunSkill) throw new Error('Skill activation requires an active Agent run.')
-      return ai.activateRunSkill(ctx && ctx.runId, input.id, ctx || {})
+    run: function (args, ctx) {
+      const id = String(args.id)
+      const resource = args.resource == null ? '' : String(args.resource)
+      const result = ai.skills.read(id, resource)
+      if (resource || result && typeof result.then === 'function') return result
+      return Object.assign({}, result, { tools: toolCounts(ai.skills.get(id), ctx) })
     },
   }, META)
-
-  ai.skillControlTools = Object.freeze(['skill.list', 'skill.activate'])
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ai/skill/builtins.js ---- */
-// Built-in framework Skills for AIditor AI Host.
+// Built-in AIditor Skills. Skills organize disclosure; Tool execution remains independent.
 ;(function (aiditor) {
   'use strict'
 
@@ -6563,194 +6544,166 @@
   const READ_CODE = [
     'workspace.fileSummary', 'workspace.searchFiles', 'workspace.readText',
     'workspace.readTextRange', 'workspace.stat', 'code.map', 'code.outline',
-    'aiditor.searchReferences', 'aiditor.readReference',
   ]
   const WRITE_CODE = READ_CODE.concat([
     'workspace.editText', 'workspace.writeText', 'workspace.patchText',
     'workspace.mkdir', 'workspace.copy', 'workspace.move', 'workspace.delete',
   ])
-  const RUNTIME = WRITE_CODE.concat([
+  const RUNTIME = [
     'aiditor.inspectDocks', 'aiditor.addPanelToDock',
     'aiditor.reloadPanel', 'aiditor.replacePanel',
-  ])
-  const COMMON_RULES = [
-    'Treat current workspace files and runtime inspection results as the source of truth.',
-    'Use only Tools exposed by the active Skill. Activate another focused Skill when a distinct capability is required.',
-    'A Skill grants discoverability and instructions, never permission. Respect Tool approval and host permission decisions.',
   ]
-  const UI_RULES = COMMON_RULES.concat([
-    'AIditor source is classic plain JavaScript: IIFE files, window.aiditor namespace, no import/export, JSX, TSX, or framework runtime.',
+  const UI_INSTRUCTIONS = [
+    'AIditor source uses classic JavaScript IIFEs and the window.aiditor namespace; do not add import/export, JSX, TSX, or a framework runtime.',
     'Registered components return one HTMLElement root and consume caller-owned signals. Core/UI must not own project data models.',
     'Keep panel roots responsive inside resizable docks and prefer aiditor.ui primitives over duplicate controls.',
     'Do not add application shortcuts, project formats, save semantics, or business workflow to framework Core/UI.',
-  ])
+  ]
 
-  function workspaceAvailable(ctx) {
-    return !!((ctx && ctx.workspace) || (ai.currentWorkspace && ai.currentWorkspace()))
+  function register(id, title, description, instructions, tools, argumentHint, toolDisclosure) {
+    ai.skills.register(id, {
+      title: title,
+      description: description,
+      argumentHint: argumentHint || '',
+      instructions: instructions.join('\n'),
+      toolDisclosure: toolDisclosure || 'onRead',
+      tools: tools,
+    }, META)
   }
 
-  function extensionsAvailable() { return !!aiditor.extensions }
+  register(
+    'aiditor.framework-authoring',
+    'AIditor Framework Authoring',
+    'Develop AIditor Core, UI, Dock, themes, and ordinary host applications while preserving framework boundaries.',
+    ['Use for AIditor framework code, UI components, dock behavior, themes, inspector primitives, or host applications.']
+      .concat(UI_INSTRUCTIONS)
+      .concat([
+        'Read aiditor.workspace-authoring before changing workspace files.',
+        'After changing src/, rebuild committed distributions and run the repository checks.',
+      ]),
+    [],
+    '[framework task]',
+    'onRead'
+  )
 
-  function register(id, spec) {
-    ai.skills.register(id, spec, META)
-  }
+  register(
+    'aiditor.runtime-authoring',
+    'AIditor Runtime Authoring',
+    'Create, edit, load, mount, reload, or replace workspace-backed panels in the current live editor.',
+    ['Use when requested UI must appear in a current AIditor dock.']
+      .concat(UI_INSTRUCTIONS)
+      .concat([
+        'Inspect real dock ids before placement; never guess layout JSON or dock names.',
+        'Write component source to the workspace, then pass its path to addPanelToDock.',
+        'Reload the same component with reloadPanel; use replacePanel only when changing component identity.',
+      ]),
+    RUNTIME,
+    '[panel or UI task]',
+    'onRead'
+  )
 
-  register('aiditor.framework-authoring', {
-    title: 'AIditor Framework Authoring',
-    description: 'Develop AIditor Core, UI, Dock, themes, and ordinary host applications while preserving framework boundaries.',
-    argumentHint: '[framework task]',
-    whenToUse: 'Use for AIditor framework code, UI components, dock behavior, themes, inspector primitives, or a host app built on AIditor.',
-    whenNotToUse: 'Do not use to mount a workspace component into the currently running editor; use aiditor.runtime-authoring.',
-    available: workspaceAvailable,
-    unavailableReason: 'Open the repository workspace first.',
-    tools: WRITE_CODE,
-    relatedApis: ['aiditor.registerComponent', 'aiditor.ui', 'aiditor.inspector', 'aiditor.createDockLayout'],
-    docPath: 'doc/skill/aiditor-framework-authoring/SKILL.md',
-    systemPrompt: 'Work as an AIditor framework engineer. Preserve the zero-dependency classic-script architecture and strict Core/UI/host ownership boundaries.',
-    rules: UI_RULES.concat(['After changing src/, rebuild committed distributions and run the repository checks.']),
-  })
-
-  register('aiditor.runtime-authoring', {
-    title: 'AIditor Runtime Authoring',
-    description: 'Create, edit, load, mount, reload, or replace workspace-backed panels in the current live editor.',
-    argumentHint: '[panel or UI task]',
-    whenToUse: 'Use when the requested UI must appear in a current AIditor dock.',
-    whenNotToUse: 'Do not use for framework/library development without live dock placement.',
-    available: function (ctx) { return workspaceAvailable(ctx) && extensionsAvailable() },
-    unavailableReason: 'Open a writable workspace in a live AIditor host first.',
-    tools: RUNTIME,
-    relatedApis: ['aiditor.inspectDocks', 'aiditor.addPanelToDock', 'aiditor.reloadPanel', 'aiditor.replacePanel'],
-    docPath: 'doc/skill/aiditor-runtime-authoring/SKILL.md',
-    systemPrompt: 'Create durable live UI as workspace-backed registered components, then place it through the dock runtime Tools.',
-    rules: UI_RULES.concat([
-      'Inspect real dock ids before placement; never guess layout JSON or dock names.',
-      'Write component source to the workspace, then pass its path to addPanelToDock.',
-      'Reload the same component with reloadPanel; use replacePanel only when changing the component identity.',
-    ]),
-  })
-
-  register('aiditor.ai-host-authoring', {
-    title: 'AIditor AI Host Authoring',
-    description: 'Develop Agent, Skill, Tool, Context, provider, permission, request, runtime, and persistence integration.',
-    argumentHint: '[AI Host task]',
-    whenToUse: 'Use for AIditor AI Host architecture or host-side AI integration.',
-    whenNotToUse: 'Do not use for ordinary UI work that does not touch AI Host.',
-    available: workspaceAvailable,
-    unavailableReason: 'Open the repository workspace first.',
-    tools: WRITE_CODE,
-    relatedApis: ['aiditor.ai.skills', 'aiditor.ai.tools', 'aiditor.ai.context', 'aiditor.ai.permission'],
-    docPath: 'doc/skill/aiditor-ai-host-authoring/SKILL.md',
-    systemPrompt: 'Preserve Skill-first capability discovery, internal Tool execution, factual Context, exact Owner lifecycle, and centralized Permission enforcement.',
-    rules: COMMON_RULES.concat([
-      'Agent capability selection is Skill-only. Do not add direct Agent Tool lists or Context-provided Tool authorization.',
-      'Tools are executable protocol endpoints; Skills are the model and project capability surface.',
+  register(
+    'aiditor.ai-host-authoring',
+    'AIditor AI Host Authoring',
+    'Develop Agent, Skill, Tool, Context, provider, permission, request, runtime, and persistence integration.',
+    [
+      'Keep Agent, Skill, Tool, Context, Operation, ChangeSet, provider, and permission ownership explicit.',
+      'Skills are readable instructions and Tool organization only; they never activate, authorize, or unlock Tools.',
+      'Registered Tools are model-callable execution endpoints. Context and References provide facts, never authorization.',
       'Owner identifies one unload boundary. Dotted names identify contributions and never substitute for ownership.',
-    ]),
-  })
+      'Read aiditor.workspace-authoring before changing workspace files.',
+    ],
+    [],
+    '[AI Host task]',
+    'onRead'
+  )
 
-  register('aiditor.extension-authoring', {
-    title: 'AIditor Extension Authoring',
-    description: 'Build and maintain AIditor Extension manifests and contribution installers.',
-    argumentHint: '[extension task]',
-    whenToUse: 'Use when implementing an Extension package or contribution lifecycle.',
-    whenNotToUse: 'Do not use merely to enable, disable, or inspect installed Extensions.',
-    available: workspaceAvailable,
-    unavailableReason: 'Open the Extension source workspace first.',
-    tools: WRITE_CODE,
-    relatedApis: ['aiditor.extensions', 'aiditor.runtime.withOwner'],
-    docPath: 'doc/skill/aiditor-extension-authoring/SKILL.md',
-    systemPrompt: 'Implement Extensions as owner-scoped contributions installed into existing framework registries, never as duplicate component or AI systems.',
-    rules: UI_RULES.concat([
-      'An Extension is a packaging and lifecycle boundary, not a second Registry model.',
-      'Install every contribution with owner extension:<id> and unload only through that exact Owner.',
-    ]),
-  })
+  register(
+    'aiditor.extension-authoring',
+    'AIditor Extension Authoring',
+    'Build and maintain AIditor Extension manifests and contribution installers.',
+    ['Extensions are packaging and lifecycle boundaries, not duplicate Registry or AI systems.']
+      .concat(UI_INSTRUCTIONS)
+      .concat([
+        'Read aiditor.workspace-authoring before changing workspace files.',
+        'Install every contribution with owner extension:<id> and unload only through that exact Owner.',
+      ]),
+    [],
+    '[extension task]',
+    'onRead'
+  )
 
-  register('aiditor.editor-control', {
-    title: 'AIditor Editor Control',
-    description: 'Inspect current editor selection and references, then preview or apply host-provided semantic operations.',
-    argumentHint: '[editor action]',
-    whenToUse: 'Use when acting on the current editor state through host Reference and Operation contracts.',
-    whenNotToUse: 'Do not use for direct repository file editing.',
-    tools: ['aiditor.getSelection', 'aiditor.getCapabilities', 'aiditor.searchReferences', 'aiditor.readReference', 'aiditor.previewOperation', 'aiditor.applyOperation'],
-    relatedApis: ['aiditor.ai.references', 'aiditor.ai.operations', 'aiditor.ai.targets'],
-    docPath: 'doc/skill/aiditor-editor-control/SKILL.md',
-    systemPrompt: 'Read current semantic state before changes, use canonical host Operations, and preserve preview/apply plus permission boundaries.',
-    rules: COMMON_RULES.concat(['Re-read mutable state before applying a change and never infer business semantics from DOM structure.']),
-  })
+  register(
+    'aiditor.editor-control',
+    'AIditor Editor Control',
+    'Inspect current editor selection and references, then preview or apply host-provided semantic operations.',
+    [
+      'Read current semantic state before changes and use canonical host Operations.',
+      'Preserve preview/apply and permission boundaries.',
+      'Re-read mutable state before applying a change and never infer business semantics from DOM structure.',
+    ],
+    ['aiditor.getSelection', 'aiditor.getCapabilities', 'aiditor.searchReferences', 'aiditor.readReference', 'aiditor.previewOperation', 'aiditor.applyOperation'],
+    '[editor action]',
+    'always'
+  )
 
-  register('aiditor.workspace-authoring', {
-    title: 'AIditor Workspace Authoring',
-    description: 'Inspect, search, read, edit, create, move, or delete files through the bounded workspace contract.',
-    argumentHint: '[workspace task]',
-    whenToUse: 'Use for generic code and file work in the current workspace.',
-    whenNotToUse: 'Do not use when no workspace is open or when a semantic editor Operation is more precise.',
-    available: workspaceAvailable,
-    unavailableReason: 'No workspace is currently open.',
-    tools: ['workspace.listFiles', 'workspace.capabilities'].concat(WRITE_CODE),
-    relatedApis: ['aiditor.workspace', 'aiditor.ai.configureWorkspace'],
-    docPath: 'doc/skill/aiditor-workspace-authoring/SKILL.md',
-    systemPrompt: 'Use the bounded workspace contract for precise file work. Read current content and stable hashes before editing.',
-    rules: COMMON_RULES.concat(['Prefer exact range/edit operations for existing files and whole-file writes only for new or deliberate replacements.']),
-  })
+  register(
+    'aiditor.workspace-authoring',
+    'AIditor Workspace Authoring',
+    'Inspect, search, read, edit, create, move, or delete files through the bounded workspace contract.',
+    [
+      'Use workspace files as the source of truth and read current content plus stable hashes before editing.',
+      'Prefer exact range/edit operations for existing files and whole-file writes only for new or deliberate replacements.',
+    ],
+    ['workspace.listFiles', 'workspace.capabilities'].concat(WRITE_CODE),
+    '[workspace task]',
+    'onRead'
+  )
 
-  register('aiditor.verify-changes', {
-    title: 'AIditor Verify Changes',
-    description: 'Discover and run host-provided tests, lint, type checks, health checks, and diagnostics.',
-    argumentHint: '[check or path]',
-    whenToUse: 'Use after implementation or when diagnosing a failing project check.',
-    whenNotToUse: 'Do not claim verification when the host provides no Verify adapter.',
-    available: function () { return !!(ai.currentVerify && ai.currentVerify()) },
-    unavailableReason: 'The host has not configured a Verify adapter.',
-    tools: ['verify.list', 'verify.run', 'verify.diagnostics'],
-    relatedApis: ['aiditor.ai.configureVerify'],
-    docPath: 'doc/skill/aiditor-verify-changes/SKILL.md',
-    systemPrompt: 'Run the narrowest relevant checks, inspect diagnostics, and report exactly what was verified.',
-    rules: COMMON_RULES,
-  })
+  register(
+    'aiditor.verify-changes',
+    'AIditor Verify Changes',
+    'Discover and run host-provided tests, lint, type checks, health checks, and diagnostics.',
+    ['Run the narrowest relevant checks, inspect diagnostics, and report exactly what was verified.'],
+    ['verify.list', 'verify.run', 'verify.diagnostics'],
+    '[check or path]',
+    'onRead'
+  )
 
-  register('aiditor.version-control', {
-    title: 'AIditor Version Control',
-    description: 'Inspect and modify repository state through the host-provided Git adapter.',
-    argumentHint: '[Git task]',
-    whenToUse: 'Use for status, diff, log, stage, restore, or commit requests.',
-    whenNotToUse: 'Do not use when the host has no Git adapter or when only workspace file edits are requested.',
-    available: function () { return !!(ai.currentGit && ai.currentGit()) },
-    unavailableReason: 'The host has not configured a Git adapter.',
-    tools: ['git.status', 'git.diff', 'git.diffFile', 'git.log', 'git.show', 'git.stage', 'git.restoreFile', 'git.commit'],
-    relatedApis: ['aiditor.ai.configureGit'],
-    docPath: 'doc/skill/aiditor-version-control/SKILL.md',
-    systemPrompt: 'Use the host Git adapter, inspect state before mutation, and preserve explicit review and approval boundaries.',
-    rules: COMMON_RULES,
-  })
+  register(
+    'aiditor.version-control',
+    'AIditor Version Control',
+    'Inspect and modify repository state through the host-provided Git adapter.',
+    ['Inspect repository state before mutation and preserve explicit review and approval boundaries.'],
+    ['git.status', 'git.diff', 'git.diffFile', 'git.log', 'git.show', 'git.stage', 'git.restoreFile', 'git.commit'],
+    '[Git task]',
+    'onRead'
+  )
 
-  register('aiditor.extension-management', {
-    title: 'AIditor Extension Management',
-    description: 'Inspect, install, update, enable, disable, remove, or change the layer of installed Extensions.',
-    argumentHint: '[extension action]',
-    whenToUse: 'Use for Extension lifecycle administration in a running AIditor host.',
-    whenNotToUse: 'Do not use to author Extension source code.',
-    available: extensionsAvailable,
-    unavailableReason: 'The Extension Runtime is not loaded.',
-    tools: ['aiditor.inspectExtensions', 'aiditor.installExtension', 'aiditor.updateExtension', 'aiditor.enableExtension', 'aiditor.disableExtension', 'aiditor.removeExtension', 'aiditor.promoteExtensionLayer'],
-    relatedApis: ['aiditor.extensions'],
-    docPath: 'doc/skill/aiditor-extension-management/SKILL.md',
-    systemPrompt: 'Manage Extension lifecycle through reviewed, owner-scoped runtime actions.',
-    rules: COMMON_RULES,
-  })
+  register(
+    'aiditor.extension-management',
+    'AIditor Extension Management',
+    'Inspect, install, update, enable, disable, remove, or change the layer of installed Extensions.',
+    ['Manage Extension lifecycle through reviewed, owner-scoped runtime actions.'],
+    ['aiditor.inspectExtensions', 'aiditor.installExtension', 'aiditor.updateExtension', 'aiditor.enableExtension', 'aiditor.disableExtension', 'aiditor.removeExtension', 'aiditor.promoteExtensionLayer'],
+    '[extension action]',
+    'onRead'
+  )
 
-  register('aiditor.agent-orchestration', {
-    title: 'AIditor Agent Orchestration',
-    description: 'Create, configure, delegate to, communicate with, and close child Agent quests.',
-    argumentHint: '[delegation task]',
-    whenToUse: 'Use when work should be delegated to focused child Agents or existing quests must be managed.',
-    whenNotToUse: 'Do not create children for trivial work or use Agent controls as an application workflow engine.',
-    tools: ['agent.read', 'agent.create', 'agent.configure', 'agent.delegate', 'agent.reparent', 'agent.delete', 'agent.send', 'quest.read', 'quest.result', 'quest.cancel', 'message.read', 'agent.stop'],
-    relatedApis: ['aiditor.ai.createAgent', 'aiditor.ai.delegate', 'aiditor.ai.readQuest'],
-    docPath: 'doc/skill/aiditor-agent-orchestration/SKILL.md',
-    systemPrompt: 'Delegate bounded work with focused Skill ids, track quests precisely, and respect Agent ancestry and budgets.',
-    rules: COMMON_RULES.concat(['Child capabilities are selected only with skillRefs; never pass raw Tool ids.']),
-  })
+  register(
+    'aiditor.agent-orchestration',
+    'AIditor Agent Orchestration',
+    'Create, configure, delegate to, communicate with, and close child Agent quests.',
+    [
+      'Delegate bounded independent work, track quests precisely, and respect Agent ancestry and budgets.',
+      'When an Agent should perform work, call agent.delegate directly. Use agent.create only when the request explicitly needs an idle Agent profile.',
+      'Agents may manage only descendants and cannot escape to the root.',
+      'Use Quest read/result/cancel for task lifecycle and reserve Agent stop for current-run cancellation.',
+    ],
+    ['agent.read', 'agent.delegate', 'agent.send', 'quest.read', 'quest.result', 'quest.cancel', 'message.read', 'agent.create', 'agent.configure', 'agent.reparent', 'agent.stop', 'agent.delete'],
+    '[delegation task]',
+    'onRead'
+  )
 })(window.aiditor = window.aiditor || {})
 
 /* ---- ai/workdir.js ---- */
@@ -7307,14 +7260,24 @@
     { path: 'scripts', kind: 'script' },
   ]
 
-  function normalizePath(path, label) {
+  function packageError(code, message) {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
+
+  function normalizePath(path, label, code) {
     path = String(path || '').replace(/\\/g, '/')
-    if (path.charAt(0) === '/' || /^[a-z][a-z0-9+.-]*:\/\//i.test(path)) throw new Error(label + ' must be workspace-relative')
+    if (path.charAt(0) === '/' || /^[a-z][a-z0-9+.-]*:\/\//i.test(path)) throw code
+      ? packageError(code, label + ' must be workspace-relative')
+      : new Error(label + ' must be workspace-relative')
     const parts = path.split('/')
     const out = []
     for (let i = 0; i < parts.length; i++) {
       if (!parts[i] || parts[i] === '.') continue
-      if (parts[i] === '..') throw new Error(label + ' cannot traverse outside the package')
+      if (parts[i] === '..') throw code
+        ? packageError(code, label + ' cannot traverse outside the package')
+        : new Error(label + ' cannot traverse outside the package')
       out.push(parts[i])
     }
     return out.join('/')
@@ -7368,7 +7331,7 @@
       name: name,
       description: description,
       argumentHint: String(data['argument-hint'] || ''),
-      userInvocable: data['user-invocable'] !== false,
+      toolDisclosure: String(data['tool-disclosure'] || 'onRead'),
       body: match[2].trim(),
     }
   }
@@ -7430,9 +7393,9 @@
       if (resources[i].kind === 'reference') readable[resources[i].path] = resources[i]
     }
     return async function (path) {
-      path = normalizePath(path, 'Skill resource path')
+      path = normalizePath(path, 'Skill resource path', 'SKILL_RESOURCE_PATH_INVALID')
       const resource = readable[path]
-      if (!resource) throw new Error('Skill reference resource not found: ' + path)
+      if (!resource) throw packageError('SKILL_RESOURCE_NOT_FOUND', 'Skill reference resource not found: ' + path)
       const file = await ws.readText(joinPath(root, path))
       return {
         path: path,
@@ -7468,19 +7431,10 @@
       title: String(input.title || parsed.name),
       description: parsed.description,
       argumentHint: String(input.argumentHint != null ? input.argumentHint : parsed.argumentHint),
-      userInvocable: input.userInvocable == null ? parsed.userInvocable : input.userInvocable !== false,
-      modelInvocable: input.modelInvocable !== false,
-      whenToUse: String(input.whenToUse || parsed.description),
-      whenNotToUse: String(input.whenNotToUse || ''),
-      systemPrompt: parsed.body,
-      rules: Array.isArray(input.rules) ? input.rules.slice() : [],
-      examples: Array.isArray(input.examples) ? input.examples.slice() : [],
+      instructions: parsed.body,
+      toolDisclosure: input.toolDisclosure || parsed.toolDisclosure,
       tools: Array.isArray(input.tools) ? input.tools.slice() : [],
-      relatedApis: Array.isArray(input.relatedApis) ? input.relatedApis.slice() : [],
       resources: resources,
-      docPath: manifestPath,
-      available: input.available,
-      unavailableReason: input.unavailableReason,
       readResource: resourceReader(ws, root, resources),
     }
     const registration = Object.assign({
@@ -8022,7 +7976,6 @@
   function inferResolver(uri, kind) {
     const text = String(uri || '')
     if (text === 'aiditor://api' || text.indexOf('aiditor://api/') === 0) return 'api'
-    if (text === 'aiditor://skills' || text.indexOf('aiditor://skills/') === 0) return 'skills'
     if (text === 'aiditor://host' || text.indexOf('aiditor://host/') === 0) return 'editor'
     const idx = text.indexOf('://')
     if (idx > 0) return text.slice(0, idx)
@@ -8239,7 +8192,15 @@
     if (title.indexOf(needle) >= 0) return 250
     if (uri.indexOf(needle) >= 0) return 100
     if (summary.indexOf(needle) >= 0) return 50
-    return 0
+    const terms = needle.split(/\s+/).filter(Boolean)
+    let score = 0
+    for (let i = 0; i < terms.length; i++) {
+      if (title.indexOf(terms[i]) >= 0) score += 25
+      else if (uri.indexOf(terms[i]) >= 0) score += 10
+      else if (summary.indexOf(terms[i]) >= 0) score += 5
+      else return 0
+    }
+    return score
   }
 
   function selectedReferences(ctx) {
@@ -8642,7 +8603,6 @@
     ai.tools.register('aiditor.previewOperation', {
       title: 'Preview Editor Operation',
       description: 'Preview a registered editor operation. Never apply invalid previews; repair input from returned validation errors.',
-      exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, false) },
       resolveModelSpecs: function () { return [] },
@@ -8659,7 +8619,6 @@
     ai.tools.register('aiditor.applyOperation', {
       title: 'Apply Editor Operation',
       description: 'Preview and apply a registered editor operation through the host transaction bridge.',
-      exposeToModel: false,
       schema: { type: 'object', properties: {}, additionalProperties: false },
       resolveSchema: function (ctx) { return operationGatewaySchema(ctx, true) },
       resolveModelSpecs: function (ctx) { return operationModelSpecs(ctx) },
@@ -10022,215 +9981,6 @@
   }, { owner: 'aiditor.ai.api', layer: 'builtin' })
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/skill/reference.js ---- */
-// AIditor Skill resources exposed through the reference protocol.
-;(function (aiditor) {
-  'use strict'
-
-  const ai = aiditor.ai = aiditor.ai || {}
-  if (!ai.references || !ai.references.register || !ai.skills) return
-
-  function skillNames() {
-    return ai.skills.list ? ai.skills.list().sort() : []
-  }
-
-  function getSkill(id) {
-    return ai.skills.get ? ai.skills.get(id) : null
-  }
-
-  function parseSkillUri(uri) {
-    const text = String(uri || '')
-    if (text === 'aiditor://skills') return { id: '', resource: '' }
-    if (text.indexOf('aiditor://skills/') !== 0) return null
-    const tail = text.slice('aiditor://skills/'.length)
-    const marker = '/resources/'
-    const index = tail.indexOf(marker)
-    if (index < 0) return { id: decodeURIComponent(tail), resource: '' }
-    return {
-      id: decodeURIComponent(tail.slice(0, index)),
-      resource: decodeURIComponent(tail.slice(index + marker.length)),
-    }
-  }
-
-  function uriFor(id) {
-    return 'aiditor://skills/' + encodeURIComponent(id)
-  }
-
-  function resourceUri(id, path) {
-    return uriFor(id) + '/resources/' + encodeURIComponent(path)
-  }
-
-  function compactResources(id, skill) {
-    const readable = typeof skill.readResource === 'function'
-    return (skill.resources || []).map(function (resource) {
-      const canRead = readable && resource.kind === 'reference'
-      return Object.assign({}, resource, {
-        uri: canRead ? resourceUri(id, resource.path) : null,
-        readable: canRead,
-      })
-    })
-  }
-
-  function compactSkill(id, skill) {
-    skill = skill || {}
-    const meta = ai.skills.meta ? ai.skills.meta(id) : {}
-    return {
-      id: id,
-      uri: uriFor(id),
-      title: skill.title || id,
-      description: skill.description || skill.systemPrompt || '',
-      whenToUse: skill.whenToUse || '',
-      whenNotToUse: skill.whenNotToUse || '',
-      relatedApis: skill.relatedApis || [],
-      tools: skill.tools || [],
-      docPath: skill.docPath || '',
-      resourceCount: (skill.resources || []).length,
-      source: meta.source || '',
-      layer: meta.layer || '',
-      hash: meta.hash || '',
-    }
-  }
-
-  function fullSkill(id, skill) {
-    return Object.assign(compactSkill(id, skill), {
-      kind: 'aiditor.skill',
-      systemPrompt: skill.systemPrompt || '',
-      rules: skill.rules || [],
-      examples: skill.examples || [],
-      resources: compactResources(id, skill),
-    })
-  }
-
-  function indexRef() {
-    return {
-      resolver: 'skills',
-      uri: 'aiditor://skills',
-      kind: 'aiditor.skill.index',
-      title: 'AIditor Skills',
-      summary: 'Generated list of registered AIditor skills and when to use them.',
-      meta: { count: skillNames().length },
-    }
-  }
-
-  function refFor(id, skill) {
-    const compact = compactSkill(id, skill)
-    return {
-      resolver: 'skills',
-      uri: compact.uri,
-      kind: 'aiditor.skill',
-      title: compact.title,
-      summary: compact.whenToUse || compact.description || '',
-      meta: compact,
-    }
-  }
-
-  function read(ref) {
-    const parsed = parseSkillUri(ref && ref.uri)
-    if (!parsed || !parsed.id) {
-      return {
-        uri: 'aiditor://skills',
-        id: 'aiditor.skills.index',
-        kind: 'aiditor.skill.index',
-        title: 'AIditor Skills',
-        summary: 'Registered AIditor skill list. Read a skill URI for full rules.',
-        entries: skillNames().map(function (name) { return compactSkill(name, getSkill(name)) }),
-      }
-    }
-    const skill = getSkill(parsed.id)
-    if (!skill) return null
-    if (!parsed.resource) return fullSkill(parsed.id, skill)
-    const resource = (skill.resources || []).find(function (item) { return item.path === parsed.resource && item.kind === 'reference' })
-    if (!resource || typeof skill.readResource !== 'function' || !ai.skills.readResource) return null
-    return ai.skills.readResource(parsed.id, parsed.resource).then(function (value) {
-      return Object.assign({
-        uri: resourceUri(parsed.id, parsed.resource),
-        id: parsed.id + ':' + parsed.resource,
-        skillId: parsed.id,
-        title: parsed.resource,
-      }, value)
-    })
-  }
-
-  function searchText(id, skill) {
-    skill = skill || {}
-    return [
-      id,
-      skill.title,
-      skill.description,
-      skill.systemPrompt,
-      skill.whenToUse,
-      skill.whenNotToUse,
-      (skill.relatedApis || []).join(' '),
-      (skill.tools || []).join(' '),
-      (skill.rules || []).join(' '),
-      (skill.resources || []).map(function (resource) { return resource.path }).join(' '),
-    ].join(' ').toLowerCase()
-  }
-
-  function matches(id, skill, terms) {
-    const text = searchText(id, skill)
-    for (let i = 0; i < terms.length; i++) {
-      if (text.indexOf(terms[i]) < 0) return false
-    }
-    return true
-  }
-
-  function search(query) {
-    const q = String(query && (query.query || query.q || '') || '').trim().toLowerCase()
-    const limit = Math.max(1, Math.min(50, Number(query && query.limit) || 10))
-    const out = [indexRef()]
-    const terms = q ? q.split(/\s+/).filter(function (term) { return term !== 'skills' && term !== 'skill' }) : []
-    const names = skillNames()
-    for (let i = 0; i < names.length && out.length < limit; i++) {
-      const skill = getSkill(names[i])
-      if (!terms.length || matches(names[i], skill, terms)) out.push(refFor(names[i], skill))
-    }
-    return out
-  }
-
-  function schema() {
-    return {
-      type: 'object',
-      properties: {
-        id: { type: 'string' },
-        title: { type: 'string' },
-        description: { type: 'string' },
-        whenToUse: { type: 'string' },
-        whenNotToUse: { type: 'string' },
-        relatedApis: { type: 'array' },
-        tools: { type: 'array' },
-        docPath: { type: 'string' },
-        resourceCount: { type: 'number' },
-        resources: { type: 'array' },
-        source: { type: 'string' },
-        layer: { type: 'string' },
-        hash: { type: 'string' },
-        systemPrompt: { type: 'string' },
-        rules: { type: 'array' },
-      },
-    }
-  }
-
-  function capabilities(ref) {
-    const parsed = parseSkillUri(ref && ref.uri)
-    if (!parsed || !parsed.id) return parsed ? ['read'] : []
-    const skill = getSkill(parsed.id)
-    if (!skill) return []
-    if (!parsed.resource) return ['read']
-    if (typeof skill.readResource !== 'function') return []
-    return (skill.resources || []).some(function (item) {
-      return item.path === parsed.resource && item.kind === 'reference'
-    }) ? ['read'] : []
-  }
-
-  ai.references.register('skills', {
-    search: search,
-    read: read,
-    schema: schema,
-    capabilities: capabilities,
-  }, { owner: 'aiditor.ai.skills', layer: 'builtin' })
-})(window.aiditor = window.aiditor || {})
-
 /* ---- extensions/manifest.js ---- */
 // aiditor extension manifest normalization and validation helpers.
 ;(function (aiditor) {
@@ -10604,7 +10354,6 @@
         permissions: clone(t.permissions || ['tool.call']),
         risk: t.risk || (t.permission && t.permission.risk) || null,
         origin: 'extension:' + manifest.id,
-        exposeToModel: t.visibleToModel === true || t.exposeToModel === true,
         available: t.available,
         preview: t.preview || (adapterId ? makeAdapterCall(adapters, adapterId, 'preview') : null),
         run: t.run && typeof t.run === 'function'
@@ -10633,17 +10382,10 @@
         title: item.title || item.label || item.id,
         description: item.description || '',
         argumentHint: item.argumentHint || '',
-        userInvocable: item.userInvocable !== false,
-        modelInvocable: item.modelInvocable !== false,
-        whenToUse: item.whenToUse || '',
-        whenNotToUse: item.whenNotToUse || '',
-        systemPrompt: item.systemPrompt || '',
-        rules: clone(item.rules || []),
-        examples: clone(item.examples || []),
+        instructions: item.instructions || '',
+        toolDisclosure: item.toolDisclosure || 'onRead',
         tools: (item.tools || []).map(function (name) { return toolIds[name] || name }),
-        relatedApis: clone(item.relatedApis || []),
         resources: clone(item.resources || []),
-        docPath: item.docPath || '',
       }
       ai.skills.register(item.publicId, spec, { owner: owner, layer: manifest.layer, source: owner })
       rollback.push(function (name) {
@@ -12593,7 +12335,7 @@
   registerTools()
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/change-set.js ---- */
+/* ---- ai/operation/change-set.js ---- */
 ;(function (aiditor) {
   'use strict'
 
@@ -12921,7 +12663,7 @@
   }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/target.js ---- */
+/* ---- ai/context/target.js ---- */
 // aiditor.ai target protocol - stable editor object references for AI context.
 ;(function (aiditor) {
   'use strict'
@@ -13377,7 +13119,7 @@
   ai.fileToTarget = fileToTarget
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/rich-prompt.js ---- */
+/* ---- ai/context/rich-prompt.js ---- */
 // aiditor.ai rich prompt draft helpers.
 ;(function (aiditor) {
   'use strict'
@@ -13666,7 +13408,7 @@
   }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/orchestration.js ---- */
+/* ---- ai/agent/orchestration.js ---- */
 // aiditor.ai built-in agent orchestration tools.
 ;(function (aiditor) {
   'use strict'
@@ -13689,6 +13431,12 @@
   function parentResolutionError(message) {
     const error = new Error(message)
     error.code = 'AGENT_PARENT_RESOLUTION_FAILED'
+    return error
+  }
+
+  function permissionError(message) {
+    const error = new Error(message || 'Permission denied')
+    error.code = 'PERMISSION_DENIED'
     return error
   }
 
@@ -13721,19 +13469,19 @@
   }
 
   function requireRead(ctx, agentId) {
-    if (!ai.canRead(actor(ctx), agentId, 'agent.full')) throw new Error('Permission denied')
+    if (!ai.canRead(actor(ctx), agentId, 'agent.full')) throw permissionError()
   }
 
   function requireSend(ctx, agentId) {
-    if (!ai.canSend(actor(ctx), agentId)) throw new Error('Permission denied')
+    if (!ai.canSend(actor(ctx), agentId)) throw permissionError()
   }
 
   function requireManage(ctx, agentId) {
-    if (!ai.canManage(actor(ctx), agentId)) throw new Error('Permission denied')
+    if (!ai.canManage(actor(ctx), agentId)) throw permissionError()
   }
 
   function requireConfigure(ctx, agentId) {
-    if (actor(ctx) === agentId) throw new Error('Permission denied: agents cannot configure themselves')
+    if (actor(ctx) === agentId) throw permissionError('Permission denied: agents cannot configure themselves')
     requireManage(ctx, agentId)
   }
 
@@ -13785,7 +13533,7 @@
       if (parentAgentId) requireManageOrSelf(ctx, parentAgentId)
       return parentAgentId
     }
-    if (!parentAgentId) throw new Error('Permission denied: agents cannot create or move root agents')
+    if (!parentAgentId) throw permissionError('Permission denied: agents cannot create or move root agents')
     requireManageOrSelf(ctx, parentAgentId)
     const resultingDepth = agentDepth(parentAgentId) + 1 + subtreeHeight(movingAgentId)
     if (resultingDepth > maxDelegationDepth()) throw new Error('Delegation depth limit reached')
@@ -13801,10 +13549,9 @@
       parentAgentId: parentAgentId,
       connection: args.connection || (inherited && inherited.connection) || ai.defaultConnection || 'mock',
       model: args.model || (inherited && inherited.model) || '',
-      systemPrompt: args.systemPrompt || '',
+      systemPrompt: hasOwn(args, 'systemPrompt') ? args.systemPrompt : null,
       outputSchema: args.outputSchema ? ai.schema.normalize(args.outputSchema, 'outputSchema') : null,
       contextRefs: clone(args.contextRefs || []),
-      skillRefs: clone(args.skillRefs || []),
       permissionMode: inherited && inherited.permissionMode || 'auto',
       permissions: clone(inherited && inherited.permissions || null),
     }
@@ -13846,13 +13593,12 @@
       unreadInboxCount: (agent.inbox || []).filter(function (event) { return !event.consumed }).length,
       recentQuests: (agent.quests || []).slice(-8).map(function (quest) { return questSummary(agent.id, quest) }),
       contextRefs: clone(agent.contextRefs || []),
-      skillRefs: clone(agent.skillRefs || []),
       permissions: clone(agent.permissions),
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
     }
     if (profile) {
-      out.systemPrompt = agent.systemPrompt || ''
+      out.systemPrompt = agent.systemPrompt
       out.outputSchema = clone(agent.outputSchema || null)
     }
     return out
@@ -13919,13 +13665,7 @@
     return Object.assign({ applied: true }, agentSummary(agent, true))
   }
 
-  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs', 'skillRefs']
-
-  function validateRegisteredRefs(ids, registry, label) {
-    for (let i = 0; i < ids.length; i++) {
-      if (!registry.get(ids[i])) throw new Error('Unknown ' + label + ': ' + ids[i])
-    }
-  }
+  const AGENT_CONFIG_KEYS = ['name', 'connection', 'model', 'systemPrompt', 'outputSchema', 'contextRefs']
 
   function agentConfigPatch(args) {
     const patch = {}
@@ -13937,7 +13677,6 @@
     if (hasOwn(patch, 'name') && !String(patch.name || '').trim()) throw new Error('Agent name cannot be empty')
     if (hasOwn(patch, 'connection') && !ai.getConnection(patch.connection)) throw new Error('Unknown connection: ' + patch.connection)
     if (hasOwn(patch, 'outputSchema') && patch.outputSchema) patch.outputSchema = ai.schema.normalize(patch.outputSchema, 'outputSchema')
-    if (patch.skillRefs) validateRegisteredRefs(patch.skillRefs, ai.skills, 'skill')
     return patch
   }
 
@@ -13964,7 +13703,7 @@
     const target = args.agentId ? ai.findAgent(args.agentId) : null
     if (args.agentId) {
       if (!target) throw new Error('Agent not found')
-      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema', 'skillRefs']
+      const creationKeys = ['name', 'parentAgentId', 'connection', 'model', 'systemPrompt', 'outputSchema']
       for (let i = 0; i < creationKeys.length; i++) {
         if (hasOwn(args, creationKeys[i])) throw new Error('Agent configuration is only valid when delegate creates a new agent')
       }
@@ -14180,7 +13919,7 @@
 
   ai.tools.register('agent.create', {
     title: 'Create Agent',
-    description: 'Create an AI agent after preview approval. Creation only creates the agent; if the user asked this agent to do work, continue with agent.send unless the request only asked for creation.',
+    description: 'Create an idle AI agent profile after preview approval. Do not use this when the user asks an Agent to perform work; use agent.delegate instead.',
     schema: {
       type: 'object',
       properties: {
@@ -14191,7 +13930,6 @@
         systemPrompt: { type: 'string' },
         outputSchema: { type: 'object', description: 'JSON schema for the final assistant output.' },
         contextRefs: STRING_ARRAY_SCHEMA,
-        skillRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -14214,7 +13952,6 @@
         systemPrompt: { type: 'string' },
         outputSchema: { type: ['object', 'null'], description: 'JSON schema for the final assistant output, or null to clear it.' },
         contextRefs: STRING_ARRAY_SCHEMA,
-        skillRefs: STRING_ARRAY_SCHEMA,
       },
     },
     permissions: ['tool.call', 'tool.apply'],
@@ -14225,7 +13962,7 @@
 
   ai.tools.register('agent.delegate', {
     title: 'Delegate Agent Task',
-    description: 'Create or reuse an agent and send it a delegated task in one workflow. A new agent defaults under the calling agent, or at root when called by the user. Returns agentId and questId. Delegation does not force the parent to wait.',
+    description: 'Use this when an Agent should perform work. Create or reuse an agent and send it a delegated task in one workflow. A new agent defaults under the calling agent, or at root when called by the user. Returns agentId and questId. Delegation does not force the parent to wait.',
     schema: {
       type: 'object',
       required: ['content'],
@@ -14237,7 +13974,6 @@
         model: { type: 'string' },
         systemPrompt: { type: 'string', description: 'System instructions for a newly created delegated agent.' },
         outputSchema: { type: 'object', description: 'JSON schema for the newly created agent final outputs.' },
-        skillRefs: STRING_ARRAY_SCHEMA,
         content: { type: 'string' },
         contextRefs: STRING_ARRAY_SCHEMA,
         attachments: { type: 'array' },
@@ -14387,12 +14123,23 @@
   }, META)
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/request.js ---- */
+/* ---- ai/agent/request.js ---- */
 // aiditor.ai canonical request builder.
 ;(function (aiditor) {
   'use strict'
 
   const ai = aiditor.ai = aiditor.ai || {}
+  const DEFAULT_SYSTEM_PROMPT = [
+    'You are an AI agent.',
+    'Complete the user\'s request using the capabilities available in the current request.',
+    'Treat the current workspace, runtime state, and Tool results as the source of truth.',
+    'Never claim an action that was not completed.',
+    'If blocked, state the exact blocker.',
+    'Keep responses concise, clear, and limited to what is necessary.',
+  ].join('\n')
+  const SKILL_BOOTSTRAP_TOOLS = ['skill.read']
+  const SKILL_CATALOG_MAX_TOKENS = 2000
+  const SKILL_CATALOG_CONTEXT_RATIO = 0.02
 
   function resolveAttachmentRef(ref, all) {
     if (typeof ref === 'string') return all.find(function (item) { return item.id === ref }) || { id: ref }
@@ -14493,16 +14240,30 @@
     })
   }
 
-  function resolveToolRefs(ctx, skillSpecs) {
-    const refs = []
-    const seen = {}
-    const controls = ai.skillControlTools || []
-    for (let i = 0; i < controls.length; i++) addUnique(refs, seen, controls[i])
-    for (let j = 0; j < (skillSpecs || []).length; j++) {
-      const tools = skillSpecs[j].tools || []
-      for (let k = 0; k < tools.length; k++) addUnique(refs, seen, tools[k])
+  function availableSkillTools(skill, ctx) {
+    const out = []
+    const tools = skill && skill.tools || []
+    for (let i = 0; i < tools.length; i++) {
+      if (ai.tools && ai.tools.available && ai.tools.available(tools[i], ctx)) out.push(tools[i])
     }
-    return ai.tools.visibleList ? ai.tools.visibleList(refs, ctx, true) : refs
+    return out
+  }
+
+  function resolveToolRefs(ctx, skills, includeSkillList) {
+    const out = []
+    const seen = {}
+    function add(id) {
+      if (!id || seen[id] || !ai.tools.available(id, ctx)) return
+      seen[id] = true
+      out.push(id)
+    }
+    for (let i = 0; i < SKILL_BOOTSTRAP_TOOLS.length; i++) add(SKILL_BOOTSTRAP_TOOLS[i])
+    if (includeSkillList) add('skill.list')
+    for (let i = 0; i < (skills || []).length; i++) {
+      const tools = skills[i].tools || []
+      for (let j = 0; j < tools.length; j++) add(tools[j])
+    }
+    return out
   }
 
   function resolveTools(ctx, toolIds) {
@@ -14548,39 +14309,10 @@
     list.push(id)
   }
 
-  function skillPromptLines(skill) {
-    const lines = []
-    if (skill.systemPrompt) lines.push(skill.title + ': ' + skill.systemPrompt)
-    const rules = skill.rules || []
-    for (let i = 0; i < rules.length; i++) lines.push('- ' + rules[i])
-    return lines
-  }
-
-  function addSkillActivation(list, seen, id, reason, ctx) {
-    if (!id || seen[id]) return
-    const skill = ai.skills && ai.skills.get ? ai.skills.get(id) : null
-    if (!skill) return
-    const availability = ai.skills.availability ? ai.skills.availability(id, ctx || {}) : { available: true }
-    if (!availability.available) return
-    seen[id] = true
-    const meta = ai.skills.meta ? ai.skills.meta(id) : {}
-    list.push({
-      id: id,
-      reason: reason,
-      spec: skill,
-      owner: meta.owner || null,
-      layer: meta.layer || null,
-      source: meta.source || null,
-      hash: meta.hash || null,
-      promptChars: skillPromptLines(skill).join('\n').length,
-      tools: (skill.tools || []).slice(),
-    })
-  }
-
-  function explicitSkillRefs(input) {
+  function requestedSkillIds(input) {
     const out = []
     const seen = {}
-    const direct = input && (input.skillRefs || input.meta && input.meta.skillRefs) || []
+    const direct = input && (input.skills || input.meta && input.meta.skills) || []
     for (let i = 0; i < direct.length; i++) addUnique(out, seen, direct[i])
     const content = input && input.content
     if (content && content.type === 'rich-prompt' && ai.richPrompt && ai.richPrompt.skills) {
@@ -14590,39 +14322,61 @@
     return out
   }
 
-  function resolveSkillActivations(agent, input, ctx) {
-    const activations = []
-    const seen = {}
-    const explicit = explicitSkillRefs(input)
-    for (let e = 0; e < explicit.length; e++) addSkillActivation(activations, seen, explicit[e], 'explicit', ctx)
-    const defaults = ai.skills && ai.skills.defaults ? ai.skills.defaults() : []
-    for (let d = 0; d < defaults.length; d++) addSkillActivation(activations, seen, defaults[d], 'host', ctx)
-    const configured = agent.skillRefs || []
-    for (let i = 0; i < configured.length; i++) addSkillActivation(activations, seen, configured[i], 'configured', ctx)
-    const selected = input && input.selectedSkillRefs || []
-    for (let j = 0; j < selected.length; j++) addSkillActivation(activations, seen, selected[j], 'selected', ctx)
-    return activations
+  function requestedSkills(input) {
+    const ids = requestedSkillIds(input)
+    const out = []
+    for (let i = 0; i < ids.length; i++) {
+      const skill = ai.skills && ai.skills.get ? ai.skills.get(ids[i]) : null
+      if (skill) out.push(skill)
+    }
+    return out
   }
 
-  function activationDetails(activations) {
-    return activations.map(function (activation) {
-      return {
-        id: activation.id,
-        reason: activation.reason,
-        owner: activation.owner,
-        layer: activation.layer,
-        source: activation.source,
-        hash: activation.hash,
-        promptChars: activation.promptChars,
-        tools: activation.tools.slice(),
+  function contextReadSkills(agent, input) {
+    const messages = ai.compaction && ai.compaction.requestMessages
+      ? ai.compaction.requestMessages(agent, input)
+      : (agent.messages || [])
+    const completed = {}
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i]
+      if (message.role === 'tool' && message.status !== 'error' && message.meta && message.meta.toolCallId) {
+        completed[message.meta.toolCallId] = true
       }
-    })
+    }
+    const out = []
+    const seen = {}
+    for (let i = 0; i < messages.length; i++) {
+      const calls = messages[i].toolCalls || []
+      for (let j = 0; j < calls.length; j++) {
+        const call = calls[j]
+        if (call.toolId !== 'skill.read' || !completed[call.id] || call.args && call.args.resource) continue
+        const id = call.args && call.args.id
+        const skill = id && ai.skills && ai.skills.get ? ai.skills.get(String(id)) : null
+        if (!skill || seen[skill.id]) continue
+        seen[skill.id] = true
+        out.push(skill)
+      }
+    }
+    return out
   }
 
-  function resolveSkillSpecs(activations) {
-    return activations.map(function (activation) {
-      return Object.assign({ id: activation.id }, activation.spec)
-    })
+  function projectedSkills(agent, input, requested) {
+    const out = []
+    const seen = {}
+    function add(skill) {
+      if (!skill || seen[skill.id]) return
+      seen[skill.id] = true
+      out.push(skill)
+    }
+    const ids = ai.skills && ai.skills.list ? ai.skills.list() : []
+    for (let i = 0; i < ids.length; i++) {
+      const skill = ai.skills.get(ids[i])
+      if (skill && skill.toolDisclosure === 'always') add(skill)
+    }
+    for (let i = 0; i < requested.length; i++) add(requested[i])
+    const read = contextReadSkills(agent, input)
+    for (let i = 0; i < read.length; i++) add(read[i])
+    return out
   }
 
   function compactJson(value, max) {
@@ -14983,67 +14737,110 @@
     )
   }
 
-  function skillLines(agent, input, requestCtx) {
-    const specs = requestCtx && requestCtx.skillSpecs || resolveSkillSpecs(resolveSkillActivations(agent, input, requestCtx))
-    const lines = []
-    for (let i = 0; i < specs.length; i++) {
-      lines.push.apply(lines, skillPromptLines(specs[i]))
-    }
-    return lines
-  }
-
-  function skillCatalogMessage(requestCtx) {
-    if (!ai.skills || !ai.skills.catalog) return null
-    const active = requestCtx && requestCtx.skillRefs || []
-    const items = ai.skills.catalog(requestCtx || {}, { limit: 50 }).map(function (item) {
-      return {
-        id: item.id,
-        description: String(item.description || item.whenToUse || '').slice(0, 320),
-        active: active.indexOf(item.id) >= 0,
-        available: item.available,
-        unavailableReason: item.available ? '' : item.unavailableReason,
-      }
-    })
-    if (!items.length) return null
-    return contextCardMessage(
-      'skills',
-      'skill-catalog',
-      75,
-      'Available Skills for this runtime. Active Skills provide the current instructions and Tools. When a required capability is inactive, call skill.activate with its id; the next continuation will expose it. Model-selected activation lasts for the current run only and must be repeated in a new request unless the Skill is configured in agent.skillRefs. Unavailable Skills state the missing host capability.\n' + compactJson(items, 6000),
-      7000
-    )
-  }
-
-  function runtimeGuideMessage(agent, requestCtx) {
-    const lines = [
-      'You are an AIditor AI agent running inside an editor runtime.',
-      'Complete the current request with the capabilities exposed in this request; never claim an action that was not performed.',
-      'Current runtime state and available tools override older transcript claims about capabilities.',
-      'Stop with a clear result when complete, or report the exact blocker when required state, permission, or user input is missing.',
-      'Do not retry an equivalent failed tool call under guessed names.',
-      'Invoke tools only through the provider tool-calling interface. Never print or imitate XML tool-call markup such as <invoke> in assistant text.',
-      'CURRENT_AGENT_ID: ' + (agent.id || ''),
-      'CURRENT_AGENT_NAME: ' + (agent.name || ''),
-      'CURRENT_PARENT_AGENT_ID: ' + (agent.parentAgentId || ''),
-    ]
-    if (agent.systemPrompt) lines.push('AGENT_SYSTEM_PROMPT:\n' + agent.systemPrompt)
-    if (!requestCtx || !(requestCtx.modelToolIds || []).length) {
-      lines.push('AVAILABLE_TOOLS: none. Report that the required capability is unavailable instead of imitating a tool call.')
-    }
-    const skills = skillLines(agent, requestCtx && requestCtx.input, requestCtx)
-    if (skills.length) lines.push('ACTIVE_SKILLS:\n' + skills.join('\n'))
+  function runtimeGuideMessage(agent) {
+    const content = agent.systemPrompt == null ? DEFAULT_SYSTEM_PROMPT : String(agent.systemPrompt)
+    if (!content) return null
     return {
       id: 'system-runtime-' + Date.now().toString(36),
       from: 'system',
       role: 'system',
       status: 'done',
-      content: lines.join('\n'),
+      content: content,
       meta: {
         contextLayer: 'runtime',
         contextCardId: 'runtime',
         contextPriority: 100,
       },
     }
+  }
+
+  function skillToolCountLabel(skill, requestCtx) {
+    const total = (skill.tools || []).length
+    if (!total) return 'instruction only'
+    const available = availableSkillTools(skill, requestCtx || {}).length
+    return available === total
+      ? total + (total === 1 ? ' tool' : ' tools')
+      : available + '/' + total + ' tools available'
+  }
+
+  function truncatedSkillDescription(value, maxChars) {
+    const text = String(value || '').trim().replace(/\s+/g, ' ')
+    if (!maxChars) return ''
+    if (text.length <= maxChars) return text
+    return text.slice(0, Math.max(1, maxChars - 1)).trim() + '…'
+  }
+
+  function skillCatalogLine(skill, requestCtx, descriptionChars) {
+    const description = truncatedSkillDescription(skill.description, descriptionChars)
+    return '- ' + skill.id + (description ? ': ' + description : '') + ' (' + skillToolCountLabel(skill, requestCtx) + ')'
+  }
+
+  function skillCatalogText(lines, omitted) {
+    const out = [
+      'Available Skills. Use skill.read({ id }) to load one Skill\'s instructions and currently available Tool schemas.',
+    ].concat(lines)
+    if (omitted) out.push(omitted + ' additional Skills omitted; use skill.list and follow nextCursor to enumerate all Skills.')
+    return out.join('\n')
+  }
+
+  function buildSkillCatalog(agent, requestCtx) {
+    if (!ai.skills || !ai.skills.catalog) return null
+    const skills = ai.skills.catalog()
+    if (!skills.length) return null
+    const tokenBudget = Math.max(256, Math.min(
+      SKILL_CATALOG_MAX_TOKENS,
+      Math.floor(modelContextLimit(agent) * SKILL_CATALOG_CONTEXT_RATIO)
+    ))
+    const descriptionCaps = [240, 160, 120, 80, 40, 0]
+    for (let i = 0; i < descriptionCaps.length; i++) {
+      const lines = skills.map(function (skill) {
+        return skillCatalogLine(skill, requestCtx, descriptionCaps[i])
+      })
+      const content = skillCatalogText(lines, 0)
+      if (estimateTokens(content) <= tokenBudget) {
+        return { content: content, total: skills.length, included: skills.length, omitted: 0 }
+      }
+    }
+    const lines = []
+    for (let i = 0; i < skills.length; i++) {
+      const next = lines.concat([skillCatalogLine(skills[i], requestCtx, 0)])
+      const omitted = skills.length - next.length
+      if (estimateTokens(skillCatalogText(next, omitted)) > tokenBudget) break
+      lines.push(next[next.length - 1])
+    }
+    const omitted = skills.length - lines.length
+    return {
+      content: skillCatalogText(lines, omitted),
+      total: skills.length,
+      included: lines.length,
+      omitted: omitted,
+    }
+  }
+
+  function skillCatalogMessage(requestCtx) {
+    const catalog = requestCtx && requestCtx.skillCatalog
+    if (!catalog) return null
+    return contextCardMessage(
+      'skills',
+      'skill-catalog',
+      75,
+      catalog.content,
+      catalog.content.length + 1
+    )
+  }
+
+  function skillInstructionsMessage(requestCtx) {
+    const skills = requestCtx && requestCtx.requestedSkills || []
+    if (!skills.length) return null
+    return contextCardMessage(
+      'skills',
+      'skill-instructions',
+      76,
+      skills.map(function (skill) {
+        return skill.title + ' (' + skill.id + ')\n' + skill.instructions
+      }).join('\n\n'),
+      16000
+    )
   }
 
   function outputSchemaMessage(requestCtx) {
@@ -15123,19 +14920,23 @@
   }
 
   function prefixMessages(agent, input, attachmentRefs, resolvedAttachments, requestCtx, toolIds) {
-    const out = [runtimeGuideMessage(agent, requestCtx)]
+    const out = []
+    const runtimeGuide = runtimeGuideMessage(agent)
+    const skillCatalog = skillCatalogMessage(requestCtx)
+    const skillInstructions = skillInstructionsMessage(requestCtx)
     const output = outputSchemaMessage(requestCtx)
     const workspace = workspaceContextMessage(requestCtx, toolIds)
     const task = taskStateContextMessage(agent, input, requestCtx, requestCtx && requestCtx.modelToolIds || toolIds)
-    const skills = skillCatalogMessage(requestCtx)
     const runtimeContext = runtimeContextMessage(requestCtx && requestCtx.runtimeContext)
     const attachments = attachmentContextMessage(attachmentRefs, resolvedAttachments)
     const inbox = inboxContextMessage(agent, input)
     const queued = queuedContextMessage(agent, input)
+    if (runtimeGuide) out.push(runtimeGuide)
     if (output) out.push(output)
+    if (skillCatalog) out.push(skillCatalog)
+    if (skillInstructions) out.push(skillInstructions)
     if (workspace) out.push(workspace)
     if (task) out.push(task)
-    if (skills) out.push(skills)
     if (runtimeContext) out.push(runtimeContext)
     if (attachments) out.push(attachments)
     const compacted = compactionContextMessages(agent)
@@ -15192,14 +14993,15 @@
       event: input && input.event ? input.event : null,
     }
     baseCtx.runtimeContext = ai.collectContext ? ai.collectContext(requestShell, baseCtx) : []
-    const skillActivationRecords = resolveSkillActivations(agent, input, baseCtx)
-    const skillRefs = skillActivationRecords.map(function (activation) { return activation.id })
-    const skillSpecs = resolveSkillSpecs(skillActivationRecords)
-    const skillActivations = activationDetails(skillActivationRecords)
-    baseCtx.skillRefs = skillRefs
-    baseCtx.skillSpecs = skillSpecs
-    baseCtx.skillActivations = skillActivations
-    const tools = connectionCapabilities.toolCalling ? resolveToolRefs(baseCtx, skillSpecs) : []
+    baseCtx.requestedSkills = requestedSkills(input)
+    baseCtx.skillCatalog = buildSkillCatalog(agent, baseCtx)
+    const tools = connectionCapabilities.toolCalling
+      ? resolveToolRefs(
+          baseCtx,
+          projectedSkills(agent, input, baseCtx.requestedSkills),
+          !!(baseCtx.skillCatalog && baseCtx.skillCatalog.omitted)
+        )
+      : []
     baseCtx.toolIds = tools
     const toolSpecs = ai.toolArguments && ai.toolArguments.prepareSpecs
       ? ai.toolArguments.prepareSpecs(resolveTools(baseCtx, tools), connectionCapabilities)
@@ -15208,22 +15010,6 @@
     const messages = requestMessages(agent, input, attachmentRefs, [], baseCtx, tools)
     const contextPack = ai.contextPack && ai.contextPack.fromMessages ? ai.contextPack.fromMessages(messages) : null
     if (ai.trace && ai.trace.append) {
-      for (let i = 0; i < skillActivations.length; i++) {
-        const activation = skillActivations[i]
-        ai.trace.append({
-          type: 'skill_activated',
-          runId: runId,
-          traceId: runId,
-          agentId: agent.id,
-          messageId: input && input.id || null,
-          questId: input && input.questId || null,
-          phase: 'request',
-          entry: activation.id,
-          status: 'active',
-          summary: activation.reason + ' skill: ' + activation.id,
-          meta: activation,
-        })
-      }
       ai.trace.append({
         type: 'request_built',
         runId: runId,
@@ -15239,8 +15025,8 @@
           toolCount: toolSpecs.length,
           gatewayCount: tools.length,
           toolIds: tools.slice(),
-          skillRefs: skillRefs.slice(),
-          skillPromptChars: skillActivations.reduce(function (total, item) { return total + item.promptChars }, 0),
+          requestedSkills: baseCtx.requestedSkills.map(function (skill) { return skill.id }),
+          omittedSkills: baseCtx.skillCatalog && baseCtx.skillCatalog.omitted || 0,
           toolProtocol: connectionCapabilities.toolProtocol || 'none',
           toolArguments: connectionCapabilities.toolArguments || 'none',
           strictToolCount: toolSpecs.filter(function (tool) { return tool.argumentMode === 'strict' }).length,
@@ -15270,9 +15056,7 @@
       tools: tools,
       toolSpecs: toolSpecs,
       modelToolIds: baseCtx.modelToolIds.slice(),
-      skills: skillRefs,
-      skillSpecs: skillSpecs,
-      skillActivations: skillActivations,
+      requestedSkills: baseCtx.requestedSkills.map(function (skill) { return skill.id }),
       outputSchema: agent.outputSchema || null,
       stream: stream,
       target: agent,
@@ -15322,7 +15106,7 @@
   ai.resolveRequest = resolveRequest
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/runtime.js ---- */
+/* ---- ai/agent/runtime.js ---- */
 // aiditor.ai agent runtime.
 ;(function (aiditor) {
   'use strict'
@@ -15330,17 +15114,15 @@
   const ai = aiditor.ai = aiditor.ai || {}
   const runs = {}
   const waitingRuns = {}
-  const runSkillRefs = {}
   const budgetTimers = {}
   const runtimeConfig = {
     maxConcurrentAgents: 8,
     maxConcurrentMessagesPerAgent: 1,
     maxConcurrentTools: 4,
     maxDelegationDepth: 4,
-    maxToolArgumentCorrections: 2,
     limits: {
-      maxTurns: 32,
-      timeoutMs: 600000,
+      maxTurns: null,
+      timeoutMs: null,
       maxTokens: null,
     },
   }
@@ -15376,75 +15158,6 @@
         next = iterator.next()
       }
     })()
-  }
-
-  function inactiveSkillIdsForTool(request, toolId) {
-    if (!ai.skills || !ai.skills.list) return []
-    const active = {}
-    const activeIds = request && request.skills || []
-    for (let i = 0; i < activeIds.length; i++) active[activeIds[i]] = true
-    const matches = []
-    const ids = ai.skills.list()
-    const skillCtx = Object.assign({}, request || {}, {
-      ai: ai,
-      agent: request && request.agent || null,
-      actor: request && request.actor || 'user',
-      runId: request && request.runId || null,
-      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
-      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
-      runtimeContext: request && request.runtimeContext || [],
-    })
-    for (let j = 0; j < ids.length; j++) {
-      const id = ids[j]
-      if (active[id]) continue
-      const skill = ai.skills.get(id)
-      if (!skill || skill.modelInvocable === false || (skill.tools || []).indexOf(toolId) < 0) continue
-      const availability = ai.skills.availability(id, skillCtx)
-      if (availability.available) matches.push(id)
-    }
-    return matches
-  }
-
-  function canonicalToolCandidates(value) {
-    if (!ai.tools) return []
-    if (ai.tools.get(value)) return [value]
-    return ai.providerToolAliasCandidates
-      ? ai.providerToolAliasCandidates(value, ai.tools.list())
-      : []
-  }
-
-  function unavailableToolFailure(request, value, providerName) {
-    const candidates = canonicalToolCandidates(value)
-    const toolId = candidates.length === 1 ? candidates[0] : value
-    const skillIds = candidates.length === 1 ? inactiveSkillIdsForTool(request, toolId) : []
-    if (skillIds.length) {
-      const message = 'Skill activation is required for this request before calling Tool: ' + toolId
-      return {
-        ok: false,
-        code: 'SKILL_ACTIVATION_REQUIRED',
-        error: message,
-        message: message,
-        hint: 'Call skill.activate with one of: ' + skillIds.join(', ') + '. The Tool becomes available on the next continuation. Run-scoped activation from an earlier request does not carry over. Persistent agent.skillRefs are configured only by the user, host, or parent Agent.',
-        toolId: toolId,
-        providerName: providerName || value,
-        skillIds: skillIds,
-        lifetime: 'run',
-      }
-    }
-    const message = candidates.length
-      ? 'Tool was not available in this request: ' + toolId
-      : 'Tool was not found: ' + value
-    const failure = {
-      ok: false,
-      code: candidates.length ? 'TOOL_UNAVAILABLE_IN_REQUEST' : 'TOOL_NOT_FOUND',
-      error: message,
-      message: message,
-      hint: 'Use the Tools exposed in the current request. Call skill.list to discover available capabilities.',
-      toolId: toolId,
-      providerName: providerName || value,
-    }
-    if (candidates.length > 1) failure.candidateToolIds = candidates
-    return failure
   }
 
   function deltaContent(delta) {
@@ -15485,7 +15198,6 @@
   function normalizeToolCalls(calls, actor) {
     const request = actor && actor.toolSpecs ? actor : null
     const who = request ? request.agent.id : actor
-    const allowed = requestToolMap(request)
     const list = calls || []
     const aliases = request && ai.toolAliasMap ? ai.toolAliasMap(request) : { byName: {} }
     const expectedNames = list.map(function (call) {
@@ -15512,7 +15224,6 @@
         id = call.id || call.providerCallId || id
         providerName = call.providerName || providerName
         providerToolId = call.toolId || call.name || call.tool || providerToolId
-        const denied = allowed && !allowed[providerToolId]
         spec = requestToolSpec(request, providerToolId)
         argumentMode = call.argumentMode || spec && spec.argumentMode || argumentMode
         providerArgs = ai.toolArguments.read(call, providerToolId)
@@ -15521,8 +15232,17 @@
         const route = spec && spec.route
         const executorToolId = route && route.toolId || null
         const executorArgs = routeToolArguments(providerArgs, route)
-        const unavailable = denied ? unavailableToolFailure(request, providerToolId, providerName) : null
-        normalizedToolId = unavailable ? unavailable.toolId : providerToolId
+        normalizedToolId = providerToolId
+        if (!route && !ai.tools.get(normalizedToolId) && ai.providerToolAliasCandidates) {
+          const candidates = ai.providerToolAliasCandidates(normalizedToolId, ai.tools.list())
+          if (candidates.length === 1) normalizedToolId = candidates[0]
+        }
+        if (!spec && ai.tools.get(normalizedToolId)) {
+          assertToolArguments(providerArgs, {
+            id: normalizedToolId,
+            schema: ai.tools.schema(normalizedToolId, request || {}),
+          }, id, argumentMode)
+        }
         normalized.push(Object.assign({}, call, {
           id: id,
           toolId: normalizedToolId,
@@ -15534,9 +15254,9 @@
           executorToolId: executorToolId,
           executorArgs: route ? executorArgs : null,
           argumentMode: argumentMode,
-          status: denied ? 'failed' : (call.status || 'proposed'),
-          error: denied ? unavailable.message : call.error,
-          errorDetails: denied ? unavailable : call.errorDetails,
+          status: call.status || 'proposed',
+          error: call.error,
+          errorDetails: call.errorDetails,
           actor: who || 'user',
           createdAt: call.createdAt || Date.now(),
           updatedAt: call.updatedAt || Date.now(),
@@ -15605,16 +15325,6 @@
 
   function toolArgumentSummary(args) {
     return ai.serialize.compactString(ai.serialize.stableStringify(args), 320)
-  }
-
-  function requestToolMap(request) {
-    if (!request) return null
-    const map = {}
-    const specs = request.toolSpecs || []
-    const refs = request.tools || []
-    for (let i = 0; i < specs.length; i++) map[specs[i].id] = true
-    if (!specs.length) for (let j = 0; j < refs.length; j++) map[refs[j]] = true
-    return map
   }
 
   function appendCapped(target, key, text, max, label) {
@@ -15732,6 +15442,15 @@
     })
   }
 
+  function approvalActivity(message) {
+    const calls = message && message.toolCalls || []
+    for (let i = 0; i < calls.length; i++) {
+      if (!calls[i].approvalPhase) continue
+      return 'awaiting approval ' + toolCallName(calls[i]) + ' · ' + String(i + 1) + '/' + String(calls.length)
+    }
+    return 'awaiting tool approval'
+  }
+
   function usageNumber(usage, keys) {
     if (!usage) return 0
     for (let i = 0; i < keys.length; i++) {
@@ -15756,11 +15475,12 @@
   function effectiveRunBudget(budget) {
     const requested = budget || {}
     const limits = runtimeConfig.limits || {}
-    return {
+    const effective = {
       maxTurns: clampLimit(requested.maxTurns, limits.maxTurns),
       timeoutMs: clampLimit(requested.timeoutMs, limits.timeoutMs),
       maxTokens: clampLimit(requested.maxTokens, limits.maxTokens),
     }
+    return effective.maxTurns || effective.timeoutMs || effective.maxTokens ? effective : null
   }
 
   function emptyUsage() {
@@ -16266,7 +15986,12 @@
           job = Promise.reject(err)
         }
         return job.catch(function (err) {
-          appendToolResult(agentId, call, { error: String(err && err.message || err) }, 'error')
+          const found = ai.findToolCall ? ai.findToolCall(agentId, call.id) : null
+          const current = found && found.toolCall
+          const failed = current && isTerminalToolStatus(current.status)
+            ? current
+            : ai.failToolCall(agentId, call.id, err, 'run')
+          if (!hasToolResult(ai.findAgent(agentId), call.id)) appendToolResult(agentId, call, failedToolPayload(failed || call), 'error')
           if (err && err.code !== 'TOOL_CANCELLED' && aiditor.reportError) aiditor.reportError({ scope: 'ai', tool: call.toolId || call.name || 'tool' }, err)
           return { waiting: false, error: err }
         })
@@ -16495,9 +16220,6 @@
     const fingerprint = toolArgumentFingerprint(error)
     if (current.fingerprints.indexOf(fingerprint) >= 0) {
       return { allowed: false, reason: 'repeated', state: current }
-    }
-    if (current.count >= runtimeConfig.maxToolArgumentCorrections) {
-      return { allowed: false, reason: 'budget', state: current }
     }
     return {
       allowed: true,
@@ -16834,10 +16556,15 @@
       if (controller.signal.aborted || !state.count) return message
       const current = ai.findAgent(agentId)
       if (!current || state.waiting) {
+        const waitingMessage = ai.readMessage(agentId, message.id) || message
         trace({ type: 'run_waiting_approval', runId: request.runId, traceId: request.runId, agentId: agentId, messageId: message.id, questId: request.input && request.input.questId || null, status: 'waiting_approval', summary: 'waiting for tool approval' })
         publishRunState(agentId, {
           messageId: message.id,
           content: message.content || '',
+          previewTail: '',
+          modelTail: '',
+          activityText: approvalActivity(waitingMessage),
+          previewUpdatedAt: Date.now(),
           startTime: request.startTime || (message.stats && message.stats.startTime) || Date.now(),
           firstTokenAt: message.stats && message.stats.firstTokenAt || null,
           usage: message.usage || (message.stats && message.stats.usage) || null,
@@ -16870,11 +16597,12 @@
         return message
       }
       if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agentId, null, { phase: 'before_tool_continuation' })
-      const nextRequest = planRunRequest(ai.findAgent(agentId) || current, null, request.runId, actor, (request.turn || 0) + 1)
-      nextRequest.input = request.input
+      const nextRequest = planRunRequest(ai.findAgent(agentId) || current, request.input, request.runId, actor, (request.turn || 0) + 1)
       nextRequest.budget = request.budget
       nextRequest.startedAt = request.startedAt
-      nextRequest.toolArgumentCorrection = request.toolArgumentCorrection || null
+      nextRequest.toolArgumentCorrection = calls.some(function (call) {
+        return call.status === 'failed' && isToolArgumentError(call.errorDetails)
+      }) ? (request.toolArgumentCorrection || null) : null
       const nextCtx = ai.createRunContext(nextRequest, controller)
       return runChatTurn(agentId, provider, nextRequest, nextCtx, controller, actor)
     })
@@ -16887,17 +16615,14 @@
   }
 
   function consumedBudgetStopReason(budget, turns, usage) {
+    if (!budget) return null
     if (budget.maxTurns && turns >= budget.maxTurns) return 'max_turns'
     if (budget.maxTokens && usage && usage.reported && usage.totalTokens >= budget.maxTokens) return 'max_tokens'
     return null
   }
 
   function planRunRequest(agent, input, runId, actor, turn) {
-    const selected = runSkillRefs[runId] || []
-    const requestInput = selected.length
-      ? Object.assign({}, input || {}, { selectedSkillRefs: selected.slice() })
-      : input
-    const request = ai.planRequest(agent, requestInput, runId, actor, turn)
+    const request = ai.planRequest(agent, input, runId, actor, turn)
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agent.id, input.questId) : null
     request.budget = quest && quest.budget || effectiveRunBudget()
     request.startedAt = quest && quest.startedAt || Date.now()
@@ -16965,7 +16690,6 @@
   function failRunningRequest(agentId, request, controller, key, err) {
     clearBudgetTimer(agentId)
     delete runs[key]
-    delete runSkillRefs[request.runId]
     const input = request.input
     const stopped = controller.signal.aborted
     if (input && input.id) ai.updateMessage(agentId, input.id, { status: stopped ? 'stopped' : 'failed', completedAt: Date.now() })
@@ -16992,7 +16716,7 @@
     return null
   }
 
-  function startRunningRequest(agentId, request, actor, statusText, markInputStarted) {
+  function startRunningRequest(agentId, request, actor, statusText, markInputStarted, execute) {
     const controller = new AbortController()
     const runner = providerRunner()
     const ctx = ai.createRunContext(request, controller)
@@ -17000,10 +16724,6 @@
     const input = request.input
     const quest = input && input.questId && ai.findQuest ? ai.findQuest(agentId, input.questId) : null
     request.startedAt = quest && quest.startedAt || request.startedAt || Date.now()
-    const transientSkills = (request.skillActivations || []).filter(function (item) {
-      return item.reason === 'explicit' || item.reason === 'selected'
-    }).map(function (item) { return item.id })
-    if (transientSkills.length) runSkillRefs[request.runId] = transientSkills
     runs[key] = {
       controller: controller,
       connection: runner,
@@ -17037,7 +16757,9 @@
     armBudgetTimer(agentId, request)
 
     const promise = Promise.resolve().then(function () {
-      return runChatTurn(agentId, runner, request, ctx, controller, actor)
+      return execute
+        ? execute(runner, request, ctx, controller, actor)
+        : runChatTurn(agentId, runner, request, ctx, controller, actor)
     }).then(function (result) {
       if (controller.signal.aborted) return null
       return finishAgentRun(agentId, request, result, key, controller)
@@ -17082,7 +16804,6 @@
     delete runs[key]
     const current = ai.findAgent(agentId)
     if (current && current.status === 'waiting_approval') return result
-    delete runSkillRefs[request.runId]
     clearBudgetTimer(agentId)
     completeMessageExecution(agentId, request, result)
     trace({
@@ -17536,7 +17257,6 @@
         else run.connection.abort(run.runId)
       }
       delete runs[agent.id]
-      delete runSkillRefs[run.runId]
     }
     if (waiting) {
       ai.setActiveRunState(agent.id, {
@@ -17550,7 +17270,6 @@
       stopQuestExecution(agent.id, input, stopReason, waiting.usage)
       trace({ type: 'run_stopped', runId: waiting.runId, traceId: waiting.runId, agentId: agent.id, messageId: waiting.messageId || null, questId: input && input.questId || null, status: 'stopped', summary: stopSummary(stopReason), meta: { stopReason: stopReason } })
       delete waitingRuns[agent.id]
-      delete runSkillRefs[waiting.runId]
     }
     ai.setAgentStatus(agent.id, status || 'idle')
     return true
@@ -17563,20 +17282,24 @@
     if (!canStartRun(agent.id)) return null
     const message = ai.readMessage(agent.id, waiting.messageId)
     const toolState = appendResolvedToolResults(agent.id, message)
-    if (toolState.pending) return null
-    const budgetReason = consumedBudgetStopReason(waiting.request.budget, waiting.turn + 1, waiting.usage)
-    if (budgetReason) {
-      stopRun(agent.id, 'idle', budgetReason)
-      scheduleQueuedAgents()
-      return null
+    if (!toolState.pending) {
+      const budgetReason = consumedBudgetStopReason(waiting.request.budget, waiting.turn + 1, waiting.usage)
+      if (budgetReason) {
+        stopRun(agent.id, 'idle', budgetReason)
+        scheduleQueuedAgents()
+        return null
+      }
     }
     delete waitingRuns[agent.id]
     if (ai.compaction && ai.compaction.maybeCompact) ai.compaction.maybeCompact(agent.id, waiting.request.input, { phase: 'before_resume' })
 
-    const request = planRunRequest(ai.findAgent(agent.id), waiting.request.input, waiting.runId, waiting.actor, waiting.turn + 1)
+    const request = Object.assign({}, waiting.request)
     request.accumulatedUsage = waiting.usage || emptyUsage()
     request.startedAt = waiting.request.startedAt
-    return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing after tool approval', false)
+    return startRunningRequest(agent.id, request, actor || waiting.actor, 'continuing tool calls', false, function (provider, nextRequest, ctx, controller, nextActor) {
+      const currentMessage = ai.readMessage(agent.id, waiting.messageId) || message
+      return continueAfterTools(agent.id, provider, currentMessage, null, nextRequest, controller, nextActor)
+    })
   }
 
   function stopAgent(agentId) {
@@ -17900,14 +17623,6 @@
     }
   }
 
-  function runRecord(runId) {
-    const agentIds = Object.keys(runs)
-    for (let i = 0; i < agentIds.length; i++) if (runs[agentIds[i]].runId === runId) return runs[agentIds[i]]
-    const waitingIds = Object.keys(waitingRuns)
-    for (let j = 0; j < waitingIds.length; j++) if (waitingRuns[waitingIds[j]].runId === runId) return waitingRuns[waitingIds[j]]
-    return null
-  }
-
   function runStatusText(input) {
     const content = input && input.content
     if (content == null) return ''
@@ -17917,67 +17632,9 @@
     return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 120)
   }
 
-  function activateRunSkill(runId, skillId, ctx) {
-    const record = runRecord(runId)
-    if (!record) throw new Error('Skill activation requires a live run.')
-    skillId = normalizedSkillId(skillId)
-    const skill = ai.skills && ai.skills.get(skillId)
-    if (!skill || skill.modelInvocable === false) throw new Error('Skill is not model-invocable: ' + skillId)
-    const request = record.request || {}
-    const availability = ai.skills.availability(skillId, runSkillContext(runId, ctx))
-    if (!availability.available) {
-      return { outcome: 'unavailable', id: skillId, reason: availability.reason }
-    }
-    const active = (request.skills || []).indexOf(skillId) >= 0
-    const selected = runSkillRefs[runId] = runSkillRefs[runId] || []
-    if (active || selected.indexOf(skillId) >= 0) return { outcome: 'already_active', id: skillId, lifetime: 'run' }
-    selected.push(skillId)
-    return { outcome: 'activated', id: skillId, continuation: true, lifetime: 'run' }
-  }
-
-  function normalizedSkillId(value) {
-    const text = String(value || '')
-    const prefix = 'aiditor://skills/'
-    if (text.indexOf(prefix) !== 0) return text
-    const path = text.slice(prefix.length).split('/')[0]
-    try { return decodeURIComponent(path) } catch (_) { return path }
-  }
-
-  function runSkillContext(runId, ctx) {
-    const record = runRecord(runId)
-    const request = record && record.request || {}
-    const active = []
-    const seen = {}
-    const requestSkills = request.skills || []
-    const selected = runSkillRefs[runId] || []
-    for (let i = 0; i < requestSkills.length; i++) {
-      if (!seen[requestSkills[i]]) active.push(requestSkills[i])
-      seen[requestSkills[i]] = true
-    }
-    for (let j = 0; j < selected.length; j++) {
-      if (!seen[selected[j]]) active.push(selected[j])
-      seen[selected[j]] = true
-    }
-    return Object.assign({}, ctx || {}, {
-      ai: ai,
-      agent: request.agent,
-      actor: request.actor,
-      runId: runId,
-      workspace: ai.currentWorkspace ? ai.currentWorkspace() : null,
-      workspaceMeta: ai.workspaceMeta ? ai.workspaceMeta() : null,
-      runtimeContext: request.runtimeContext || [],
-      skillRefs: active,
-      toolIds: request.tools ? request.tools.slice() : [],
-      modelToolIds: request.modelToolIds ? request.modelToolIds.slice() : [],
-      configuredSkillRefs: request.agent && request.agent.skillRefs ? request.agent.skillRefs.slice() : [],
-    })
-  }
-
   ai.runAgent = runAgent
   ai.stopAgent = stopAgent
   ai.resumeAgent = resumeAgent
-  ai.activateRunSkill = activateRunSkill
-  ai._runSkillContext = runSkillContext
   ai.flushToolResults = flushToolResults
   ai.scheduleAgent = scheduleAgent
   ai.configureRuntime = function (config) {
@@ -17986,7 +17643,6 @@
     if (next.maxConcurrentMessagesPerAgent != null) runtimeConfig.maxConcurrentMessagesPerAgent = next.maxConcurrentMessagesPerAgent
     if (next.maxConcurrentTools != null) runtimeConfig.maxConcurrentTools = next.maxConcurrentTools
     if (next.maxDelegationDepth != null) runtimeConfig.maxDelegationDepth = next.maxDelegationDepth
-    if (next.maxToolArgumentCorrections != null) runtimeConfig.maxToolArgumentCorrections = next.maxToolArgumentCorrections
     if (next.limits) runtimeConfig.limits = Object.assign({}, runtimeConfig.limits, next.limits)
     scheduleQueuedAgents()
     return ai.runtimeConfig()
@@ -18005,7 +17661,7 @@
   ai.response.stop = stopResponse
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/checkpoints.js ---- */
+/* ---- ai/agent/checkpoints.js ---- */
 // aiditor.ai optional recoverable runtime checkpoints.
 ;(function (aiditor) {
   'use strict'
@@ -18168,7 +17824,7 @@
   }
 })(window.aiditor = window.aiditor || {})
 
-/* ---- ai/evals.js ---- */
+/* ---- ai/agent/evals.js ---- */
 // aiditor.ai lightweight deterministic evaluation runner.
 ;(function (aiditor) {
   'use strict'
@@ -19450,7 +19106,7 @@
   }
 
   function createAgent(parentAgentId) {
-      aiditor.ai.createAgent({ parentAgentId: parentAgentId || null, skillRefs: ['aiditor.agent-orchestration'] })
+      aiditor.ai.createAgent({ parentAgentId: parentAgentId || null })
   }
 
   function renameNode(node) {
@@ -20305,7 +19961,7 @@
         icon: 'tag',
         group: 'Skills',
         disabled: !!active[id] || unavailable,
-        search: [id, skill.title, skill.description, skill.whenToUse, skill.argumentHint, meta.owner, meta.layer, meta.source, (skill.tools || []).join(' ')],
+        search: [id, skill.title, skill.description, skill.argumentHint, meta.owner, meta.layer, meta.source, (skill.tools || []).join(' ')],
         skill: skill,
       })
     }
@@ -21080,7 +20736,7 @@
       }
       if (aiditor.ai.richPrompt.isEmpty(currentDraft)) return
       const refs = aiditor.ai.richPrompt.refs(currentDraft)
-      const skillRefs = aiditor.ai.richPrompt.skills(currentDraft)
+      const skills = aiditor.ai.richPrompt.skills(currentDraft)
       const content = aiditor.ai.richPrompt.content(currentDraft)
       aiditor.ai.updateAgent(agent.id, {
         connection: connection.peek(),
@@ -21092,7 +20748,7 @@
         model: model.peek() || defaultModel(connection.peek()),
         permissionMode: permissionMode.peek(),
         attachmentRefs: refs,
-        skillRefs: skillRefs,
+        skills: skills,
         renderedText: content.renderedText,
       }
       if (aiditor.ai.setLastSelectedModel) aiditor.ai.setLastSelectedModel({ connection: meta.connection, model: meta.model })
@@ -21111,12 +20767,88 @@
   })
 })(window.aiditor = window.aiditor || {})
 
+/* ---- ai/panels/metrics-format.js ---- */
+// Shared compact formatting for AI message and live-run metrics.
+;(function (aiditor) {
+  'use strict'
+
+  const ai = aiditor.ai = aiditor.ai || {}
+  const UNITS = ['', 'K', 'M', 'B', 'T']
+
+  function fixed(value, digits) {
+    const text = Number(value).toFixed(digits)
+    return digits ? text.replace(/\.?0+$/, '') : text
+  }
+
+  function compact(value) {
+    let n = Number(value)
+    if (!Number.isFinite(n)) return ''
+    let unit = 0
+    while (Math.abs(n) >= 1000 && unit < UNITS.length - 1) {
+      n /= 1000
+      unit++
+    }
+    const digits = unit ? (Math.abs(n) < 10 ? 2 : (Math.abs(n) < 100 ? 1 : 0)) : 0
+    return fixed(n, digits) + UNITS[unit]
+  }
+
+  function duration(ms) {
+    const value = Number(ms)
+    if (!(value > 0)) return ''
+    if (value < 1000) return String(Math.max(1, Math.round(value))) + ' ms'
+    if (value < 10000) return fixed(value / 1000, 1) + ' s'
+    if (value < 60000) return String(Math.round(value / 1000)) + ' s'
+
+    const totalSeconds = Math.round(value / 1000)
+    if (totalSeconds < 3600) {
+      const minutes = Math.floor(totalSeconds / 60)
+      const seconds = totalSeconds % 60
+      return String(minutes) + 'm' + (seconds ? ' ' + String(seconds) + 's' : '')
+    }
+    if (totalSeconds < 86400) {
+      const hours = Math.floor(totalSeconds / 3600)
+      const minutes = Math.floor(totalSeconds % 3600 / 60)
+      return String(hours) + 'h' + (minutes ? ' ' + String(minutes) + 'm' : '')
+    }
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor(totalSeconds % 86400 / 3600)
+    return String(days) + 'd' + (hours ? ' ' + String(hours) + 'h' : '')
+  }
+
+  function tokens(value) {
+    const n = Number(value)
+    return n > 0 ? compact(Math.round(n)) : ''
+  }
+
+  function rate(value) {
+    const n = Number(value)
+    if (!(n > 0)) return ''
+    return n < 1000 ? fixed(n, 1) : compact(n)
+  }
+
+  function cost(value) {
+    const n = Number(value && value.amount || value || 0)
+    if (!(n > 0)) return ''
+    if (n >= 1000) return '$' + compact(n)
+    const digits = n < 0.0001 ? 6 : (n < 0.01 ? 5 : 4)
+    return '$' + fixed(n, digits)
+  }
+
+  ai.metricFormat = Object.freeze({
+    duration: duration,
+    tokens: tokens,
+    rate: rate,
+    cost: cost,
+  })
+})(window.aiditor = window.aiditor || {})
+
 /* ---- ai/panels/message-live-strip.js ---- */
 ;(function (aiditor) {
   'use strict'
 
   const ui = aiditor.ui
   const ai = aiditor.ai = aiditor.ai || {}
+  const format = ai.metricFormat
 
   function usageNumber(usage, keys) {
     if (!usage) return 0
@@ -21125,20 +20857,6 @@
       if (v > 0) return v
     }
     return 0
-  }
-
-  function formatDuration(ms) {
-    if (!ms || ms < 0) return ''
-    if (ms < 1000) return String(Math.max(1, Math.round(ms))) + ' ms'
-    if (ms < 10000) return (ms / 1000).toFixed(1).replace(/\.0$/, '') + ' s'
-    return String(Math.round(ms / 1000)) + ' s'
-  }
-
-  function formatCost(cost) {
-    const n = Number(cost && cost.amount || 0)
-    if (!n) return ''
-    const digits = n < 0.0001 ? 6 : (n < 0.01 ? 5 : 4)
-    return '$' + n.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '')
   }
 
   function normalizePreview(text) {
@@ -21158,7 +20876,8 @@
     const model = displayModelTail(state && state.modelTail)
     const preview = model || normalizePreview(state && state.previewTail)
     const s = state && state.state || 'idle'
-    if ((s === 'tool' || s === 'waiting_approval') && activity) return activity + (preview ? ' | ' + preview : '')
+    if (s === 'waiting_approval') return activity
+    if (s === 'tool' && activity) return activity + (preview ? ' | ' + preview : '')
     return preview || activity
   }
 
@@ -21173,18 +20892,18 @@
     const parts = []
     const started = state.startedAt || null
     const ended = state.completedAt || null
-    if (started) parts.push(formatDuration((ended || Date.now()) - started))
+    if (started) parts.push(format.duration((ended || Date.now()) - started))
     if (!state.responseMetrics && state.turn != null) parts.push('turn ' + String(state.turn || 0))
-    if (!state.responseMetrics && state.firstTokenAt && started) parts.push('TTFT ' + formatDuration(state.firstTokenAt - started))
+    if (!state.responseMetrics && state.firstTokenAt && started) parts.push('TTFT ' + format.duration(state.firstTokenAt - started))
     const total = state.totalTokens || usageNumber(state.usage, ['total_tokens', 'totalTokens'])
     const out = state.outputTokens || usageNumber(state.usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
-    if (total) parts.push(String(total) + ' tok')
-    else if (out) parts.push(String(out) + ' out')
+    if (total) parts.push(format.tokens(total) + ' tok')
+    else if (out) parts.push(format.tokens(out) + ' out')
     const speedMs = state.responseMetrics
       ? state.generationMs
       : (state.firstTokenAt ? (ended || Date.now()) - state.firstTokenAt : (started ? (ended || Date.now()) - started : 0))
-    if (out && speedMs > 0) parts.push((out / Math.max(speedMs / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
-    if (state.cost && state.cost.amount > 0) parts.push(formatCost(state.cost))
+    if (out && speedMs > 0) parts.push(format.rate(out / Math.max(speedMs / 1000, 0.001)) + ' tok/s')
+    if (state.cost && state.cost.amount > 0) parts.push(format.cost(state.cost))
     return parts.join(' · ')
   }
 
@@ -21325,6 +21044,7 @@
   'use strict'
 
   const ui = aiditor.ui
+  const format = aiditor.ai.metricFormat
 
   function read(v) {
     return ui.isSignal(v) ? v() : v
@@ -21445,28 +21165,21 @@
     return 0
   }
 
-  function formatDuration(ms) {
-    if (!ms || ms < 0) return ''
-    if (ms < 1000) return String(Math.max(1, Math.round(ms))) + ' ms'
-    if (ms < 10000) return (ms / 1000).toFixed(1).replace(/\.0$/, '') + ' s'
-    return String(Math.round(ms / 1000)) + ' s'
-  }
-
   function metricText(msg) {
     const parts = []
     const ms = durationMs(msg)
-    if (ms) parts.push(formatDuration(ms))
+    if (ms) parts.push(format.duration(ms))
     const stats = msg.stats || msg.meta || {}
-    if (stats.ttftMs > 0) parts.push('TTFT ' + formatDuration(stats.ttftMs))
+    if (stats.ttftMs > 0) parts.push('TTFT ' + format.duration(stats.ttftMs))
     const usage = usageOf(msg)
     const out = usageNumber(usage, ['output_tokens', 'completion_tokens', 'outputTokens', 'completionTokens'])
     const total = usageNumber(usage, ['total_tokens', 'totalTokens'])
-    if (total) parts.push(String(total) + ' tok')
-    else if (out) parts.push(String(out) + ' out')
+    if (total) parts.push(format.tokens(total) + ' tok')
+    else if (out) parts.push(format.tokens(out) + ' out')
     const speedMs = (stats.generationMs > 0 ? stats.generationMs : ms)
-    if (out && speedMs) parts.push((out / Math.max(speedMs / 1000, 0.001)).toFixed(1).replace(/\.0$/, '') + ' tok/s')
+    if (out && speedMs) parts.push(format.rate(out / Math.max(speedMs / 1000, 0.001)) + ' tok/s')
     const cost = msg.stats && msg.stats.cost
-    if (cost && cost.amount > 0) parts.push(formatCost(cost))
+    if (cost && cost.amount > 0) parts.push(format.cost(cost))
     return parts.join(' · ')
   }
 
@@ -21516,19 +21229,12 @@
     const metrics = info && info.metrics
     if (!metrics) return fallback || ''
     const parts = []
-    if (metrics.durationMs) parts.push(formatDuration(metrics.durationMs))
-    if (metrics.totalTokens) parts.push(String(metrics.totalTokens) + ' tok')
-    else if (metrics.outputTokens) parts.push(String(metrics.outputTokens) + ' out')
-    if (metrics.tokensPerSecond > 0) parts.push(metrics.tokensPerSecond.toFixed(1).replace(/\.0$/, '') + ' tok/s')
-    if (metrics.cost && metrics.cost.amount > 0) parts.push(formatCost(metrics.cost))
+    if (metrics.durationMs) parts.push(format.duration(metrics.durationMs))
+    if (metrics.totalTokens) parts.push(format.tokens(metrics.totalTokens) + ' tok')
+    else if (metrics.outputTokens) parts.push(format.tokens(metrics.outputTokens) + ' out')
+    if (metrics.tokensPerSecond > 0) parts.push(format.rate(metrics.tokensPerSecond) + ' tok/s')
+    if (metrics.cost && metrics.cost.amount > 0) parts.push(format.cost(metrics.cost))
     return parts.join(' · ') || fallback || ''
-  }
-
-  function formatCost(cost) {
-    const n = Number(cost.amount || 0)
-    if (!n) return ''
-    const digits = n < 0.0001 ? 6 : (n < 0.01 ? 5 : 4)
-    return '$' + n.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '')
   }
 
   function textPartItems(text) {
@@ -21660,7 +21366,7 @@
     row.appendChild(ui.h('span', 'aiditor-ai-quest-agent', { text: quest.agentId }))
     row.appendChild(ui.h('span', 'aiditor-ai-quest-status', { text: quest.status }))
     row.appendChild(ui.h('span', 'aiditor-ai-quest-id', { text: quest.questId }))
-    if (quest.completedAt && quest.createdAt) row.appendChild(ui.h('span', 'aiditor-ai-quest-time', { text: formatDuration(quest.completedAt - quest.createdAt) }))
+    if (quest.completedAt && quest.createdAt) row.appendChild(ui.h('span', 'aiditor-ai-quest-time', { text: format.duration(quest.completedAt - quest.createdAt) }))
     if (quest.resultId) {
       row.appendChild(ui.button({
         text: 'View result',
@@ -22689,6 +22395,14 @@
       description: 'Connection used by newly created agents.',
       order: 10,
     },
+    {
+      key: 'ai.debug.logProviderRequest',
+      label: 'Debug Mode',
+      type: 'boolean',
+      default: false,
+      description: 'Print the complete request body sent to the AI provider in the browser console.',
+      order: 20,
+    },
   ])
 
   aiditor.effect(function () {
@@ -22742,6 +22456,12 @@
     ui.collect(root, aiditor.effect(function () {
       selected()
       renderConnectionDetail(detail, selected, root)
+    }))
+    root.appendChild(settingSwitch({
+      key: 'ai.debug.logProviderRequest',
+      label: 'Debug Mode',
+      defaultValue: false,
+      desc: 'Print the complete request body sent to the AI provider in the browser console. Use for local debugging only.',
     }))
 
     return root

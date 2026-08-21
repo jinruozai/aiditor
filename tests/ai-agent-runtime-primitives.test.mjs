@@ -8,12 +8,12 @@ for (const file of [
   'src/core/signal.js',
   'src/core/log.js',
   'src/core/names.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/serialize.js',
   'src/ai/trace.js',
   'src/ai/context-pack.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
+  'src/ai/agent/store.js',
   'src/ai/connection.js',
   'src/ai/adapter.js',
   'src/ai/provider.js',
@@ -27,21 +27,15 @@ for (const file of [
   'src/ai/skill/registry.js',
   'src/ai/tool/scheduler.js',
   'src/ai/tool/runtime.js',
-  'src/ai/orchestration.js',
-  'src/ai/request.js',
-  'src/ai/runtime.js',
+  'src/ai/agent/orchestration.js',
+  'src/ai/agent/request.js',
+  'src/ai/agent/runtime.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
 }
 
 const ai = window.aiditor.ai
 const TEST_META = { owner: 'test:agent-primitives' }
-let nextSkill = 1
-function skillRefs(tools) {
-  const id = 'test.primitives.' + nextSkill++
-  ai.skills.register(id, { title: id, tools: tools }, TEST_META)
-  return [id]
-}
 const replies = []
 
 async function flush(count = 1) {
@@ -64,7 +58,6 @@ const agent = ai.createAgent({
   name: 'Root Agent',
   connection: 'agent-primitives',
   permissionMode: 'full',
-  skillRefs: skillRefs(['trace-edit']),
 })
 const child = ai.createAgent({
   name: 'Child Agent',
@@ -101,6 +94,11 @@ ai.tools.register('trace-edit', {
   apply: function (preview) { return { applied: true, preview: preview } },
   capabilities: { write: true, idempotent: false },
 }, TEST_META)
+ai.skills.register('test.trace-edit', {
+  title: 'Trace Edit',
+  toolDisclosure: 'always',
+  tools: ['trace-edit'],
+}, TEST_META)
 assert.equal(ai.tools.capabilities('trace-edit').apply, true)
 assert.equal(ai.tools.capabilities('trace-edit').write, true)
 assert.equal(ai.tools.capabilities('trace-edit').risk, 'write')
@@ -134,12 +132,11 @@ assert.equal(events.some(function (event) { return event.type === 'run_completed
 const protocolAgent = ai.createAgent({
   name: 'Protocol Agent',
   connection: 'agent-primitives',
-  skillRefs: skillRefs(['agent.create']),
   select: false,
 })
 replies.push({
   role: 'assistant',
-  content: '<create_agent><name>worker</name></create_agent>',
+  content: '<trace-edit><before>a</before><after>b</after></trace-edit>',
   finishReason: 'stop',
 })
 const protocolRun = ai.message.send(protocolAgent.id, { content: 'edit through a tool' })
@@ -147,7 +144,7 @@ await protocolRun.promise
 const protocolMessage = ai.findAgent(protocolAgent.id).messages.at(-1)
 assert.equal(protocolMessage.status, 'error')
 assert.equal(protocolMessage.meta.errorCode, 'TOOL_PROTOCOL_INVALID')
-assert.match(protocolMessage.content, /<create_agent>/)
+assert.match(protocolMessage.content, /<trace-edit>/)
 
 const interruptedAgent = ai.createAgent({
   name: 'Interrupted Agent',
@@ -169,14 +166,45 @@ ai.registerConnection('no-tools', { auth: { type: 'none' }, transport: { type: '
 const noToolAgent = ai.createAgent({
   name: 'No Tool Agent',
   connection: 'no-tools',
-  skillRefs: skillRefs(['trace-edit']),
   select: false,
 })
 const noToolRequest = ai.planRequest(noToolAgent, null, 'no_tool_request', noToolAgent.id, 0)
 assert.deepEqual(noToolRequest.tools, [])
 assert.equal(noToolRequest.connectionCapabilities.toolProtocol, 'none')
+const noToolRuntimePrompt = noToolRequest.messages.find(function (message) {
+  return message.role === 'system' && message.meta && message.meta.contextCardId === 'runtime'
+})
+assert.match(noToolRuntimePrompt.content, /You are an AI agent\./)
+assert.match(noToolRuntimePrompt.content, /Keep responses concise, clear, and limited to what is necessary\./)
+assert.doesNotMatch(noToolRuntimePrompt.content, /You are an AIditor agent/)
+assert.doesNotMatch(noToolRuntimePrompt.content, /CURRENT_AGENT_ID|CURRENT_AGENT_NAME|CURRENT_PARENT_AGENT_ID/)
+assert.doesNotMatch(noToolRuntimePrompt.content, /AVAILABLE_TOOLS: none/)
 assert.equal(noToolRequest.messages.some(function (message) {
-  return message.role === 'system' && String(message.content).indexOf('AVAILABLE_TOOLS: none') >= 0
+  return message.meta && message.meta.contextCardId === 'skill-catalog'
 }), true)
+
+const customPromptAgent = ai.createAgent({
+  name: 'Custom Prompt Agent',
+  connection: 'no-tools',
+  systemPrompt: 'Custom project prompt.',
+  select: false,
+})
+const customPromptRequest = ai.planRequest(customPromptAgent, null, 'custom_prompt_request', customPromptAgent.id, 0)
+const customRuntimePrompt = customPromptRequest.messages.find(function (message) {
+  return message.meta && message.meta.contextCardId === 'runtime'
+})
+assert.equal(customRuntimePrompt.content, 'Custom project prompt.')
+assert.doesNotMatch(customRuntimePrompt.content, /You are an AI agent/)
+
+const emptyPromptAgent = ai.createAgent({
+  name: 'Empty Prompt Agent',
+  connection: 'no-tools',
+  systemPrompt: '',
+  select: false,
+})
+const emptyPromptRequest = ai.planRequest(emptyPromptAgent, null, 'empty_prompt_request', emptyPromptAgent.id, 0)
+assert.equal(emptyPromptRequest.messages.some(function (message) {
+  return message.meta && message.meta.contextCardId === 'runtime'
+}), false)
 
 console.log('ai agent runtime primitive tests passed')

@@ -42,9 +42,9 @@ for (const file of [
   'src/core/commands.js',
   'src/core/workspace.js',
   'src/core/registry.js',
-  'src/ai/name-generator.js',
+  'src/ai/agent/name-generator.js',
   'src/ai/permission.js',
-  'src/ai/store.js',
+  'src/ai/agent/store.js',
   'src/ai/connection.js',
   'src/ai/schema.js',
   'src/ai/contribution-registry.js',
@@ -56,7 +56,7 @@ for (const file of [
   'src/ai/workdir.js',
   'src/ai/verify.js',
   'src/ai/reference.js',
-  'src/ai/request.js',
+  'src/ai/agent/request.js',
   'demo/project.js',
 ]) {
   vm.runInThisContext(readFileSync(file, 'utf8'), { filename: file })
@@ -69,7 +69,6 @@ aiditor.ai.setActiveConnection('project-test')
 
 const closedProjectAgent = aiditor.ai.createAgent({
   name: 'Closed Project Agent',
-  skillRefs: ['demo.project.authoring'],
 })
 const closedProjectRequest = aiditor.ai.planRequest(closedProjectAgent, null, 'run_closed_project', 'user', 0)
 assert.equal(closedProjectRequest.tools.some(function (tool) { return tool.indexOf('demo.project.') === 0 }), false)
@@ -138,7 +137,11 @@ const ws = aiditor.workspace.memory({
 })
 
 aiditor.ai.setWorkspace(ws, { id: 'memory:case', label: 'Case Folder', kind: 'memory' })
-const workspaceProjectRequest = aiditor.ai.planRequest(closedProjectAgent, null, 'run_workspace_project', 'user', 0)
+const workspaceProjectRequest = aiditor.ai.planRequest(closedProjectAgent, {
+  role: 'user',
+  content: 'open project',
+  meta: { skills: ['demo.project.authoring'] },
+}, 'run_workspace_project', 'user', 0)
 assert.equal(workspaceProjectRequest.tools.includes('demo.project.openWorkspace'), true)
 assert.equal(workspaceProjectRequest.tools.includes('demo.project.mountPanel'), true)
 const openedFromWorkspace = await aiditor.ai.tools.get('demo.project.openWorkspace').run({})
@@ -150,7 +153,11 @@ assert.equal(project.id, 'case')
 assert.equal(window.Demo.project.current().id, 'case')
 assert.equal(aiditor.ai.currentWorkspace(), ws)
 assert.deepEqual(aiditor.ai.workspaceMeta(), { id: 'demo.project:case', label: 'Case Project', kind: 'demo-project' })
-const openProjectRequest = aiditor.ai.planRequest(closedProjectAgent, null, 'run_open_project', 'user', 0)
+const openProjectRequest = aiditor.ai.planRequest(closedProjectAgent, {
+  role: 'user',
+  content: 'edit project',
+  meta: { skills: ['demo.project.authoring'] },
+}, 'run_open_project', 'user', 0)
 assert.equal(openProjectRequest.tools.includes('demo.project.readDescriptor'), true)
 assert.equal(openProjectRequest.tools.includes('demo.project.readSource'), true)
 assert.equal(openProjectRequest.tools.includes('demo.project.inspectPanel'), true)
